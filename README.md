@@ -125,8 +125,13 @@ Logs to `~/.bluebubbles-gui.log`.
 | `Ctrl+J` | Split focused pane top/bottom |
 | `Ctrl+W` | Close focused pane |
 | `Ctrl+S` | Toggle chat list visibility |
+| `Ctrl+M` | Toggle top menu bar |
 
-Up to 4 panes can be open at once. Click in a pane's input field to focus it, then select a chat from the list to load it into that pane.
+Up to 8 panes can be open at once. Click in a pane's input field to focus it, then select a chat from the list to load it into that pane.
+
+Click `X` at the right side of the top menu bar to hide it. When hidden, use the `Menu` button (top-left) or `Ctrl+M` to show it again.
+
+Reply to a specific message by clicking the `↩` button on that message. A reply preview appears above the input; send to post a quoted reply, or click `X` on the preview to cancel.
 
 ### Desktop Launcher
 
@@ -148,12 +153,28 @@ StartupWMClass=BlueBubbles
 
 `FYNE_SCALE=1.3` renders at 130% internal resolution. This is the recommended workaround for Fyne's grayscale font anti-aliasing on 1440p displays — it makes glyphs noticeably smoother without changing the perceived window size much.
 
-### Font (Lato)
+### Fonts
 
-The theme loads Lato from `/usr/share/fonts/TTF/Lato-*.ttf` if available, with graceful fallback to Fyne's built-in sans-serif. Install on Arch:
+The GUI font picker shows installed families from known system paths, with graceful fallback to Fyne's built-in sans-serif.
+
+Included families in this app:
+
+- `Lato`
+- `Inter`
+- `Noto Sans`
+- `JetBrains Mono Nerd Font`
+- `Geist`
+
+Install on Arch (examples):
 
 ```bash
 sudo pacman -S ttf-lato
+sudo pacman -S ttf-jetbrains-mono-nerd
+# Geist via AUR (pick one):
+yay -S ttf-geist
+# or:
+yay -S otf-geist
+fc-cache -f
 ```
 
 ### View Menu

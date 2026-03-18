@@ -14,31 +14,85 @@ type fontSet struct {
 
 type fontDef struct {
 	Name                              string
-	Regular, Bold, Italic, BoldItalic string
+	Regular, Bold, Italic, BoldItalic []string
 }
 
 var knownFonts = []fontDef{
 	{Name: "Default"},
 	{
 		Name:       "Lato",
-		Regular:    "/usr/share/fonts/TTF/Lato-Regular.ttf",
-		Bold:       "/usr/share/fonts/TTF/Lato-Bold.ttf",
-		Italic:     "/usr/share/fonts/TTF/Lato-Italic.ttf",
-		BoldItalic: "/usr/share/fonts/TTF/Lato-BoldItalic.ttf",
+		Regular:    []string{"/usr/share/fonts/TTF/Lato-Regular.ttf"},
+		Bold:       []string{"/usr/share/fonts/TTF/Lato-Bold.ttf"},
+		Italic:     []string{"/usr/share/fonts/TTF/Lato-Italic.ttf"},
+		BoldItalic: []string{"/usr/share/fonts/TTF/Lato-BoldItalic.ttf"},
 	},
 	{
 		Name:       "Inter",
-		Regular:    "/usr/share/fonts/inter/Inter-Regular.otf",
-		Bold:       "/usr/share/fonts/inter/Inter-Bold.otf",
-		Italic:     "/usr/share/fonts/inter/Inter-Italic.otf",
-		BoldItalic: "/usr/share/fonts/inter/Inter-BoldItalic.otf",
+		Regular:    []string{"/usr/share/fonts/inter/Inter-Regular.otf"},
+		Bold:       []string{"/usr/share/fonts/inter/Inter-Bold.otf"},
+		Italic:     []string{"/usr/share/fonts/inter/Inter-Italic.otf"},
+		BoldItalic: []string{"/usr/share/fonts/inter/Inter-BoldItalic.otf"},
 	},
 	{
 		Name:       "Noto Sans",
-		Regular:    "/usr/share/fonts/noto/NotoSans-Regular.ttf",
-		Bold:       "/usr/share/fonts/noto/NotoSans-Bold.ttf",
-		Italic:     "/usr/share/fonts/noto/NotoSans-Italic.ttf",
-		BoldItalic: "/usr/share/fonts/noto/NotoSans-BoldItalic.ttf",
+		Regular:    []string{"/usr/share/fonts/noto/NotoSans-Regular.ttf"},
+		Bold:       []string{"/usr/share/fonts/noto/NotoSans-Bold.ttf"},
+		Italic:     []string{"/usr/share/fonts/noto/NotoSans-Italic.ttf"},
+		BoldItalic: []string{"/usr/share/fonts/noto/NotoSans-BoldItalic.ttf"},
+	},
+	{
+		Name: "JetBrains Mono Nerd Font",
+		Regular: []string{
+			"/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf",
+			"/usr/share/fonts/TTF/JetBrainsMonoNLNerdFont-Regular.ttf",
+			"/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
+			"/usr/share/fonts/TTF/JetBrainsMonoNLNerdFontMono-Regular.ttf",
+		},
+		Bold: []string{
+			"/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Bold.ttf",
+			"/usr/share/fonts/TTF/JetBrainsMonoNLNerdFont-Bold.ttf",
+			"/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Bold.ttf",
+			"/usr/share/fonts/TTF/JetBrainsMonoNLNerdFontMono-Bold.ttf",
+		},
+		Italic: []string{
+			"/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Italic.ttf",
+			"/usr/share/fonts/TTF/JetBrainsMonoNLNerdFont-Italic.ttf",
+			"/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Italic.ttf",
+			"/usr/share/fonts/TTF/JetBrainsMonoNLNerdFontMono-Italic.ttf",
+		},
+		BoldItalic: []string{
+			"/usr/share/fonts/TTF/JetBrainsMonoNerdFont-BoldItalic.ttf",
+			"/usr/share/fonts/TTF/JetBrainsMonoNLNerdFont-BoldItalic.ttf",
+			"/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-BoldItalic.ttf",
+			"/usr/share/fonts/TTF/JetBrainsMonoNLNerdFontMono-BoldItalic.ttf",
+		},
+	},
+	{
+		Name: "Geist",
+		Regular: []string{
+			"/usr/share/fonts/TTF/Geist-Regular.ttf",
+			"/usr/share/fonts/OTF/Geist-Regular.otf",
+			"/usr/share/fonts/TTF/GeistVF.ttf",
+			"/usr/share/fonts/OTF/GeistVF.otf",
+		},
+		Bold: []string{
+			"/usr/share/fonts/TTF/Geist-Bold.ttf",
+			"/usr/share/fonts/OTF/Geist-Bold.otf",
+			"/usr/share/fonts/TTF/GeistVF.ttf",
+			"/usr/share/fonts/OTF/GeistVF.otf",
+		},
+		Italic: []string{
+			"/usr/share/fonts/TTF/Geist-Italic.ttf",
+			"/usr/share/fonts/OTF/Geist-Italic.otf",
+			"/usr/share/fonts/TTF/GeistVF.ttf",
+			"/usr/share/fonts/OTF/GeistVF.otf",
+		},
+		BoldItalic: []string{
+			"/usr/share/fonts/TTF/Geist-BoldItalic.ttf",
+			"/usr/share/fonts/OTF/Geist-BoldItalic.otf",
+			"/usr/share/fonts/TTF/GeistVF.ttf",
+			"/usr/share/fonts/OTF/GeistVF.otf",
+		},
 	},
 }
 
@@ -51,6 +105,15 @@ func loadFont(path string) fyne.Resource {
 		return nil
 	}
 	return fyne.NewStaticResource(path, data)
+}
+
+func loadFirstFont(paths []string) fyne.Resource {
+	for _, p := range paths {
+		if r := loadFont(p); r != nil {
+			return r
+		}
+	}
+	return nil
 }
 
 // compactTheme is a mutable theme supporting dark/light mode, font size, font family, and bold.
@@ -74,15 +137,15 @@ func newCompactTheme() *compactTheme {
 			t.fonts["Default"] = fontSet{} // all nil → Fyne built-in
 			continue
 		}
-		regular := loadFont(def.Regular)
+		regular := loadFirstFont(def.Regular)
 		if regular == nil {
 			continue // not installed
 		}
 		t.fonts[def.Name] = fontSet{
 			regular:    regular,
-			bold:       loadFont(def.Bold),
-			italic:     loadFont(def.Italic),
-			boldItalic: loadFont(def.BoldItalic),
+			bold:       loadFirstFont(def.Bold),
+			italic:     loadFirstFont(def.Italic),
+			boldItalic: loadFirstFont(def.BoldItalic),
 		}
 	}
 	// Prefer Lato if installed.

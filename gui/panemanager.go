@@ -3,6 +3,7 @@ package gui
 import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"github.com/bluebubbles-tui/models"
 )
 
 type splitDir int
@@ -10,6 +11,7 @@ type splitDir int
 const (
 	splitHorizontal splitDir = iota
 	splitVertical
+	defaultMaxPanes = 8
 )
 
 // paneNode is a node in a binary tree of chat panes.
@@ -89,16 +91,18 @@ func (n *paneNode) remove(target *ChatPane) bool {
 // that holds the rendered split layout. All methods must be called from
 // the Fyne main goroutine.
 type PaneManager struct {
-	root    paneNode
-	focused *ChatPane
-	holder  *fyne.Container
+	root     paneNode
+	focused  *ChatPane
+	holder   *fyne.Container
+	maxPanes int
 
-	onSend    func(*ChatPane, string)
-	onFocused func(*ChatPane)
+	onSend          func(*ChatPane, string, *models.Message)
+	onFocused       func(*ChatPane)
+	onInputShortcut func(fyne.Shortcut) bool
 }
 
-func NewPaneManager(onSend func(*ChatPane, string), onFocused func(*ChatPane)) *PaneManager {
-	pm := &PaneManager{onSend: onSend, onFocused: onFocused}
+func NewPaneManager(onSend func(*ChatPane, string, *models.Message), onFocused func(*ChatPane), onInputShortcut func(fyne.Shortcut) bool) *PaneManager {
+	pm := &PaneManager{onSend: onSend, onFocused: onFocused, onInputShortcut: onInputShortcut, maxPanes: defaultMaxPanes}
 
 	first := pm.newPane()
 	pm.root = paneNode{pane: first}
@@ -122,6 +126,7 @@ func (pm *PaneManager) newPane() *ChatPane {
 			}
 			pm.onFocused(p)
 		},
+		pm.onInputShortcut,
 	)
 }
 
@@ -145,9 +150,9 @@ func (pm *PaneManager) PanesShowingChat(guid string) []*ChatPane {
 	return out
 }
 
-// SplitFocused splits the focused pane in the given direction (max 4 panes).
+// SplitFocused splits the focused pane in the given direction.
 func (pm *PaneManager) SplitFocused(dir splitDir) {
-	if pm.focused == nil || len(pm.AllPanes()) >= 4 {
+	if pm.focused == nil || len(pm.AllPanes()) >= pm.maxPanes {
 		return
 	}
 	newPane := pm.newPane()
@@ -160,6 +165,14 @@ func (pm *PaneManager) SplitFocused(dir splitDir) {
 	newPane.SetFocused(true)
 
 	pm.rebuildHolder()
+}
+
+// IsFocusedInputActive reports whether the focused pane currently has an active input field.
+func (pm *PaneManager) IsFocusedInputActive() bool {
+	if pm.focused == nil {
+		return false
+	}
+	return pm.focused.IsInputFocused()
 }
 
 // CloseFocused removes the focused pane (minimum 1 pane is kept).

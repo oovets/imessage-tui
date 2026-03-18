@@ -2,14 +2,17 @@ package gui
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"sync"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	"github.com/bluebubbles-tui/api"
 	"github.com/bluebubbles-tui/models"
@@ -18,9 +21,9 @@ import (
 
 // App is the top-level GUI application.
 type App struct {
-	fyneApp   fyne.App
-	win       fyne.Window
-	appTheme  *compactTheme
+	fyneApp  fyne.App
+	win      fyne.Window
+	appTheme *compactTheme
 
 	apiClient *api.Client
 	wsClient  *ws.Client
@@ -28,8 +31,10 @@ type App struct {
 	chatListComp  *ChatList
 	paneManager   *PaneManager
 	split         *container.Split
+	topBarHolder  *fyne.Container
 	contentHolder *fyne.Container
 	showChatList  bool
+	showTopBar    bool
 
 	mu       sync.Mutex
 	msgCache map[string][]models.Message
@@ -58,16 +63,19 @@ func (a *App) Run() {
 	})
 
 	a.paneManager = NewPaneManager(
-		func(pane *ChatPane, text string) { a.sendMessageFromPane(pane, text) },
+		func(pane *ChatPane, text string, replyTo *models.Message) { a.sendMessageFromPane(pane, text, replyTo) },
 		func(pane *ChatPane) { /* focus tracked inside PaneManager */ },
+		a.handleInputShortcut,
 	)
 
 	a.split = container.NewHSplit(a.chatListComp.Widget(), a.paneManager.Widget())
 	a.split.SetOffset(0.25)
 	a.showChatList = true
+	a.showTopBar = true
+	a.topBarHolder = container.NewMax()
 	a.contentHolder = container.NewMax(a.split)
-	toolbar := a.buildToolbar()
-	a.win.SetContent(container.NewBorder(toolbar, nil, nil, nil, a.contentHolder))
+	a.refreshTopBar()
+	a.win.SetContent(container.NewBorder(a.topBarHolder, nil, nil, nil, a.contentHolder))
 
 	// Keyboard shortcuts ─────────────────────────────────────────────────
 	// Ctrl+H  split focused pane side by side (horizontal)
@@ -78,41 +86,111 @@ func (a *App) Run() {
 		KeyName:  fyne.KeyName("H"),
 		Modifier: fyne.KeyModifierControl,
 	}, func(_ fyne.Shortcut) {
-		a.paneManager.SplitFocused(splitHorizontal)
-		a.scrollAllPanes()
+		a.splitFocusedHorizontal()
 	})
 	c.AddShortcut(&desktop.CustomShortcut{
 		KeyName:  fyne.KeyName("J"),
 		Modifier: fyne.KeyModifierControl,
 	}, func(_ fyne.Shortcut) {
-		a.paneManager.SplitFocused(splitVertical)
-		a.scrollAllPanes()
+		a.splitFocusedVertical()
 	})
 	c.AddShortcut(&desktop.CustomShortcut{
 		KeyName:  fyne.KeyName("W"),
 		Modifier: fyne.KeyModifierControl,
 	}, func(_ fyne.Shortcut) {
-		a.paneManager.CloseFocused()
-		a.scrollAllPanes()
+		// GLFW may emit Ctrl+W while typing in Entry before normal shortcut handling.
+		// Ignore close-pane in that state to avoid accidental pane closes.
+		if a.paneManager.IsFocusedInputActive() {
+			return
+		}
+		a.closeFocusedPane()
 	})
 	// Ctrl+S  toggle chat list visibility
 	c.AddShortcut(&desktop.CustomShortcut{
 		KeyName:  fyne.KeyName("S"),
 		Modifier: fyne.KeyModifierControl,
 	}, func(_ fyne.Shortcut) {
-		a.showChatList = !a.showChatList
-		if a.showChatList {
-			a.contentHolder.Objects = []fyne.CanvasObject{a.split}
-		} else {
-			a.contentHolder.Objects = []fyne.CanvasObject{a.paneManager.Widget()}
-		}
-		a.contentHolder.Refresh()
+		a.toggleChatListVisibility()
+	})
+	// Ctrl+M  toggle top menu bar visibility
+	c.AddShortcut(&desktop.CustomShortcut{
+		KeyName:  fyne.KeyName("M"),
+		Modifier: fyne.KeyModifierControl,
+	}, func(_ fyne.Shortcut) {
+		a.setTopBarVisible(!a.showTopBar)
 	})
 
 	go a.loadChats()
 	go a.runWebSocket()
 
 	a.win.ShowAndRun()
+}
+
+func (a *App) splitFocusedHorizontal() {
+	a.paneManager.SplitFocused(splitHorizontal)
+	a.scrollAllPanes()
+}
+
+func (a *App) splitFocusedVertical() {
+	a.paneManager.SplitFocused(splitVertical)
+	a.scrollAllPanes()
+}
+
+func (a *App) closeFocusedPane() {
+	a.paneManager.CloseFocused()
+	a.scrollAllPanes()
+}
+
+func (a *App) toggleChatListVisibility() {
+	a.showChatList = !a.showChatList
+	if a.showChatList {
+		a.contentHolder.Objects = []fyne.CanvasObject{a.split}
+	} else {
+		a.contentHolder.Objects = []fyne.CanvasObject{a.paneManager.Widget()}
+	}
+	a.contentHolder.Refresh()
+}
+
+func (a *App) setTopBarVisible(visible bool) {
+	a.showTopBar = visible
+	a.refreshTopBar()
+}
+
+func (a *App) refreshTopBar() {
+	if a.showTopBar {
+		a.topBarHolder.Objects = []fyne.CanvasObject{a.buildToolbar()}
+	} else {
+		a.topBarHolder.Objects = []fyne.CanvasObject{a.buildShowToolbarButton()}
+	}
+	a.topBarHolder.Refresh()
+}
+
+func (a *App) handleInputShortcut(shortcut fyne.Shortcut) bool {
+	custom, ok := shortcut.(*desktop.CustomShortcut)
+	if !ok {
+		return false
+	}
+	if custom.Modifier&fyne.KeyModifierControl == 0 {
+		return false
+	}
+
+	key := fyne.KeyName(strings.ToUpper(string(custom.KeyName)))
+	switch key {
+	case fyne.KeyName("H"):
+		a.splitFocusedHorizontal()
+		return true
+	case fyne.KeyName("J"):
+		a.splitFocusedVertical()
+		return true
+	case fyne.KeyName("S"):
+		a.toggleChatListVisibility()
+		return true
+	case fyne.KeyName("M"):
+		a.setTopBarVisible(!a.showTopBar)
+		return true
+	default:
+		return false
+	}
 }
 
 // selectChat loads the given chat into the focused pane.
@@ -125,6 +203,7 @@ func (a *App) selectChat(chat *models.Chat) {
 
 	chatGUID := chat.GUID
 	pane.ChatGUID = chatGUID
+	pane.ClearReplyTarget()
 
 	a.chatListComp.ClearNewMessage(chatGUID)
 	pane.msgView.SetChatName(chat.GetDisplayName())
@@ -177,14 +256,25 @@ func (a *App) loadMessagesForPane(pane *ChatPane, chatGUID string) {
 }
 
 // sendMessageFromPane sends a message on behalf of the given pane.
-func (a *App) sendMessageFromPane(pane *ChatPane, text string) {
+func (a *App) sendMessageFromPane(pane *ChatPane, text string, replyTo *models.Message) {
 	chatGUID := pane.ChatGUID
 	if chatGUID == "" {
 		return
 	}
 
+	payload := text
+	if replyTo != nil {
+		sender := messageSenderName(*replyTo)
+		quoted := strings.ReplaceAll(strings.TrimSpace(replyTo.Text), "\n", " ")
+		quoted = truncateString(quoted, 140)
+		if quoted == "" {
+			quoted = "(message without text)"
+		}
+		payload = fmt.Sprintf("> %s: %s\n%s", sender, quoted, text)
+	}
+
 	go func() {
-		if err := a.apiClient.SendMessage(chatGUID, text); err != nil {
+		if err := a.apiClient.SendMessage(chatGUID, payload); err != nil {
 			log.Printf("[GUI] SendMessage error: %v", err)
 			return
 		}
@@ -249,7 +339,7 @@ func (a *App) scrollAllPanes() {
 	}
 }
 
-// buildToolbar builds the always-visible top toolbar.
+// buildToolbar builds the top toolbar.
 func (a *App) buildToolbar() fyne.CanvasObject {
 	smaller := widget.NewButton("A-", func() {
 		if a.appTheme.fontSize > 8 {
@@ -297,7 +387,28 @@ func (a *App) buildToolbar() fyne.CanvasObject {
 		a.fyneApp.Settings().SetTheme(a.appTheme)
 	})
 
-	return container.NewHBox(smaller, larger, boldBtn, widget.NewSeparator(), fontSelect, widget.NewSeparator(), modeBtn)
+	hideBtn := widget.NewButton("X", func() {
+		a.setTopBarVisible(false)
+	})
+
+	return container.NewHBox(
+		smaller,
+		larger,
+		boldBtn,
+		widget.NewSeparator(),
+		fontSelect,
+		widget.NewSeparator(),
+		modeBtn,
+		layout.NewSpacer(),
+		hideBtn,
+	)
+}
+
+func (a *App) buildShowToolbarButton() fyne.CanvasObject {
+	showBtn := widget.NewButton("Menu", func() {
+		a.setTopBarVisible(true)
+	})
+	return container.NewHBox(showBtn, layout.NewSpacer())
 }
 
 // handleWSEvent processes a single WebSocket event. Called from the WS goroutine.

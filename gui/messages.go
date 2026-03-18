@@ -19,10 +19,11 @@ type MessageView struct {
 	scroll   *container.Scroll
 	panel    fyne.CanvasObject
 	messages []models.Message
+	onReply  func(models.Message)
 }
 
-func NewMessageView() *MessageView {
-	mv := &MessageView{}
+func NewMessageView(onReply func(models.Message)) *MessageView {
+	mv := &MessageView{onReply: onReply}
 	mv.header = widget.NewLabel("")
 	mv.header.TextStyle = fyne.TextStyle{Bold: true}
 
@@ -85,25 +86,28 @@ func (mv *MessageView) ScrollToBottom() {
 func (mv *MessageView) rebuildVBox() {
 	mv.vbox.Objects = nil
 	for _, msg := range mv.messages {
-		mv.vbox.Add(buildMessageRow(msg))
+		mv.vbox.Add(buildMessageRow(msg, mv.onReply))
 	}
 	mv.vbox.Refresh()
 	mv.ScrollToBottom()
 }
 
-func buildMessageRow(msg models.Message) fyne.CanvasObject {
-	timeStr := formatMessageTime(msg.ParsedTime())
-
-	var senderName string
+func messageSenderName(msg models.Message) string {
 	if msg.IsFromMe {
-		senderName = "You"
-	} else if msg.Handle != nil && msg.Handle.DisplayName != "" {
-		senderName = stripEmojis(msg.Handle.DisplayName)
-	} else if msg.Handle != nil {
-		senderName = msg.Handle.Address
-	} else {
-		senderName = "Unknown"
+		return "You"
 	}
+	if msg.Handle != nil && msg.Handle.DisplayName != "" {
+		return stripEmojis(msg.Handle.DisplayName)
+	}
+	if msg.Handle != nil {
+		return msg.Handle.Address
+	}
+	return "Unknown"
+}
+
+func buildMessageRow(msg models.Message, onReply func(models.Message)) fyne.CanvasObject {
+	timeStr := formatMessageTime(msg.ParsedTime())
+	senderName := messageSenderName(msg)
 
 	text := fmt.Sprintf("[%s] %s: %s", timeStr, senderName, msg.Text)
 
@@ -115,5 +119,13 @@ func buildMessageRow(msg models.Message) fyne.CanvasObject {
 		label.Importance = widget.SuccessImportance
 	}
 
-	return label
+	if onReply == nil {
+		return label
+	}
+
+	replyBtn := newGlyphAction("↩", func() {
+		onReply(msg)
+	})
+
+	return container.NewBorder(nil, nil, nil, replyBtn, label)
 }
