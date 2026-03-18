@@ -11,6 +11,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"path"
@@ -64,6 +65,23 @@ var previewFetcher = struct {
 	sync.RWMutex
 	fn func(string) (linkPreviewData, error)
 }{}
+
+// attachmentFetcher is set when an API client is available and used to download
+// attachment images that cannot be read from the local filesystem.
+var attachmentFetcher = struct {
+	sync.RWMutex
+	fn func(guid string) ([]byte, string, error)
+}{}
+
+func setAttachmentFetcherFromAPI(client *api.Client) {
+	attachmentFetcher.Lock()
+	defer attachmentFetcher.Unlock()
+	if client == nil {
+		attachmentFetcher.fn = nil
+		return
+	}
+	attachmentFetcher.fn = client.DownloadAttachment
+}
 
 func init() {
 	previewEnabled.Store(true)
@@ -203,8 +221,16 @@ func (mv *MessageView) SetChatName(name string) {
 }
 
 // SetMessages replaces all messages and scrolls to the bottom.
+// Passing nil or an empty slice clears the view and resets scroll to the top
+// so a freshly selected chat doesn't inherit the previous scroll position.
 func (mv *MessageView) SetMessages(msgs []models.Message) {
 	mv.messages = msgs
+	if len(msgs) == 0 {
+		mv.vbox.Objects = nil
+		mv.vbox.Refresh()
+		mv.scroll.ScrollToTop()
+		return
+	}
 	mv.rebuildVBox()
 }
 
@@ -233,13 +259,15 @@ func (mv *MessageView) SetFocused(focused bool) {
 	mv.header.Refresh()
 }
 
-// ScrollToBottom scrolls the message list to the bottom after a short layout
-// settle delay. Safe to call from the Fyne main goroutine.
+// ScrollToBottom attempts to scroll to the bottom at several increasing delays
+// so it works whether Fyne lays out quickly or slowly.
 func (mv *MessageView) ScrollToBottom() {
-	go func() {
-		time.Sleep(150 * time.Millisecond)
-		fyne.Do(func() { mv.scroll.ScrollToBottom() })
-	}()
+	for _, d := range []time.Duration{60, 200, 500} {
+		go func(delay time.Duration) {
+			time.Sleep(delay)
+			fyne.Do(func() { mv.scroll.ScrollToBottom() })
+		}(d)
+	}
 }
 
 const groupingWindow = 5 * time.Minute
@@ -473,34 +501,76 @@ func buildAttachmentRows(attachments []models.Attachment) []fyne.CanvasObject {
 
 func buildAttachmentRow(att models.Attachment) fyne.CanvasObject {
 	name := attachmentName(att)
-	uri := attachmentURI(att)
+	isImage := strings.HasPrefix(strings.ToLower(att.MimeType), "image/")
 
-	prefix := "Attachment"
-	if strings.HasPrefix(strings.ToLower(att.MimeType), "image/") {
-		prefix = "Image"
-	}
+	log.Printf("[attachment] guid=%q name=%q mime=%q url=%q path=%q pathOnDisk=%q",
+		att.GUID, name, att.MimeType, att.URL, att.Path, att.PathOnDisk)
 
-	if uri != nil {
-		href, err := url.Parse(uri.String())
-		if err != nil {
-			href = nil
-		}
+	// Try reading from the local filesystem first.
+	if uri := attachmentURI(att); uri != nil {
+		log.Printf("[attachment] trying local URI: %s", uri.String())
 		if img := buildInlineImage(uri); img != nil {
-			if href != nil {
-				link := widget.NewHyperlink(prefix+": "+name, href)
-				return container.NewVBox(img, link)
-			}
+			log.Printf("[attachment] local image OK: %s", uri.String())
 			return img
 		}
-		if href != nil {
-			return widget.NewHyperlink(prefix+": "+name, href)
-		}
+		log.Printf("[attachment] local image failed (not an image or unreadable): %s", uri.String())
+	} else {
+		log.Printf("[attachment] no usable local URI")
 	}
 
+	// Fall back to downloading via the BlueBubbles API.
+	if isImage && att.GUID != "" {
+		attachmentFetcher.RLock()
+		fn := attachmentFetcher.fn
+		attachmentFetcher.RUnlock()
+		if fn != nil {
+			log.Printf("[attachment] queuing async API download for guid=%q", att.GUID)
+			return buildAsyncAttachmentImage(att.GUID, name, fn)
+		}
+		log.Printf("[attachment] no API fetcher registered, showing label")
+	}
+
+	prefix := "Attachment"
+	if isImage {
+		prefix = "Image"
+	}
 	label := widget.NewLabel(fmt.Sprintf("%s: %s", prefix, name))
 	label.Importance = widget.LowImportance
 	label.Wrapping = fyne.TextWrapWord
 	return label
+}
+
+// buildAsyncAttachmentImage shows a placeholder label and replaces it with the
+// actual image once the API download completes.
+func buildAsyncAttachmentImage(guid, name string, fetch func(string) ([]byte, string, error)) fyne.CanvasObject {
+	placeholder := widget.NewLabel("Loading image…")
+	placeholder.Importance = widget.LowImportance
+	box := container.NewVBox(placeholder)
+
+	go func() {
+		data, mimeType, err := fetch(guid)
+		if err != nil {
+			log.Printf("[attachment] API download error guid=%q: %v", guid, err)
+			fyne.Do(func() { placeholder.SetText("Image: " + name) })
+			return
+		}
+		log.Printf("[attachment] API download OK guid=%q bytes=%d mime=%q", guid, len(data), mimeType)
+		if _, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil {
+			log.Printf("[attachment] image decode failed guid=%q: %v", guid, err)
+			fyne.Do(func() { placeholder.SetText("Image: " + name) })
+			return
+		}
+		res := fyne.NewStaticResource(guid, data)
+		img := canvas.NewImageFromResource(res)
+		img.FillMode = canvas.ImageFillContain
+		img.SetMinSize(fyne.NewSize(220, 140))
+		fyne.Do(func() {
+			box.Objects = []fyne.CanvasObject{img}
+			box.Refresh()
+		})
+	}()
+
+	return box
 }
 
 func buildLinkPreviewRows(body string, _ bool) []fyne.CanvasObject {

@@ -185,8 +185,9 @@ func (t *compactTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant
 			// Match Alacritty theme background (Tokyo Night): #1a1b26.
 			return color.NRGBA{R: 26, G: 27, B: 38, A: 255}
 		case theme.ColorNameInputBackground:
-			// Match chat surface so input blends into the conversation area.
-			return color.NRGBA{R: 26, G: 27, B: 38, A: 255}
+			// Slightly darker than the main background so the input area is
+			// subtly distinct without needing a border.
+			return color.NRGBA{R: 16, G: 17, B: 26, A: 255}
 		case theme.ColorNameInputBorder:
 			// Transparent border — the stroke is invisible but SizeNameInputBorder
 			// must be non-zero so Fyne can draw the cursor with a real width.
@@ -198,8 +199,8 @@ func (t *compactTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant
 			// Keep "from me" messages distinct, but less saturated than default green.
 			return color.NRGBA{R: 148, G: 166, B: 150, A: 255}
 		case theme.ColorNamePrimary:
-			// Bright cursor / selection color visible against the dark background.
-			return color.NRGBA{R: 125, G: 207, B: 255, A: 255}
+			// Grey block cursor.
+			return color.NRGBA{R: 100, G: 106, B: 130, A: 200}
 		}
 	}
 	if !t.dark && name == theme.ColorNameSuccess {
@@ -247,7 +248,7 @@ func (t *compactTheme) Size(name fyne.ThemeSizeName) float32 {
 	case theme.SizeNameInputRadius:
 		return 0
 	case theme.SizeNameInputBorder:
-		return 2 // cursor width — must be non-zero or the cursor rectangle is invisible
+		return 2 // cursor width — layout and cursor share this value in Fyne
 	case theme.SizeNameScrollBar, theme.SizeNameScrollBarSmall:
 		return 0
 	case theme.SizeNameText, theme.SizeNameSubHeadingText:

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -16,6 +17,7 @@ import (
 	"github.com/bluebubbles-tui/config"
 	"github.com/bluebubbles-tui/models"
 	"github.com/bluebubbles-tui/ws"
+	"github.com/google/uuid"
 )
 
 // App is the top-level GUI application.
@@ -101,6 +103,7 @@ func (a *App) Run() {
 	setLinkPreviewEnabled(a.linkPreviewsEnabled)
 	setMaxLinkPreviewsPerMessage(a.maxLinkPreviews)
 	setLinkPreviewFetcherFromAPI(a.apiClient)
+	setAttachmentFetcherFromAPI(a.apiClient)
 
 	a.chatListComp = NewChatList(func(chat *models.Chat) {
 		a.selectChat(chat)
@@ -329,6 +332,7 @@ func (a *App) selectChat(chat *models.Chat) {
 	a.chatListComp.ClearNewMessage(chatGUID)
 	pane.msgView.SetChatName(chat.GetDisplayName())
 	pane.msgView.SetMessages(nil)
+	pane.FocusInput(a.win.Canvas())
 
 	go a.loadMessagesForPane(pane, chatGUID)
 }
@@ -377,6 +381,9 @@ func (a *App) loadMessagesForPane(pane *ChatPane, chatGUID string) {
 }
 
 // sendMessageFromPane sends a message on behalf of the given pane.
+// The message is shown immediately (optimistic UI); the API call happens in the
+// background. When the real message arrives via WebSocket the pending copy is
+// swapped out transparently.
 func (a *App) sendMessageFromPane(pane *ChatPane, text string, replyTo *models.Message) {
 	chatGUID := pane.ChatGUID
 	if chatGUID == "" {
@@ -388,32 +395,66 @@ func (a *App) sendMessageFromPane(pane *ChatPane, text string, replyTo *models.M
 		replyToGUID = replyTo.GUID
 	}
 
+	// 1. Inject an optimistic message so the UI updates before any network call.
+	pendingGUID := "pending-" + uuid.New().String()
+	optimistic := models.Message{
+		GUID:        pendingGUID,
+		Text:        text,
+		IsFromMe:    true,
+		DateCreated: time.Now().UnixMilli(),
+		ChatGUID:    chatGUID,
+	}
+
+	a.mu.Lock()
+	a.msgCache[chatGUID] = append(a.msgCache[chatGUID], optimistic)
+	snapshot := a.sortedCacheSnapshot(chatGUID)
+	a.mu.Unlock()
+
+	fyne.Do(func() {
+		if pane.ChatGUID == chatGUID {
+			pane.msgView.SetMessages(snapshot)
+		}
+	})
+
+	// 2. Fire-and-forget: send to server. WebSocket delivers the real message.
 	go func() {
 		if err := a.apiClient.SendMessage(chatGUID, text, replyToGUID); err != nil {
 			log.Printf("[GUI] SendMessage error: %v", err)
-			return
+			// Roll back the optimistic message on failure.
+			a.mu.Lock()
+			a.removePending(chatGUID, pendingGUID)
+			snapshot := a.sortedCacheSnapshot(chatGUID)
+			a.mu.Unlock()
+			fyne.Do(func() {
+				if pane.ChatGUID == chatGUID {
+					pane.msgView.SetMessages(snapshot)
+				}
+			})
 		}
-
-		msgs, err := a.apiClient.GetMessages(chatGUID, 50)
-		if err != nil {
-			log.Printf("[GUI] GetMessages after send error: %v", err)
-			return
-		}
-
-		a.mu.Lock()
-		a.msgCache[chatGUID] = msgs
-		a.mu.Unlock()
-
-		sort.Slice(msgs, func(i, j int) bool {
-			return msgs[i].DateCreated < msgs[j].DateCreated
-		})
-
-		fyne.Do(func() {
-			if pane.ChatGUID == chatGUID {
-				pane.msgView.SetMessages(msgs)
-			}
-		})
 	}()
+}
+
+// sortedCacheSnapshot returns a sorted copy of the message cache for chatGUID.
+// Must be called with a.mu held.
+func (a *App) sortedCacheSnapshot(chatGUID string) []models.Message {
+	src := a.msgCache[chatGUID]
+	out := make([]models.Message, len(src))
+	copy(out, src)
+	sort.Slice(out, func(i, j int) bool { return out[i].DateCreated < out[j].DateCreated })
+	return out
+}
+
+// removePending removes a single message by GUID from the cache.
+// Must be called with a.mu held.
+func (a *App) removePending(chatGUID, guid string) {
+	cached := a.msgCache[chatGUID]
+	out := cached[:0]
+	for _, m := range cached {
+		if m.GUID != guid {
+			out = append(out, m)
+		}
+	}
+	a.msgCache[chatGUID] = out
 }
 
 // loadChats fetches the chat list and pre-selects the first entry.
@@ -478,23 +519,35 @@ func (a *App) handleWSEvent(event models.WSEvent) {
 
 		a.mu.Lock()
 		cached := a.msgCache[msg.ChatGUID]
-		alreadyCached := false
+		// Check if already cached.
 		for _, m := range cached {
 			if m.GUID == msg.GUID {
-				alreadyCached = true
-				break
+				a.mu.Unlock()
+				return
 			}
 		}
-		if !alreadyCached {
-			a.msgCache[msg.ChatGUID] = append(cached, msg)
+		// Remove any pending optimistic message with matching text (our own send).
+		if msg.IsFromMe {
+			out := cached[:0]
+			removed := false
+			for _, m := range cached {
+				if !removed && strings.HasPrefix(m.GUID, "pending-") && m.Text == msg.Text {
+					removed = true
+					continue
+				}
+				out = append(out, m)
+			}
+			cached = out
 		}
+		a.msgCache[msg.ChatGUID] = append(cached, msg)
+		snapshot := a.sortedCacheSnapshot(msg.ChatGUID)
 		a.mu.Unlock()
 
 		fyne.Do(func() {
 			panesShowing := a.paneManager.PanesShowingChat(msg.ChatGUID)
 			if len(panesShowing) > 0 {
 				for _, p := range panesShowing {
-					p.msgView.AppendMessage(msg)
+					p.msgView.SetMessages(snapshot)
 				}
 			} else {
 				a.chatListComp.MarkNewMessage(msg.ChatGUID)

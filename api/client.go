@@ -288,8 +288,21 @@ func (c *Client) GetMessages(chatGUID string, limit int) ([]models.Message, erro
 	return messages, nil
 }
 
-// SendMessage posts a new iMessage. If replyToGUID is set, it sends a native iMessage reply.
+// SendMessage posts a new iMessage. If replyToGUID is set it first tries the
+// Private API (required for threaded replies); if that fails it falls back to
+// apple-script and sends the message without threading context.
 func (c *Client) SendMessage(chatGUID, text, replyToGUID string) error {
+	if strings.TrimSpace(replyToGUID) != "" {
+		err := c.sendMessage(chatGUID, text, replyToGUID, "private-api")
+		if err == nil {
+			return nil
+		}
+		log.Printf("SendMessage private-api failed (%v), falling back to apple-script", err)
+	}
+	return c.sendMessage(chatGUID, text, "", "apple-script")
+}
+
+func (c *Client) sendMessage(chatGUID, text, replyToGUID, method string) error {
 	u, err := url.Parse(fmt.Sprintf("%s/api/v1/message/text", c.baseURL))
 	if err != nil {
 		return err
@@ -302,14 +315,12 @@ func (c *Client) SendMessage(chatGUID, text, replyToGUID string) error {
 	payload := map[string]interface{}{
 		"chatGuid": chatGUID,
 		"message":  text,
-		"method":   "apple-script",
+		"method":   method,
 		"tempGuid": uuid.New().String(),
 	}
 	if strings.TrimSpace(replyToGUID) != "" {
 		payload["selectedMessageGuid"] = replyToGUID
 		payload["partIndex"] = 0
-		// selectedMessageGuid implies private-api on the server validator.
-		payload["method"] = "private-api"
 	}
 
 	body, err := json.Marshal(payload)
@@ -317,7 +328,7 @@ func (c *Client) SendMessage(chatGUID, text, replyToGUID string) error {
 		return err
 	}
 
-	log.Printf("SendMessage POST: %s", u.String())
+	log.Printf("SendMessage POST method=%s: %s", method, u.String())
 	log.Printf("SendMessage body: %s", string(body))
 
 	resp, err := c.httpClient.Post(u.String(), "application/json", bytes.NewReader(body))
@@ -418,6 +429,36 @@ func (c *Client) GetContacts() (map[string]string, error) {
 
 	log.Printf("Successfully loaded %d contacts (cached)", len(contactMap))
 	return contactMap, nil
+}
+
+// DownloadAttachment fetches the raw bytes of an attachment by GUID.
+// Returns the data and the MIME type reported by the server.
+func (c *Client) DownloadAttachment(guid string) ([]byte, string, error) {
+	u, err := url.Parse(fmt.Sprintf("%s/api/v1/attachment/%s/download", c.baseURL, url.PathEscape(guid)))
+	if err != nil {
+		return nil, "", err
+	}
+	c.addAuth(u)
+
+	log.Printf("DownloadAttachment: %s", u.String())
+
+	resp, err := c.httpClient.Get(u.String())
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("attachment download failed: status %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 20*1024*1024)) // 20 MB cap
+	if err != nil {
+		return nil, "", err
+	}
+
+	mimeType := resp.Header.Get("Content-Type")
+	return data, mimeType, nil
 }
 
 // Ping checks server connectivity by trying to fetch chats

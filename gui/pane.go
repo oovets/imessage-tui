@@ -34,8 +34,10 @@ func newChatPane(onSend func(*ChatPane, string, *models.Message), onFocused func
 		onInputShortcut,
 	)
 	gap := canvas.NewRectangle(color.Transparent)
-	gap.SetMinSize(fyne.NewSize(1, 12)) // one row-like visual gap above input
-	inputWithGap := container.NewVBox(gap, p.inputArea.Widget())
+	gap.SetMinSize(fyne.NewSize(1, 12))
+	gapBelow := canvas.NewRectangle(color.Transparent)
+	gapBelow.SetMinSize(fyne.NewSize(1, 12))
+	inputWithGap := container.NewVBox(gap, p.inputArea.Widget(), gapBelow)
 	p.widget = container.NewBorder(nil, inputWithGap, nil, nil, p.msgView.Widget())
 	return p
 }

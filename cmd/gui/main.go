@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"log"
 	"os"
 
@@ -17,11 +18,14 @@ func init() {
 	}
 	logFile := homeDir + "/.bluebubbles-gui.log"
 	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+
+	var w io.Writer = os.Stdout
 	if err == nil {
-		log.SetOutput(f)
-		log.SetFlags(log.LstdFlags | log.Lshortfile)
-		log.Println("========== BlueBubbles GUI Started ==========")
+		w = io.MultiWriter(os.Stdout, f)
 	}
+	log.SetOutput(w)
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.Println("========== BlueBubbles GUI Started ==========")
 }
 
 func main() {

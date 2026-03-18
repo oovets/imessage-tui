@@ -124,7 +124,7 @@ type InputArea struct {
 func NewInputArea(onSend func(string, *models.Message), onFocused func()) *InputArea {
 	ia := &InputArea{onSend: onSend}
 
-	ia.entry = newFocusEntry("Chat 4 Lyfe...", onFocused, nil, func(text string) {
+	ia.entry = newFocusEntry("", onFocused, nil, func(text string) {
 		ia.submit(text)
 	})
 	ia.entry.OnChanged = func(_ string) { ia.updateInputHeight() }
@@ -142,7 +142,7 @@ func NewInputArea(onSend func(string, *models.Message), onFocused func()) *Input
 func NewInputAreaWithShortcutHandler(onSend func(string, *models.Message), onFocused func(), onShortcut func(fyne.Shortcut) bool) *InputArea {
 	ia := &InputArea{onSend: onSend}
 
-	ia.entry = newFocusEntry("Chat 4 Lyfe...", onFocused, onShortcut, func(text string) {
+	ia.entry = newFocusEntry("", onFocused, onShortcut, func(text string) {
 		ia.submit(text)
 	})
 	ia.entry.OnChanged = func(_ string) { ia.updateInputHeight() }
