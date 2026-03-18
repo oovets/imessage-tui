@@ -251,6 +251,8 @@ type MessageView struct {
 	panel    fyne.CanvasObject
 	messages []models.Message
 	onReply  func(models.Message)
+
+	autoScrollUntil atomic.Int64
 }
 
 func NewMessageView(onReply func(models.Message)) *MessageView {
@@ -324,9 +326,21 @@ func (mv *MessageView) ScrollToBottom() {
 	}
 }
 
+func (mv *MessageView) extendAutoScrollWindow(d time.Duration) {
+	mv.autoScrollUntil.Store(time.Now().Add(d).UnixNano())
+}
+
+func (mv *MessageView) maybeScrollAfterAsyncResize() {
+	if time.Now().UnixNano() > mv.autoScrollUntil.Load() {
+		return
+	}
+	mv.ScrollToBottom()
+}
+
 const groupingWindow = 5 * time.Minute
 
 func (mv *MessageView) rebuildVBox() {
+	mv.extendAutoScrollWindow(2 * time.Second)
 	mv.vbox.Objects = nil
 	for i, msg := range mv.messages {
 		showSender := true
@@ -338,7 +352,7 @@ func (mv *MessageView) rebuildVBox() {
 				showSender = false
 			}
 		}
-		mv.vbox.Add(buildMessageRow(msg, mv.onReply, showSender))
+		mv.vbox.Add(buildMessageRow(msg, mv.onReply, showSender, mv.maybeScrollAfterAsyncResize))
 	}
 	mv.vbox.Refresh()
 	mv.ScrollToBottom()
@@ -357,7 +371,7 @@ func messageSenderName(msg models.Message) string {
 	return "Unknown"
 }
 
-func buildMessageRow(msg models.Message, onReply func(models.Message), showSender bool) fyne.CanvasObject {
+func buildMessageRow(msg models.Message, onReply func(models.Message), showSender bool, onAsyncResize func()) fyne.CanvasObject {
 	timeStr := formatHoverTimestamp(msg.ParsedTime())
 	senderName := messageSenderName(msg)
 
@@ -375,13 +389,13 @@ func buildMessageRow(msg models.Message, onReply func(models.Message), showSende
 	}
 	if strings.TrimSpace(msg.Text) != "" {
 		objs = append(objs, buildMessageContent(msg.Text, msg))
-		if previews := buildLinkPreviewRows(msg.Text, msg.IsFromMe); len(previews) > 0 {
+		if previews := buildLinkPreviewRows(msg.Text, msg.IsFromMe, onAsyncResize); len(previews) > 0 {
 			for _, p := range previews {
 				objs = append(objs, alignOutgoingRow(p, msg.IsFromMe))
 			}
 		}
 	}
-	if attachments := buildAttachmentRows(msg.Attachments); len(attachments) > 0 {
+	if attachments := buildAttachmentRows(msg.Attachments, onAsyncResize); len(attachments) > 0 {
 		for _, a := range attachments {
 			objs = append(objs, alignOutgoingRow(a, msg.IsFromMe))
 		}
@@ -539,19 +553,19 @@ func normalizeLinkToken(token string) (*url.URL, string, bool) {
 	return u, token, true
 }
 
-func buildAttachmentRows(attachments []models.Attachment) []fyne.CanvasObject {
+func buildAttachmentRows(attachments []models.Attachment, onAsyncResize func()) []fyne.CanvasObject {
 	if len(attachments) == 0 {
 		return nil
 	}
 
 	rows := make([]fyne.CanvasObject, 0, len(attachments))
 	for _, att := range attachments {
-		rows = append(rows, buildAttachmentRow(att))
+		rows = append(rows, buildAttachmentRow(att, onAsyncResize))
 	}
 	return rows
 }
 
-func buildAttachmentRow(att models.Attachment) fyne.CanvasObject {
+func buildAttachmentRow(att models.Attachment, onAsyncResize func()) fyne.CanvasObject {
 	name := attachmentName(att)
 	isImage := strings.HasPrefix(strings.ToLower(att.MimeType), "image/")
 
@@ -577,7 +591,7 @@ func buildAttachmentRow(att models.Attachment) fyne.CanvasObject {
 		attachmentFetcher.RUnlock()
 		if fn != nil {
 			log.Printf("[attachment] queuing async API download for guid=%q", att.GUID)
-			return buildAsyncAttachmentImage(att.GUID, name, fn)
+			return buildAsyncAttachmentImage(att.GUID, name, fn, onAsyncResize)
 		}
 		log.Printf("[attachment] no API fetcher registered, showing label")
 	}
@@ -594,7 +608,7 @@ func buildAttachmentRow(att models.Attachment) fyne.CanvasObject {
 
 // buildAsyncAttachmentImage shows a placeholder label and replaces it with the
 // actual image once the API download completes.
-func buildAsyncAttachmentImage(guid, name string, fetch func(string) ([]byte, string, error)) fyne.CanvasObject {
+func buildAsyncAttachmentImage(guid, name string, fetch func(string) ([]byte, string, error), onAsyncResize func()) fyne.CanvasObject {
 	placeholder := widget.NewLabel("Loading image…")
 	placeholder.Importance = widget.LowImportance
 	box := container.NewVBox(placeholder)
@@ -619,13 +633,16 @@ func buildAsyncAttachmentImage(guid, name string, fetch func(string) ([]byte, st
 		fyne.Do(func() {
 			box.Objects = []fyne.CanvasObject{img}
 			box.Refresh()
+			if onAsyncResize != nil {
+				onAsyncResize()
+			}
 		})
 	}()
 
 	return box
 }
 
-func buildLinkPreviewRows(body string, _ bool) []fyne.CanvasObject {
+func buildLinkPreviewRows(body string, _ bool, onAsyncResize func()) []fyne.CanvasObject {
 	if !previewEnabled.Load() {
 		return nil
 	}
@@ -645,12 +662,12 @@ func buildLinkPreviewRows(body string, _ bool) []fyne.CanvasObject {
 
 	rows := make([]fyne.CanvasObject, 0, len(urls))
 	for _, raw := range urls {
-		rows = append(rows, buildLinkPreviewCard(raw))
+		rows = append(rows, buildLinkPreviewCard(raw, onAsyncResize))
 	}
 	return rows
 }
 
-func buildLinkPreviewCard(rawURL string) fyne.CanvasObject {
+func buildLinkPreviewCard(rawURL string, onAsyncResize func()) fyne.CanvasObject {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return widget.NewLabel(rawURL)
@@ -698,6 +715,9 @@ func buildLinkPreviewCard(rawURL string) fyne.CanvasObject {
 				desc.Wrapping = fyne.TextWrapWord
 				desc.Importance = widget.LowImportance
 				card.Objects = append([]fyne.CanvasObject{title, site, desc}, link)
+				if onAsyncResize != nil {
+					onAsyncResize()
+				}
 			}
 
 			if meta.ImageURL != "" {
@@ -706,12 +726,18 @@ func buildLinkPreviewCard(rawURL string) fyne.CanvasObject {
 						fyne.Do(func() {
 							card.Objects = prependCanvasObject(card.Objects, img)
 							card.Refresh()
+							if onAsyncResize != nil {
+								onAsyncResize()
+							}
 						})
 					}
 				}()
 			}
 
 			card.Refresh()
+			if onAsyncResize != nil {
+				onAsyncResize()
+			}
 		})
 	}()
 
