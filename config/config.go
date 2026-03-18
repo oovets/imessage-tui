@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/spf13/viper"
 )
@@ -21,7 +23,9 @@ type Config struct {
 func Load() (*Config, error) {
 	viper.SetConfigName("bluebubbles")
 	viper.SetConfigType("yaml")
-	viper.AddConfigPath("$HOME/.config/bluebubbles-tui/")
+	if home, err := os.UserHomeDir(); err == nil {
+		viper.AddConfigPath(filepath.Join(home, ".config", "bluebubbles-tui"))
+	}
 	viper.AddConfigPath(".")
 
 	// Env var bindings

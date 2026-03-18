@@ -133,15 +133,20 @@ var senderNamePalette = []color.NRGBA{
 	{R: 115, G: 218, B: 202, A: 255},
 }
 
+// tsColor is the fully-opaque colour used for the hover timestamp.
+var tsColor = color.NRGBA{R: 100, G: 106, B: 130, A: 180}
+
 type hoverMessageRow struct {
 	widget.BaseWidget
 	host      *fyne.Container
 	rowMain   fyne.CanvasObject
 	replyBtn  fyne.CanvasObject
-	timestamp *widget.Label
+	timestamp *canvas.Text // canvas.Text so we can animate its alpha
+	tsAnim    *fyne.Animation
+	hovered   bool
 }
 
-func newHoverMessageRow(rowMain fyne.CanvasObject, replyBtn fyne.CanvasObject, timestamp *widget.Label) *hoverMessageRow {
+func newHoverMessageRow(rowMain fyne.CanvasObject, replyBtn fyne.CanvasObject, timestamp *canvas.Text) *hoverMessageRow {
 	host := container.NewVBox(rowMain)
 	r := &hoverMessageRow{host: host, rowMain: rowMain, replyBtn: replyBtn, timestamp: timestamp}
 	r.ExtendBaseWidget(r)
@@ -153,37 +158,86 @@ func (r *hoverMessageRow) CreateRenderer() fyne.WidgetRenderer {
 }
 
 func (r *hoverMessageRow) MouseIn(_ *desktop.MouseEvent) {
-	left := fyne.CanvasObject(nil)
-	right := fyne.CanvasObject(nil)
+	r.hovered = true
 
 	if r.replyBtn != nil {
 		r.replyBtn.Show()
 		if g, ok := r.replyBtn.(*glyphAction); ok {
 			g.SetEmphasis(true)
 		}
-		right = r.replyBtn
-	}
-	if r.timestamp != nil {
-		r.timestamp.Show()
-		left = r.timestamp
 	}
 
-	r.host.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, left, right, r.rowMain)}
-	r.host.Refresh()
+	if r.timestamp != nil {
+		// Ensure the timestamp slot is in the layout before animating.
+		r.timestamp.Color = color.NRGBA{R: tsColor.R, G: tsColor.G, B: tsColor.B, A: 0}
+		r.timestamp.Show()
+		var left, right fyne.CanvasObject = r.timestamp, nil
+		if r.replyBtn != nil {
+			right = r.replyBtn
+		}
+		r.host.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, left, right, r.rowMain)}
+		r.host.Refresh()
+
+		if r.tsAnim != nil {
+			r.tsAnim.Stop()
+		}
+		startA := r.timestamp.Color.(color.NRGBA).A
+		targetA := tsColor.A
+		r.tsAnim = fyne.NewAnimation(150*time.Millisecond, func(f float32) {
+			a := startA + uint8(float32(targetA-startA)*f)
+			r.timestamp.Color = color.NRGBA{R: tsColor.R, G: tsColor.G, B: tsColor.B, A: a}
+			canvas.Refresh(r.timestamp)
+		})
+		r.tsAnim.Curve = fyne.AnimationEaseOut
+		r.tsAnim.Start()
+	} else {
+		var right fyne.CanvasObject
+		if r.replyBtn != nil {
+			right = r.replyBtn
+		}
+		r.host.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, nil, right, r.rowMain)}
+		r.host.Refresh()
+	}
 }
 
 func (r *hoverMessageRow) MouseOut() {
+	r.hovered = false
+
 	if r.replyBtn != nil {
 		if g, ok := r.replyBtn.(*glyphAction); ok {
 			g.SetEmphasis(false)
 		}
 		r.replyBtn.Hide()
 	}
-	if r.timestamp != nil {
-		r.timestamp.Hide()
+
+	if r.timestamp == nil {
+		r.host.Objects = []fyne.CanvasObject{r.rowMain}
+		r.host.Refresh()
+		return
 	}
-	r.host.Objects = []fyne.CanvasObject{r.rowMain}
-	r.host.Refresh()
+
+	if r.tsAnim != nil {
+		r.tsAnim.Stop()
+	}
+	startA := r.timestamp.Color.(color.NRGBA).A
+	const dur = 120 * time.Millisecond
+	r.tsAnim = fyne.NewAnimation(dur, func(f float32) {
+		a := uint8(float32(startA) * (1 - f))
+		r.timestamp.Color = color.NRGBA{R: tsColor.R, G: tsColor.G, B: tsColor.B, A: a}
+		canvas.Refresh(r.timestamp)
+	})
+	r.tsAnim.Curve = fyne.AnimationEaseIn
+	r.tsAnim.Start()
+
+	time.AfterFunc(dur, func() {
+		fyne.Do(func() {
+			if !r.hovered {
+				r.timestamp.Hide()
+				r.host.Objects = []fyne.CanvasObject{r.rowMain}
+				r.host.Refresh()
+			}
+		})
+	})
 }
 
 func (r *hoverMessageRow) MouseMoved(_ *desktop.MouseEvent) {}
@@ -334,12 +388,10 @@ func buildMessageRow(msg models.Message, onReply func(models.Message), showSende
 	}
 	content := container.NewVBox(objs...)
 
-	tsLabel := widget.NewLabel("[" + timeStr + "]")
-	tsLabel.Importance = widget.LowImportance
-	tsLabel.Alignment = fyne.TextAlignLeading
-	tsLabel.Hide()
-	if msg.IsFromMe {
-		tsLabel = nil
+	var tsLabel *canvas.Text
+	if !msg.IsFromMe {
+		tsLabel = canvas.NewText("["+timeStr+"]", color.NRGBA{R: tsColor.R, G: tsColor.G, B: tsColor.B, A: 0})
+		tsLabel.TextSize = 11
 	}
 
 	rowMain := content

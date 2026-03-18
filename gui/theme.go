@@ -201,6 +201,8 @@ func (t *compactTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant
 		case theme.ColorNamePrimary:
 			// Grey block cursor.
 			return color.NRGBA{R: 100, G: 106, B: 130, A: 200}
+		case theme.ColorNameSeparator:
+			return color.NRGBA{A: 0}
 		}
 	}
 	if !t.dark && name == theme.ColorNameSuccess {

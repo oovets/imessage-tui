@@ -64,7 +64,26 @@ export BB_OEMBED_ENDPOINT="https://noembed.com/embed"
 
 ---
 
-## Building
+## Quick Install (recommended)
+
+Run the install script once to build everything, install the preview proxy as a systemd user service, and create the desktop launcher:
+
+```bash
+./scripts/install.sh
+```
+
+Re-run any time after `git pull` to rebuild and update. Safe to run multiple times.
+
+Optional env overrides:
+
+```bash
+FYNE_SCALE=1.5 ./scripts/install.sh        # override HiDPI scale (default 1.3)
+PREVIEW_PROXY_ADDR=127.0.0.1:8091 ./scripts/install.sh
+```
+
+---
+
+## Manual Build
 
 ```bash
 go build -o bluebubbles-tui .            # terminal UI
@@ -74,17 +93,14 @@ go build -o bluebubbles-preview-proxy ./cmd/preview-proxy/ # local preview proxy
 
 ### Preview Proxy (optional, recommended for IG/FB stability)
 
-Run the internal proxy service:
+The install script handles this automatically. For manual setup:
 
 ```bash
-./bluebubbles-preview-proxy
-```
+# Build and start the proxy once
+go build -o bluebubbles-preview-proxy ./cmd/preview-proxy/
+./bluebubbles-preview-proxy &
 
-Default endpoint is `http://127.0.0.1:8090/preview?url=...`.
-
-Point the GUI client to it:
-
-```bash
+# Point the GUI at it
 export BB_PREVIEW_PROXY_URL="http://127.0.0.1:8090/preview"
 ```
 
@@ -99,27 +115,16 @@ export PREVIEW_CACHE_TTL_SEC=21600
 
 ### Autostart With systemd (user)
 
-A ready-to-use user service file is included at:
-
-`systemd/bluebubbles-preview-proxy.service`
-
-Install and enable it:
+`scripts/install.sh` handles this automatically. For manual setup:
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp /home/stefan/Code/bluebubbles-tui/systemd/bluebubbles-preview-proxy.service ~/.config/systemd/user/
+# The service file uses %h (home dir) — copy as-is, no edits needed
+cp systemd/bluebubbles-preview-proxy.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now bluebubbles-preview-proxy.service
 systemctl --user status bluebubbles-preview-proxy.service
 ```
-
-Make sure the GUI points to the local proxy:
-
-```bash
-export BB_PREVIEW_PROXY_URL="http://127.0.0.1:8090/preview"
-```
-
-If your repo path differs, edit `ExecStart` and `WorkingDirectory` in the service file.
 
 ---
 
@@ -199,7 +204,7 @@ Reply to a specific message by clicking the `↩` button on that message. A repl
 
 ### Desktop Launcher
 
-Create `~/.local/share/applications/bluebubbles-gui.desktop`:
+`scripts/install.sh` creates this automatically. For manual setup, create `~/.local/share/applications/bluebubbles-gui.desktop`:
 
 ```ini
 [Desktop Entry]
@@ -207,12 +212,18 @@ Type=Application
 Name=BlueBubbles
 GenericName=iMessage Client
 Comment=iMessage via BlueBubbles relay
-Exec=env FYNE_SCALE=1.3 /home/stefan/Code/bluebubbles-tui/bluebubbles-gui
+Exec=env FYNE_SCALE=1.3 BB_PREVIEW_PROXY_URL=http://127.0.0.1:8090/preview /home/stefan/Code/bluebubbles-tui/bluebubbles-gui
 Icon=internet-chat
 Terminal=false
 Categories=Network;Chat;InstantMessaging;
 Keywords=imessage;messages;chat;bluebubbles;
 StartupWMClass=BlueBubbles
+```
+
+Then refresh the launcher index:
+
+```bash
+update-desktop-database ~/.local/share/applications
 ```
 
 `FYNE_SCALE=1.3` renders at 130% internal resolution. This is the recommended workaround for Fyne's grayscale font anti-aliasing on 1440p displays — it makes glyphs noticeably smoother without changing the perceived window size much.
