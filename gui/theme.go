@@ -116,6 +116,9 @@ func (t *compactTheme) base() fyne.Theme {
 }
 
 func (t *compactTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	if !t.dark && name == theme.ColorNameSuccess {
+		return color.NRGBA{R: 140, G: 140, B: 140, A: 255}
+	}
 	return t.base().Color(name, variant)
 }
 

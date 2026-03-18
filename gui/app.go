@@ -10,6 +10,7 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/widget"
 	"github.com/bluebubbles-tui/api"
 	"github.com/bluebubbles-tui/models"
 	"github.com/bluebubbles-tui/ws"
@@ -65,8 +66,8 @@ func (a *App) Run() {
 	a.split.SetOffset(0.25)
 	a.showChatList = true
 	a.contentHolder = container.NewMax(a.split)
-	a.win.SetMainMenu(a.buildMenu())
-	a.win.SetContent(a.contentHolder)
+	toolbar := a.buildToolbar()
+	a.win.SetContent(container.NewBorder(toolbar, nil, nil, nil, a.contentHolder))
 
 	// Keyboard shortcuts ─────────────────────────────────────────────────
 	// Ctrl+H  split focused pane side by side (horizontal)
@@ -248,63 +249,55 @@ func (a *App) scrollAllPanes() {
 	}
 }
 
-// buildMenu builds the window menu bar with font size, font family, and dark/light controls.
-func (a *App) buildMenu() *fyne.MainMenu {
-	larger := fyne.NewMenuItem("A+  Larger", func() {
-		if a.appTheme.fontSize < 20 {
-			a.appTheme.fontSize++
-			a.fyneApp.Settings().SetTheme(a.appTheme)
-		}
-	})
-	smaller := fyne.NewMenuItem("A-  Smaller", func() {
+// buildToolbar builds the always-visible top toolbar.
+func (a *App) buildToolbar() fyne.CanvasObject {
+	smaller := widget.NewButton("A-", func() {
 		if a.appTheme.fontSize > 8 {
 			a.appTheme.fontSize--
 			a.fyneApp.Settings().SetTheme(a.appTheme)
 		}
 	})
-
-	var fontMenuItems []*fyne.MenuItem
-	for _, name := range a.appTheme.availableFamilies() {
-		n := name
-		fontMenuItems = append(fontMenuItems, fyne.NewMenuItem(n, func() {
-			a.appTheme.curFamily = n
+	larger := widget.NewButton("A+", func() {
+		if a.appTheme.fontSize < 20 {
+			a.appTheme.fontSize++
 			a.fyneApp.Settings().SetTheme(a.appTheme)
-		}))
-	}
-	fontItem := fyne.NewMenuItem("Font", nil)
-	fontItem.ChildMenu = fyne.NewMenu("", fontMenuItems...)
+		}
+	})
 
-	var boldItem *fyne.MenuItem
-	boldItem = fyne.NewMenuItem("Bold: Off", func() {
+	var boldBtn *widget.Button
+	boldBtn = widget.NewButton("B", func() {
 		a.appTheme.boldAll = !a.appTheme.boldAll
 		if a.appTheme.boldAll {
-			boldItem.Label = "Bold: On"
+			boldBtn.Importance = widget.HighImportance
 		} else {
-			boldItem.Label = "Bold: Off"
+			boldBtn.Importance = widget.MediumImportance
 		}
+		boldBtn.Refresh()
 		a.fyneApp.Settings().SetTheme(a.appTheme)
 	})
+	boldBtn.Importance = widget.MediumImportance
 
-	var modeItem *fyne.MenuItem
-	modeItem = fyne.NewMenuItem("Switch to Light Mode", func() {
-		a.appTheme.dark = !a.appTheme.dark
+	families := a.appTheme.availableFamilies()
+	fontSelect := widget.NewSelect(families, func(name string) {
+		a.appTheme.curFamily = name
+		a.fyneApp.Settings().SetTheme(a.appTheme)
+	})
+	fontSelect.Selected = a.appTheme.curFamily
+
+	var modeBtn *widget.Button
+	modeBtnLabel := func() string {
 		if a.appTheme.dark {
-			modeItem.Label = "Switch to Light Mode"
-		} else {
-			modeItem.Label = "Switch to Dark Mode"
+			return "Light"
 		}
+		return "Dark"
+	}
+	modeBtn = widget.NewButton(modeBtnLabel(), func() {
+		a.appTheme.dark = !a.appTheme.dark
+		modeBtn.SetText(modeBtnLabel())
 		a.fyneApp.Settings().SetTheme(a.appTheme)
 	})
 
-	return fyne.NewMainMenu(
-		fyne.NewMenu("View",
-			larger, smaller, boldItem,
-			fyne.NewMenuItemSeparator(),
-			fontItem,
-			fyne.NewMenuItemSeparator(),
-			modeItem,
-		),
-	)
+	return container.NewHBox(smaller, larger, boldBtn, widget.NewSeparator(), fontSelect, widget.NewSeparator(), modeBtn)
 }
 
 // handleWSEvent processes a single WebSocket event. Called from the WS goroutine.
