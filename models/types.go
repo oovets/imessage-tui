@@ -7,14 +7,14 @@ import (
 
 // Chat represents a conversation thread (1:1 or group)
 type Chat struct {
-	GUID            string    `json:"guid"`
-	DisplayName     string    `json:"displayName"`
-	ChatIdentifier  string    `json:"chatIdentifier"` // phone number, email, or group ID
-	Participants    []Handle  `json:"participants"`
-	LastMessage     *Message  `json:"lastMessage"`
-	UnreadCount     int       `json:"unreadCount"`
-	HasNewMessage   bool      `json:"-"` // Set when a new WS message arrives for this chat
-	LastMessageText string    `json:"-"` // Preview of latest message (not from API)
+	GUID            string   `json:"guid"`
+	DisplayName     string   `json:"displayName"`
+	ChatIdentifier  string   `json:"chatIdentifier"` // phone number, email, or group ID
+	Participants    []Handle `json:"participants"`
+	LastMessage     *Message `json:"lastMessage"`
+	UnreadCount     int      `json:"unreadCount"`
+	HasNewMessage   bool     `json:"-"` // Set when a new WS message arrives for this chat
+	LastMessageText string   `json:"-"` // Preview of latest message (not from API)
 }
 
 // GetDisplayName returns a suitable name for the chat
@@ -46,13 +46,13 @@ type Handle struct {
 
 // Message represents a single iMessage
 type Message struct {
-	GUID        string      `json:"guid"`
-	Text        string      `json:"text"`
-	IsFromMe    bool        `json:"isFromMe"`
-	DateCreated int64       `json:"dateCreated"` // milliseconds epoch
-	Handle      *Handle     `json:"handle"`      // nil when isFromMe=true
+	GUID        string       `json:"guid"`
+	Text        string       `json:"text"`
+	IsFromMe    bool         `json:"isFromMe"`
+	DateCreated int64        `json:"dateCreated"` // milliseconds epoch
+	Handle      *Handle      `json:"handle"`      // nil when isFromMe=true
 	Attachments []Attachment `json:"attachments"`
-	ChatGUID    string      `json:"-"` // injected after parse
+	ChatGUID    string       `json:"-"` // injected after parse
 }
 
 // ParsedTime returns the message creation time
@@ -62,9 +62,12 @@ func (m *Message) ParsedTime() time.Time {
 
 // Attachment for future image/file support
 type Attachment struct {
-	GUID     string `json:"guid"`
-	MimeType string `json:"mimeType"`
-	FileName string `json:"transferName"`
+	GUID       string `json:"guid"`
+	MimeType   string `json:"mimeType"`
+	FileName   string `json:"transferName"`
+	URL        string `json:"url"`
+	Path       string `json:"path"`
+	PathOnDisk string `json:"originalPath"`
 }
 
 // WSEvent is the envelope for WebSocket frames from BlueBubbles

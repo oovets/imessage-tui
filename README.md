@@ -12,6 +12,9 @@ A real-time iMessage client for BlueBubbles with two frontends: a terminal UI (T
 - Unread indicators — chats with new messages are highlighted and moved to the top
 - Split-window layout — view multiple conversations side by side or stacked
 - Toggle chat list visibility
+- Clickable links in messages (`http(s)`, `www.`, `mailto`, email addresses)
+- Basic attachment/media rendering (inline image preview when URI is available)
+- Link previews with title/metadata (toggleable in GUI View menu)
 
 ---
 
@@ -43,6 +46,20 @@ server_url: "https://xxx.xxx.xxx.xxx:1234"
 password: "your-api-password"
 message_limit: 50
 chat_limit: 50
+enable_link_previews: true
+max_previews_per_message: 2
+# Optional backend proxy/oEmbed endpoints for stable social previews.
+preview_proxy_url: ""
+oembed_endpoint: "https://noembed.com/embed"
+```
+
+Optional environment variables:
+
+```bash
+export BB_ENABLE_LINK_PREVIEWS=true
+export BB_MAX_PREVIEWS_PER_MESSAGE=2
+export BB_PREVIEW_PROXY_URL=""
+export BB_OEMBED_ENDPOINT="https://noembed.com/embed"
 ```
 
 ---
@@ -52,7 +69,57 @@ chat_limit: 50
 ```bash
 go build -o bluebubbles-tui .            # terminal UI
 go build -o bluebubbles-gui ./cmd/gui/  # windowed GUI
+go build -o bluebubbles-preview-proxy ./cmd/preview-proxy/ # local preview proxy
 ```
+
+### Preview Proxy (optional, recommended for IG/FB stability)
+
+Run the internal proxy service:
+
+```bash
+./bluebubbles-preview-proxy
+```
+
+Default endpoint is `http://127.0.0.1:8090/preview?url=...`.
+
+Point the GUI client to it:
+
+```bash
+export BB_PREVIEW_PROXY_URL="http://127.0.0.1:8090/preview"
+```
+
+Optional proxy env vars:
+
+```bash
+export PREVIEW_PROXY_ADDR="127.0.0.1:8090"
+export PREVIEW_OEMBED_ENDPOINT="https://noembed.com/embed"
+export PREVIEW_TIMEOUT_SEC=8
+export PREVIEW_CACHE_TTL_SEC=21600
+```
+
+### Autostart With systemd (user)
+
+A ready-to-use user service file is included at:
+
+`systemd/bluebubbles-preview-proxy.service`
+
+Install and enable it:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp /home/stefan/Code/bluebubbles-tui/systemd/bluebubbles-preview-proxy.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now bluebubbles-preview-proxy.service
+systemctl --user status bluebubbles-preview-proxy.service
+```
+
+Make sure the GUI points to the local proxy:
+
+```bash
+export BB_PREVIEW_PROXY_URL="http://127.0.0.1:8090/preview"
+```
+
+If your repo path differs, edit `ExecStart` and `WorkingDirectory` in the service file.
 
 ---
 
@@ -131,7 +198,7 @@ Up to 8 panes can be open at once. Click in a pane's input field to focus it, th
 
 Click `X` at the right side of the top menu bar to hide it. When hidden, use the `Menu` button (top-left) or `Ctrl+M` to show it again.
 
-Reply to a specific message by clicking the `↩` button on that message. A reply preview appears above the input; send to post a quoted reply, or click `X` on the preview to cancel.
+Reply to a specific message by clicking the `↩` button on that message. A reply preview appears above the input; send to post a native iMessage reply (threaded), or click `X` on the preview to cancel.
 
 ### Desktop Launcher
 
@@ -188,6 +255,8 @@ All appearance settings live under **View** in the menu bar:
 | Bold: Off/On | Toggle bold weight for all text |
 | Font → | Submenu listing installed font families |
 | Switch to Light/Dark Mode | Toggle between dark and light theme |
+| Disable/Enable Previews | Toggle URL preview fetching |
+| Max Previews: 1 / 2 | Limit preview cards per message for performance |
 
 Changes apply instantly without restarting.
 

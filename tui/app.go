@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bluebubbles-tui/api"
 	"github.com/bluebubbles-tui/models"
 	"github.com/bluebubbles-tui/ws"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type focusRegion int
@@ -21,17 +21,17 @@ const (
 
 // Message types for Bubble Tea
 type (
-	chatsLoadedMsg      []models.Chat
-	messagesLoadedMsg   struct {
+	chatsLoadedMsg    []models.Chat
+	messagesLoadedMsg struct {
 		chatGUID string
 		messages []models.Message
 	}
 	sendSuccessMsg      struct{ windowID WindowID }
-	sendErrMsg          error
+	sendErrMsg          struct{ err error }
 	wsEventMsg          models.WSEvent
 	wsConnectSuccessMsg struct{}
-	wsConnectFailMsg    error
-	errMsg              error
+	wsConnectFailMsg    struct{ err error }
+	errMsg              struct{ err error }
 )
 
 type AppModel struct {
@@ -65,13 +65,13 @@ type AppModel struct {
 
 func NewAppModel(client *api.Client, wsClient *ws.Client) AppModel {
 	return AppModel{
-		chatList:      NewChatListModel(),
-		windowManager: NewWindowManager(),
-		apiClient:     client,
-		wsClient:      wsClient,
-		focused:       focusChatList,
-		width:         80,
-		height:        24,
+		chatList:       NewChatListModel(),
+		windowManager:  NewWindowManager(),
+		apiClient:      client,
+		wsClient:       wsClient,
+		focused:        focusChatList,
+		width:          80,
+		height:         24,
 		showTimestamps: true,
 		showChatList:   true,
 	}
@@ -155,7 +155,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case sendErrMsg:
-		m.err = msg
+		m.err = msg.err
 		return m, nil
 
 	case wsConnectSuccessMsg:
@@ -163,14 +163,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForWSEventCmd(m.wsClient)
 
 	case wsConnectFailMsg:
-		m.err = msg
+		m.err = msg.err
 		return m, nil
 
 	case wsEventMsg:
 		return m.handleWSEvent(models.WSEvent(msg))
 
 	case errMsg:
-		m.err = msg
+		m.err = msg.err
 		return m, nil
 
 	case tea.MouseMsg:
@@ -452,7 +452,7 @@ func loadChatsCmd(client *api.Client) tea.Cmd {
 	return func() tea.Msg {
 		chats, err := client.GetChats(50)
 		if err != nil {
-			return errMsg(fmt.Errorf("failed to load chats: %v", err))
+			return errMsg{err: fmt.Errorf("failed to load chats: %v", err)}
 		}
 		return chatsLoadedMsg(chats)
 	}
@@ -462,7 +462,7 @@ func loadMessagesCmd(client *api.Client, chatGUID string, windowID WindowID) tea
 	return func() tea.Msg {
 		messages, err := client.GetMessages(chatGUID, 50)
 		if err != nil {
-			return errMsg(fmt.Errorf("failed to load messages: %v", err))
+			return errMsg{err: fmt.Errorf("failed to load messages: %v", err)}
 		}
 		return messagesLoadedMsg{chatGUID: chatGUID, messages: messages}
 	}
@@ -470,8 +470,8 @@ func loadMessagesCmd(client *api.Client, chatGUID string, windowID WindowID) tea
 
 func sendMessageCmd(client *api.Client, chatGUID, text string, windowID WindowID) tea.Cmd {
 	return func() tea.Msg {
-		if err := client.SendMessage(chatGUID, text); err != nil {
-			return sendErrMsg(err)
+		if err := client.SendMessage(chatGUID, text, ""); err != nil {
+			return sendErrMsg{err: err}
 		}
 		return sendSuccessMsg{windowID: windowID}
 	}
@@ -480,7 +480,7 @@ func sendMessageCmd(client *api.Client, chatGUID, text string, windowID WindowID
 func connectWSCmd(wsClient *ws.Client) tea.Cmd {
 	return func() tea.Msg {
 		if err := wsClient.Connect(); err != nil {
-			return wsConnectFailMsg(fmt.Errorf("websocket connection failed: %v", err))
+			return wsConnectFailMsg{err: fmt.Errorf("websocket connection failed: %v", err)}
 		}
 		return wsConnectSuccessMsg{}
 	}
@@ -490,7 +490,7 @@ func waitForWSEventCmd(wsClient *ws.Client) tea.Cmd {
 	return func() tea.Msg {
 		event, ok := <-wsClient.Events
 		if !ok {
-			return errMsg(fmt.Errorf("websocket connection closed"))
+			return errMsg{err: fmt.Errorf("websocket connection closed")}
 		}
 		return wsEventMsg(event)
 	}

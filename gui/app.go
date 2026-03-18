@@ -2,7 +2,6 @@ package gui
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"sort"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	"github.com/bluebubbles-tui/api"
+	"github.com/bluebubbles-tui/config"
 	"github.com/bluebubbles-tui/models"
 	"github.com/bluebubbles-tui/ws"
 )
@@ -36,16 +36,31 @@ type App struct {
 	showChatList  bool
 	showTopBar    bool
 
+	linkPreviewsEnabled bool
+	maxLinkPreviews     int
+
 	mu       sync.Mutex
 	msgCache map[string][]models.Message
 }
 
 // NewApp creates a new GUI application using the given API and WebSocket clients.
-func NewApp(apiClient *api.Client, wsClient *ws.Client) *App {
+func NewApp(apiClient *api.Client, wsClient *ws.Client, cfg *config.Config) *App {
+	enablePreviews := true
+	maxPreviews := 2
+	if cfg != nil {
+		enablePreviews = cfg.EnableLinkPreviews
+		maxPreviews = cfg.MaxPreviewsPerMessage
+	}
+	if maxPreviews < 0 {
+		maxPreviews = 0
+	}
+
 	return &App{
-		apiClient: apiClient,
-		wsClient:  wsClient,
-		msgCache:  make(map[string][]models.Message),
+		apiClient:           apiClient,
+		wsClient:            wsClient,
+		msgCache:            make(map[string][]models.Message),
+		linkPreviewsEnabled: enablePreviews,
+		maxLinkPreviews:     maxPreviews,
 	}
 }
 
@@ -57,6 +72,11 @@ func (a *App) Run() {
 
 	a.win = a.fyneApp.NewWindow("BlueBubbles")
 	a.win.Resize(fyne.NewSize(960, 640))
+	a.win.SetMainMenu(a.buildMainMenu())
+
+	setLinkPreviewEnabled(a.linkPreviewsEnabled)
+	setMaxLinkPreviewsPerMessage(a.maxLinkPreviews)
+	setLinkPreviewFetcherFromAPI(a.apiClient)
 
 	a.chatListComp = NewChatList(func(chat *models.Chat) {
 		a.selectChat(chat)
@@ -76,6 +96,7 @@ func (a *App) Run() {
 	a.contentHolder = container.NewMax(a.split)
 	a.refreshTopBar()
 	a.win.SetContent(container.NewBorder(a.topBarHolder, nil, nil, nil, a.contentHolder))
+	a.focusFocusedPaneInput()
 
 	// Keyboard shortcuts ─────────────────────────────────────────────────
 	// Ctrl+H  split focused pane side by side (horizontal)
@@ -128,12 +149,22 @@ func (a *App) Run() {
 
 func (a *App) splitFocusedHorizontal() {
 	a.paneManager.SplitFocused(splitHorizontal)
+	a.focusFocusedPaneInput()
 	a.scrollAllPanes()
 }
 
 func (a *App) splitFocusedVertical() {
 	a.paneManager.SplitFocused(splitVertical)
+	a.focusFocusedPaneInput()
 	a.scrollAllPanes()
+}
+
+func (a *App) focusFocusedPaneInput() {
+	p := a.paneManager.FocusedPane()
+	if p == nil || a.win == nil {
+		return
+	}
+	p.FocusInput(a.win.Canvas())
 }
 
 func (a *App) closeFocusedPane() {
@@ -163,6 +194,68 @@ func (a *App) refreshTopBar() {
 		a.topBarHolder.Objects = []fyne.CanvasObject{a.buildShowToolbarButton()}
 	}
 	a.topBarHolder.Refresh()
+}
+
+func (a *App) refreshAllMessageViews() {
+	for _, p := range a.paneManager.AllPanes() {
+		msgs := append([]models.Message(nil), p.msgView.messages...)
+		p.msgView.SetMessages(msgs)
+	}
+}
+
+func (a *App) setLinkPreviewsEnabled(enabled bool) {
+	a.linkPreviewsEnabled = enabled
+	setLinkPreviewEnabled(enabled)
+	a.refreshAllMessageViews()
+	a.win.SetMainMenu(a.buildMainMenu())
+}
+
+func (a *App) setMaxLinkPreviews(max int) {
+	if max < 0 {
+		max = 0
+	}
+	a.maxLinkPreviews = max
+	setMaxLinkPreviewsPerMessage(max)
+	a.refreshAllMessageViews()
+	a.win.SetMainMenu(a.buildMainMenu())
+}
+
+func (a *App) buildMainMenu() *fyne.MainMenu {
+	previewLabel := "Disable Previews"
+	if !a.linkPreviewsEnabled {
+		previewLabel = "Enable Previews"
+	}
+
+	viewMenu := fyne.NewMenu("View",
+		fyne.NewMenuItem("A+ Larger", func() {
+			if a.appTheme.fontSize < 20 {
+				a.appTheme.fontSize++
+				a.fyneApp.Settings().SetTheme(a.appTheme)
+			}
+		}),
+		fyne.NewMenuItem("A- Smaller", func() {
+			if a.appTheme.fontSize > 8 {
+				a.appTheme.fontSize--
+				a.fyneApp.Settings().SetTheme(a.appTheme)
+			}
+		}),
+		fyne.NewMenuItem("Toggle Bold", func() {
+			a.appTheme.boldAll = !a.appTheme.boldAll
+			a.fyneApp.Settings().SetTheme(a.appTheme)
+		}),
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem(previewLabel, func() {
+			a.setLinkPreviewsEnabled(!a.linkPreviewsEnabled)
+		}),
+		fyne.NewMenuItem("Max Previews: 1", func() {
+			a.setMaxLinkPreviews(1)
+		}),
+		fyne.NewMenuItem("Max Previews: 2", func() {
+			a.setMaxLinkPreviews(2)
+		}),
+	)
+
+	return fyne.NewMainMenu(viewMenu)
 }
 
 func (a *App) handleInputShortcut(shortcut fyne.Shortcut) bool {
@@ -262,19 +355,13 @@ func (a *App) sendMessageFromPane(pane *ChatPane, text string, replyTo *models.M
 		return
 	}
 
-	payload := text
+	replyToGUID := ""
 	if replyTo != nil {
-		sender := messageSenderName(*replyTo)
-		quoted := strings.ReplaceAll(strings.TrimSpace(replyTo.Text), "\n", " ")
-		quoted = truncateString(quoted, 140)
-		if quoted == "" {
-			quoted = "(message without text)"
-		}
-		payload = fmt.Sprintf("> %s: %s\n%s", sender, quoted, text)
+		replyToGUID = replyTo.GUID
 	}
 
 	go func() {
-		if err := a.apiClient.SendMessage(chatGUID, payload); err != nil {
+		if err := a.apiClient.SendMessage(chatGUID, text, replyToGUID); err != nil {
 			log.Printf("[GUI] SendMessage error: %v", err)
 			return
 		}

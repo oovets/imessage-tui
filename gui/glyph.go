@@ -8,16 +8,29 @@ import (
 // glyphAction is a flat clickable text glyph (no button chrome/background).
 type glyphAction struct {
 	widget.Label
-	onTap func()
+	onTap      func()
+	emphasized bool
 }
 
 func newGlyphAction(text string, onTap func()) *glyphAction {
 	g := &glyphAction{onTap: onTap}
 	g.SetText(text)
 	g.Alignment = fyne.TextAlignCenter
-	g.TextStyle = fyne.TextStyle{Bold: true}
+	g.TextStyle = fyne.TextStyle{}
+	g.SetEmphasis(false)
 	g.ExtendBaseWidget(g)
 	return g
+}
+
+func (g *glyphAction) SetEmphasis(on bool) {
+	g.emphasized = on
+	if g.emphasized {
+		// Match normal message text color when active/hovered.
+		g.Importance = widget.MediumImportance
+	} else {
+		g.Importance = widget.LowImportance
+	}
+	g.Refresh()
 }
 
 func (g *glyphAction) Tapped(_ *fyne.PointEvent) {

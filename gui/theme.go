@@ -179,6 +179,22 @@ func (t *compactTheme) base() fyne.Theme {
 }
 
 func (t *compactTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	if t.dark {
+		switch name {
+		case theme.ColorNameBackground:
+			// Match Alacritty theme background (Tokyo Night): #1a1b26.
+			return color.NRGBA{R: 26, G: 27, B: 38, A: 255}
+		case theme.ColorNameInputBackground:
+			// Slightly lighter companion tone for input fields.
+			return color.NRGBA{R: 36, G: 40, B: 59, A: 255}
+		case theme.ColorNameForeground:
+			// Match Alacritty theme foreground (Tokyo Night): #a9b1d6.
+			return color.NRGBA{R: 169, G: 177, B: 214, A: 255}
+		case theme.ColorNameSuccess:
+			// Keep "from me" messages distinct, but less saturated than default green.
+			return color.NRGBA{R: 148, G: 166, B: 150, A: 255}
+		}
+	}
 	if !t.dark && name == theme.ColorNameSuccess {
 		return color.NRGBA{R: 140, G: 140, B: 140, A: 255}
 	}

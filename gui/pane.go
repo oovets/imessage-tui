@@ -51,3 +51,8 @@ func (p *ChatPane) IsInputFocused() bool {
 func (p *ChatPane) ClearReplyTarget() {
 	p.inputArea.ClearReplyTarget()
 }
+
+// FocusInput requests keyboard focus for this pane's message entry.
+func (p *ChatPane) FocusInput(c fyne.Canvas) {
+	p.inputArea.FocusEntry(c)
+}

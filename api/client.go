@@ -19,10 +19,12 @@ import (
 )
 
 type Client struct {
-	baseURL      string
-	password     string
-	httpClient   *http.Client
-	contactCache map[string]string // Cached contact map to avoid repeated fetches
+	baseURL         string
+	password        string
+	httpClient      *http.Client
+	contactCache    map[string]string // Cached contact map to avoid repeated fetches
+	previewProxyURL string
+	oembedEndpoint  string
 }
 
 func NewClient(baseURL, password string) *Client {
@@ -37,10 +39,11 @@ func NewClient(baseURL, password string) *Client {
 	}
 
 	return &Client{
-		baseURL:      strings.TrimRight(baseURL, "/"),
-		password:     password,
-		httpClient:   httpClient,
-		contactCache: make(map[string]string),
+		baseURL:        strings.TrimRight(baseURL, "/"),
+		password:       password,
+		httpClient:     httpClient,
+		contactCache:   make(map[string]string),
+		oembedEndpoint: "https://noembed.com/embed",
 	}
 }
 
@@ -146,10 +149,10 @@ func (c *Client) GetChats(limit int) ([]models.Chat, error) {
 
 	// Use goroutines to fetch messages in parallel
 	type activityResult struct {
-		index       int
-		lastMsgTime int64
+		index        int
+		lastMsgTime  int64
 		messageCount int
-		messageText string
+		messageText  string
 	}
 	resultsChan := make(chan activityResult, len(chats))
 
@@ -165,12 +168,12 @@ func (c *Client) GetChats(limit int) ([]models.Chat, error) {
 			msgs, err := c.GetMessages(chatGUID, 1)
 			result := activityResult{index: idx}
 			if err != nil {
-				} else if len(msgs) == 0 {
-				} else {
+			} else if len(msgs) == 0 {
+			} else {
 				result.lastMsgTime = msgs[0].DateCreated
 				result.messageCount = 1
 				result.messageText = msgs[0].Text
-				}
+			}
 			resultsChan <- result
 		}(i, chat.GUID)
 	}
@@ -183,9 +186,9 @@ func (c *Client) GetChats(limit int) ([]models.Chat, error) {
 		chatActivities[result.index].messageCount = result.messageCount
 		chatActivities[result.index].chat.LastMessageText = result.messageText
 
-			if result.messageText != "" {
-			} else {
-			}
+		if result.messageText != "" {
+		} else {
+		}
 	}
 
 	// Sort by last message time (descending - newest first)
@@ -285,8 +288,8 @@ func (c *Client) GetMessages(chatGUID string, limit int) ([]models.Message, erro
 	return messages, nil
 }
 
-// SendMessage posts a new iMessage
-func (c *Client) SendMessage(chatGUID, text string) error {
+// SendMessage posts a new iMessage. If replyToGUID is set, it sends a native iMessage reply.
+func (c *Client) SendMessage(chatGUID, text, replyToGUID string) error {
 	u, err := url.Parse(fmt.Sprintf("%s/api/v1/message/text", c.baseURL))
 	if err != nil {
 		return err
@@ -296,11 +299,17 @@ func (c *Client) SendMessage(chatGUID, text string) error {
 	q.Set("guid", c.password)
 	u.RawQuery = q.Encode()
 
-	payload := map[string]string{
+	payload := map[string]interface{}{
 		"chatGuid": chatGUID,
 		"message":  text,
 		"method":   "apple-script",
 		"tempGuid": uuid.New().String(),
+	}
+	if strings.TrimSpace(replyToGUID) != "" {
+		payload["selectedMessageGuid"] = replyToGUID
+		payload["partIndex"] = 0
+		// selectedMessageGuid implies private-api on the server validator.
+		payload["method"] = "private-api"
 	}
 
 	body, err := json.Marshal(payload)
@@ -378,8 +387,8 @@ func (c *Client) GetContacts() (map[string]string, error) {
 
 	// BlueBubbles contacts have a different structure than Handle
 	type ContactResponse struct {
-		DisplayName   string `json:"displayName"`
-		PhoneNumbers  []struct {
+		DisplayName  string `json:"displayName"`
+		PhoneNumbers []struct {
 			Address string `json:"address"`
 		} `json:"phoneNumbers"`
 	}

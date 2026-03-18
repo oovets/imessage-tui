@@ -33,6 +33,8 @@ func main() {
 	log.Printf("Connecting to %s", cfg.ServerURL)
 
 	apiClient := api.NewClient(cfg.ServerURL, cfg.Password)
+	apiClient.SetPreviewProxyURL(cfg.PreviewProxyURL)
+	apiClient.SetOEmbedEndpoint(cfg.OEmbedEndpoint)
 	if err := apiClient.Ping(); err != nil {
 		log.Fatalf("Failed to connect to BlueBubbles server: %v", err)
 	}
@@ -41,5 +43,5 @@ func main() {
 
 	wsClient := ws.NewClient(cfg.ServerURL, cfg.Password)
 
-	gui.NewApp(apiClient, wsClient).Run()
+	gui.NewApp(apiClient, wsClient, cfg).Run()
 }

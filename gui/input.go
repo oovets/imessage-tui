@@ -68,6 +68,7 @@ func NewInputArea(onSend func(string, *models.Message), onFocused func()) *Input
 	}
 	ia.replyLabel = widget.NewLabel("")
 	ia.replyLabel.Wrapping = fyne.TextWrapWord
+	ia.replyLabel.Importance = widget.LowImportance
 	ia.replyHolder = container.NewMax()
 
 	ia.sendBtn = widget.NewButton("Send", func() {
@@ -88,6 +89,7 @@ func NewInputAreaWithShortcutHandler(onSend func(string, *models.Message), onFoc
 	}
 	ia.replyLabel = widget.NewLabel("")
 	ia.replyLabel.Wrapping = fyne.TextWrapWord
+	ia.replyLabel.Importance = widget.LowImportance
 	ia.replyHolder = container.NewMax()
 
 	ia.sendBtn = widget.NewButton("Send", func() {
@@ -109,12 +111,20 @@ func (ia *InputArea) IsEntryFocused() bool {
 	return ia.entry.IsFocused()
 }
 
+// FocusEntry requests keyboard focus for the input entry.
+func (ia *InputArea) FocusEntry(c fyne.Canvas) {
+	if c == nil {
+		return
+	}
+	c.Focus(ia.entry)
+}
+
 // SetReplyTarget enables reply mode for the next sent message.
 func (ia *InputArea) SetReplyTarget(msg models.Message) {
 	reply := msg
 	ia.replyTarget = &reply
 	ia.replyLabel.SetText("Replying to: " + truncateString(stripEmojis(msg.Text), 80))
-	cancelBtn := newGlyphAction("x", func() {
+	cancelBtn := newGlyphAction("×", func() {
 		ia.ClearReplyTarget()
 	})
 	ia.replyHolder.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, nil, cancelBtn, ia.replyLabel)}
