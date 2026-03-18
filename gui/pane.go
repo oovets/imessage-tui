@@ -1,7 +1,10 @@
 package gui
 
 import (
+	"image/color"
+
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"github.com/bluebubbles-tui/models"
 )
@@ -30,7 +33,10 @@ func newChatPane(onSend func(*ChatPane, string, *models.Message), onFocused func
 		func() { onFocused(p) },
 		onInputShortcut,
 	)
-	p.widget = container.NewBorder(nil, p.inputArea.Widget(), nil, nil, p.msgView.Widget())
+	gap := canvas.NewRectangle(color.Transparent)
+	gap.SetMinSize(fyne.NewSize(1, 12)) // one row-like visual gap above input
+	inputWithGap := container.NewVBox(gap, p.inputArea.Widget())
+	p.widget = container.NewBorder(nil, inputWithGap, nil, nil, p.msgView.Widget())
 	return p
 }
 

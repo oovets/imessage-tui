@@ -11,7 +11,6 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	"github.com/bluebubbles-tui/api"
 	"github.com/bluebubbles-tui/config"
@@ -30,17 +29,42 @@ type App struct {
 
 	chatListComp  *ChatList
 	paneManager   *PaneManager
-	split         *container.Split
-	topBarHolder  *fyne.Container
+	chatListPane  *fixedWidthWrap
 	contentHolder *fyne.Container
 	showChatList  bool
-	showTopBar    bool
 
 	linkPreviewsEnabled bool
 	maxLinkPreviews     int
 
 	mu       sync.Mutex
 	msgCache map[string][]models.Message
+}
+
+const fixedChatListWidth = float32(105)
+
+type fixedWidthWrap struct {
+	widget.BaseWidget
+	child fyne.CanvasObject
+	width float32
+}
+
+func newFixedWidthWrap(child fyne.CanvasObject, width float32) *fixedWidthWrap {
+	w := &fixedWidthWrap{child: child, width: width}
+	w.ExtendBaseWidget(w)
+	return w
+}
+
+func (w *fixedWidthWrap) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(w.child)
+}
+
+func (w *fixedWidthWrap) MinSize() fyne.Size {
+	return fyne.NewSize(w.width, w.child.MinSize().Height)
+}
+
+func (w *fixedWidthWrap) SetWidth(width float32) {
+	w.width = width
+	w.Refresh()
 }
 
 // NewApp creates a new GUI application using the given API and WebSocket clients.
@@ -81,6 +105,7 @@ func (a *App) Run() {
 	a.chatListComp = NewChatList(func(chat *models.Chat) {
 		a.selectChat(chat)
 	})
+	a.chatListPane = newFixedWidthWrap(a.chatListComp.Widget(), fixedChatListWidth)
 
 	a.paneManager = NewPaneManager(
 		func(pane *ChatPane, text string, replyTo *models.Message) { a.sendMessageFromPane(pane, text, replyTo) },
@@ -88,14 +113,9 @@ func (a *App) Run() {
 		a.handleInputShortcut,
 	)
 
-	a.split = container.NewHSplit(a.chatListComp.Widget(), a.paneManager.Widget())
-	a.split.SetOffset(0.25)
 	a.showChatList = true
-	a.showTopBar = true
-	a.topBarHolder = container.NewMax()
-	a.contentHolder = container.NewMax(a.split)
-	a.refreshTopBar()
-	a.win.SetContent(container.NewBorder(a.topBarHolder, nil, nil, nil, a.contentHolder))
+	a.contentHolder = container.NewMax(a.mainContent())
+	a.win.SetContent(a.contentHolder)
 	a.focusFocusedPaneInput()
 
 	// Keyboard shortcuts ─────────────────────────────────────────────────
@@ -133,14 +153,6 @@ func (a *App) Run() {
 	}, func(_ fyne.Shortcut) {
 		a.toggleChatListVisibility()
 	})
-	// Ctrl+M  toggle top menu bar visibility
-	c.AddShortcut(&desktop.CustomShortcut{
-		KeyName:  fyne.KeyName("M"),
-		Modifier: fyne.KeyModifierControl,
-	}, func(_ fyne.Shortcut) {
-		a.setTopBarVisible(!a.showTopBar)
-	})
-
 	go a.loadChats()
 	go a.runWebSocket()
 
@@ -174,26 +186,26 @@ func (a *App) closeFocusedPane() {
 
 func (a *App) toggleChatListVisibility() {
 	a.showChatList = !a.showChatList
-	if a.showChatList {
-		a.contentHolder.Objects = []fyne.CanvasObject{a.split}
-	} else {
-		a.contentHolder.Objects = []fyne.CanvasObject{a.paneManager.Widget()}
-	}
+	a.contentHolder.Objects = []fyne.CanvasObject{a.mainContent()}
 	a.contentHolder.Refresh()
 }
 
-func (a *App) setTopBarVisible(visible bool) {
-	a.showTopBar = visible
-	a.refreshTopBar()
+func (a *App) mainContent() fyne.CanvasObject {
+	if !a.showChatList {
+		return a.paneManager.Widget()
+	}
+	return container.NewBorder(nil, nil, a.chatListPane, nil, a.paneManager.Widget())
 }
 
-func (a *App) refreshTopBar() {
-	if a.showTopBar {
-		a.topBarHolder.Objects = []fyne.CanvasObject{a.buildToolbar()}
-	} else {
-		a.topBarHolder.Objects = []fyne.CanvasObject{a.buildShowToolbarButton()}
+func (a *App) refreshChatListWidth() {
+	if a.chatListPane == nil {
+		return
 	}
-	a.topBarHolder.Refresh()
+	a.chatListPane.SetWidth(fixedChatListWidth)
+	if a.showChatList {
+		a.contentHolder.Objects = []fyne.CanvasObject{a.mainContent()}
+		a.contentHolder.Refresh()
+	}
 }
 
 func (a *App) refreshAllMessageViews() {
@@ -220,10 +232,24 @@ func (a *App) setMaxLinkPreviews(max int) {
 	a.win.SetMainMenu(a.buildMainMenu())
 }
 
+func (a *App) setDarkMode(enabled bool) {
+	if a.appTheme == nil {
+		return
+	}
+	a.appTheme.dark = enabled
+	a.fyneApp.Settings().SetTheme(a.appTheme)
+	a.win.SetMainMenu(a.buildMainMenu())
+}
+
 func (a *App) buildMainMenu() *fyne.MainMenu {
 	previewLabel := "Disable Previews"
 	if !a.linkPreviewsEnabled {
 		previewLabel = "Enable Previews"
+	}
+
+	colorModeLabel := "Switch to Light Mode"
+	if !a.appTheme.dark {
+		colorModeLabel = "Switch to Dark Mode"
 	}
 
 	viewMenu := fyne.NewMenu("View",
@@ -231,17 +257,22 @@ func (a *App) buildMainMenu() *fyne.MainMenu {
 			if a.appTheme.fontSize < 20 {
 				a.appTheme.fontSize++
 				a.fyneApp.Settings().SetTheme(a.appTheme)
+				a.refreshChatListWidth()
 			}
 		}),
 		fyne.NewMenuItem("A- Smaller", func() {
 			if a.appTheme.fontSize > 8 {
 				a.appTheme.fontSize--
 				a.fyneApp.Settings().SetTheme(a.appTheme)
+				a.refreshChatListWidth()
 			}
 		}),
 		fyne.NewMenuItem("Toggle Bold", func() {
 			a.appTheme.boldAll = !a.appTheme.boldAll
 			a.fyneApp.Settings().SetTheme(a.appTheme)
+		}),
+		fyne.NewMenuItem(colorModeLabel, func() {
+			a.setDarkMode(!a.appTheme.dark)
 		}),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem(previewLabel, func() {
@@ -277,9 +308,6 @@ func (a *App) handleInputShortcut(shortcut fyne.Shortcut) bool {
 		return true
 	case fyne.KeyName("S"):
 		a.toggleChatListVisibility()
-		return true
-	case fyne.KeyName("M"):
-		a.setTopBarVisible(!a.showTopBar)
 		return true
 	default:
 		return false
@@ -424,78 +452,6 @@ func (a *App) scrollAllPanes() {
 	for _, p := range a.paneManager.AllPanes() {
 		p.msgView.ScrollToBottom()
 	}
-}
-
-// buildToolbar builds the top toolbar.
-func (a *App) buildToolbar() fyne.CanvasObject {
-	smaller := widget.NewButton("A-", func() {
-		if a.appTheme.fontSize > 8 {
-			a.appTheme.fontSize--
-			a.fyneApp.Settings().SetTheme(a.appTheme)
-		}
-	})
-	larger := widget.NewButton("A+", func() {
-		if a.appTheme.fontSize < 20 {
-			a.appTheme.fontSize++
-			a.fyneApp.Settings().SetTheme(a.appTheme)
-		}
-	})
-
-	var boldBtn *widget.Button
-	boldBtn = widget.NewButton("B", func() {
-		a.appTheme.boldAll = !a.appTheme.boldAll
-		if a.appTheme.boldAll {
-			boldBtn.Importance = widget.HighImportance
-		} else {
-			boldBtn.Importance = widget.MediumImportance
-		}
-		boldBtn.Refresh()
-		a.fyneApp.Settings().SetTheme(a.appTheme)
-	})
-	boldBtn.Importance = widget.MediumImportance
-
-	families := a.appTheme.availableFamilies()
-	fontSelect := widget.NewSelect(families, func(name string) {
-		a.appTheme.curFamily = name
-		a.fyneApp.Settings().SetTheme(a.appTheme)
-	})
-	fontSelect.Selected = a.appTheme.curFamily
-
-	var modeBtn *widget.Button
-	modeBtnLabel := func() string {
-		if a.appTheme.dark {
-			return "Light"
-		}
-		return "Dark"
-	}
-	modeBtn = widget.NewButton(modeBtnLabel(), func() {
-		a.appTheme.dark = !a.appTheme.dark
-		modeBtn.SetText(modeBtnLabel())
-		a.fyneApp.Settings().SetTheme(a.appTheme)
-	})
-
-	hideBtn := widget.NewButton("X", func() {
-		a.setTopBarVisible(false)
-	})
-
-	return container.NewHBox(
-		smaller,
-		larger,
-		boldBtn,
-		widget.NewSeparator(),
-		fontSelect,
-		widget.NewSeparator(),
-		modeBtn,
-		layout.NewSpacer(),
-		hideBtn,
-	)
-}
-
-func (a *App) buildShowToolbarButton() fyne.CanvasObject {
-	showBtn := widget.NewButton("Menu", func() {
-		a.setTopBarVisible(true)
-	})
-	return container.NewHBox(showBtn, layout.NewSpacer())
 }
 
 // handleWSEvent processes a single WebSocket event. Called from the WS goroutine.

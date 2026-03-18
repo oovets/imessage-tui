@@ -192,11 +192,8 @@ Logs to `~/.bluebubbles-gui.log`.
 | `Ctrl+J` | Split focused pane top/bottom |
 | `Ctrl+W` | Close focused pane |
 | `Ctrl+S` | Toggle chat list visibility |
-| `Ctrl+M` | Toggle top menu bar |
 
 Up to 8 panes can be open at once. Click in a pane's input field to focus it, then select a chat from the list to load it into that pane.
-
-Click `X` at the right side of the top menu bar to hide it. When hidden, use the `Menu` button (top-left) or `Ctrl+M` to show it again.
 
 Reply to a specific message by clicking the `↩` button on that message. A reply preview appears above the input; send to post a native iMessage reply (threaded), or click `X` on the preview to cancel.
 

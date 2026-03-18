@@ -242,10 +242,21 @@ func (mv *MessageView) ScrollToBottom() {
 	}()
 }
 
+const groupingWindow = 5 * time.Minute
+
 func (mv *MessageView) rebuildVBox() {
 	mv.vbox.Objects = nil
-	for _, msg := range mv.messages {
-		mv.vbox.Add(buildMessageRow(msg, mv.onReply))
+	for i, msg := range mv.messages {
+		showSender := true
+		if i > 0 {
+			prev := mv.messages[i-1]
+			sameSender := messageSenderName(prev) == messageSenderName(msg)
+			closeInTime := msg.ParsedTime().Sub(prev.ParsedTime()) < groupingWindow
+			if sameSender && closeInTime {
+				showSender = false
+			}
+		}
+		mv.vbox.Add(buildMessageRow(msg, mv.onReply, showSender))
 	}
 	mv.vbox.Refresh()
 	mv.ScrollToBottom()
@@ -253,7 +264,7 @@ func (mv *MessageView) rebuildVBox() {
 
 func messageSenderName(msg models.Message) string {
 	if msg.IsFromMe {
-		return "You"
+		return "Stefan Larsson"
 	}
 	if msg.Handle != nil && msg.Handle.DisplayName != "" {
 		return stripEmojis(msg.Handle.DisplayName)
@@ -264,29 +275,34 @@ func messageSenderName(msg models.Message) string {
 	return "Unknown"
 }
 
-func buildMessageRow(msg models.Message, onReply func(models.Message)) fyne.CanvasObject {
+func buildMessageRow(msg models.Message, onReply func(models.Message), showSender bool) fyne.CanvasObject {
 	timeStr := formatHoverTimestamp(msg.ParsedTime())
 	senderName := messageSenderName(msg)
 
-	sender := canvas.NewText(senderName, senderNameColor(senderName, msg.IsFromMe))
-	sender.TextStyle = fyne.TextStyle{Bold: true}
-
-	var senderRow fyne.CanvasObject
-	if msg.IsFromMe {
-		senderRow = container.NewHBox(layout.NewSpacer(), sender)
-	} else {
-		senderRow = container.NewHBox(sender, layout.NewSpacer())
+	var objs []fyne.CanvasObject
+	if showSender {
+		sender := canvas.NewText(senderName, senderNameColor(senderName, msg.IsFromMe))
+		sender.TextStyle = fyne.TextStyle{Bold: true}
+		var senderRow fyne.CanvasObject
+		if msg.IsFromMe {
+			senderRow = container.NewHBox(layout.NewSpacer(), sender)
+		} else {
+			senderRow = container.NewHBox(sender, layout.NewSpacer())
+		}
+		objs = []fyne.CanvasObject{senderRow}
 	}
-
-	objs := []fyne.CanvasObject{senderRow}
 	if strings.TrimSpace(msg.Text) != "" {
 		objs = append(objs, buildMessageContent(msg.Text, msg))
 		if previews := buildLinkPreviewRows(msg.Text, msg.IsFromMe); len(previews) > 0 {
-			objs = append(objs, previews...)
+			for _, p := range previews {
+				objs = append(objs, alignOutgoingRow(p, msg.IsFromMe))
+			}
 		}
 	}
 	if attachments := buildAttachmentRows(msg.Attachments); len(attachments) > 0 {
-		objs = append(objs, attachments...)
+		for _, a := range attachments {
+			objs = append(objs, alignOutgoingRow(a, msg.IsFromMe))
+		}
 	}
 	content := container.NewVBox(objs...)
 
@@ -294,6 +310,9 @@ func buildMessageRow(msg models.Message, onReply func(models.Message)) fyne.Canv
 	tsLabel.Importance = widget.LowImportance
 	tsLabel.Alignment = fyne.TextAlignLeading
 	tsLabel.Hide()
+	if msg.IsFromMe {
+		tsLabel = nil
+	}
 
 	rowMain := content
 	var replyBtn fyne.CanvasObject
@@ -303,10 +322,27 @@ func buildMessageRow(msg models.Message, onReply func(models.Message)) fyne.Canv
 		})
 		replyGlyph.SetEmphasis(false)
 		replyGlyph.Hide()
-		replyBtn = replyGlyph
+		if !msg.IsFromMe {
+			replyBtn = replyGlyph
+		}
 	}
 
-	return newHoverMessageRow(rowMain, replyBtn, tsLabel)
+	row := newHoverMessageRow(rowMain, replyBtn, tsLabel)
+	return applyMessageSideIndent(row, msg.IsFromMe)
+}
+
+func applyMessageSideIndent(row fyne.CanvasObject, isFromMe bool) fyne.CanvasObject {
+	const indentPx float32 = 24 // requested indentation
+	if isFromMe {
+		return container.NewBorder(nil, nil, nil, fixedWidthSpacer(indentPx), row)
+	}
+	return container.NewBorder(nil, nil, fixedWidthSpacer(indentPx), nil, row)
+}
+
+func fixedWidthSpacer(width float32) fyne.CanvasObject {
+	r := canvas.NewRectangle(color.Transparent)
+	r.SetMinSize(fyne.NewSize(width, 1))
+	return r
 }
 
 func buildMessageContent(body string, msg models.Message) fyne.CanvasObject {
@@ -335,9 +371,9 @@ func buildMessageContent(body string, msg models.Message) fyne.CanvasObject {
 
 		raw := body[m[0]:m[1]]
 		linkText, trailing := splitLinkTrailing(raw)
-		linkURL, linkLabel, ok := normalizeLinkToken(linkText)
+		_, _, ok := normalizeLinkToken(linkText)
 		if ok {
-			segments = append(segments, &widget.HyperlinkSegment{Text: linkLabel, URL: linkURL})
+			// Hide raw URL tokens in chat text; preview cards render the clickable link.
 		} else {
 			segments = append(segments, &widget.TextSegment{Text: raw})
 			last = m[1]
@@ -354,9 +390,28 @@ func buildMessageContent(body string, msg models.Message) fyne.CanvasObject {
 		segments = append(segments, &widget.TextSegment{Text: body[last:]})
 	}
 
+	if len(segments) == 0 {
+		return widget.NewLabel("")
+	}
+
 	rich := widget.NewRichText(segments...)
 	rich.Wrapping = fyne.TextWrapWord
+	if msg.IsFromMe {
+		return rightAlignMessageContent(rich)
+	}
 	return rich
+}
+
+func rightAlignMessageContent(obj fyne.CanvasObject) fyne.CanvasObject {
+	// Keep outgoing content anchored to the right edge while allowing wraps on resize.
+	return container.NewBorder(nil, nil, layout.NewSpacer(), nil, obj)
+}
+
+func alignOutgoingRow(obj fyne.CanvasObject, isFromMe bool) fyne.CanvasObject {
+	if !isFromMe {
+		return obj
+	}
+	return rightAlignMessageContent(obj)
 }
 
 func senderNameColor(name string, isFromMe bool) color.Color {
@@ -487,7 +542,7 @@ func buildLinkPreviewCard(rawURL string) fyne.CanvasObject {
 	site := widget.NewLabel(parsed.Hostname())
 	site.Importance = widget.LowImportance
 
-	link := widget.NewHyperlink(rawURL, parsed)
+	link := widget.NewHyperlink("Open link", parsed)
 
 	card.Add(title)
 	card.Add(site)
