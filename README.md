@@ -1,57 +1,42 @@
-# BlueBubbles TUI - iMessage Terminal Client
+# BlueBubbles — iMessage Client
 
-A sleek, real-time terminal user interface (TUI) for BlueBubbles, allowing you to send and receive iMessages directly from your terminal.
+A real-time iMessage client for BlueBubbles with two frontends: a terminal UI (TUI) and a windowed GUI. Both share the same backend packages (`api/`, `ws/`, `models/`, `config/`) and produce separate binaries.
+
+---
 
 ## Features
 
 - Browse and read iMessage conversations with contact names
-- Send messages to any chat (press Enter)
-- Real-time message delivery via WebSocket (Socket.IO) with auto-reconnect
-- New message indicators - chats with unread messages are highlighted in red and moved to the top
-- Full keyboard navigation with Tab/Arrow keys
-- Contact name lookup - shows real names instead of phone numbers
-- Smart chat sorting by most recent activity
-- Toggle chat list visibility and message timestamps
+- Send messages (press Enter)
+- Real-time delivery via WebSocket (Socket.IO) with auto-reconnect
+- Unread indicators — chats with new messages are highlighted and moved to the top
+- Split-window layout — view multiple conversations side by side or stacked
+- Toggle chat list visibility
+
+---
 
 ## Prerequisites
 
 - Go 1.24+
 - BlueBubbles server running on macOS with iMessage synced
 - Network access to your BlueBubbles server (HTTP/HTTPS)
-- macOS contacts synced to BlueBubbles (for contact name display)
 
-## Dependencies
-
-The following Go packages are used (automatically installed with `go mod tidy`):
-
-- `github.com/charmbracelet/bubbletea` - TUI framework
-- `github.com/charmbracelet/bubbles` - UI components (list, textarea, viewport)
-- `github.com/charmbracelet/lipgloss` - Terminal styling
-- `github.com/gorilla/websocket` - WebSocket communication
-- `github.com/google/uuid` - UUID generation for message IDs
-- `github.com/tidwall/gjson` - JSON parsing
-
-## Installation
-
-```bash
-cd ~/bluebubbles-tui
-go build -o bluebubbles-tui .
-```
+---
 
 ## Configuration
 
-Set environment variables or create a config file:
+Set environment variables or create a config file.
 
-### Environment Variables (Easiest)
+### Environment Variables
 
 ```bash
 export BB_SERVER_URL="https://xxx.xxx.xxx.xxx:1234"
 export BB_PASSWORD="your-api-password"
 ```
 
-### Config File (Optional)
+### Config File (optional)
 
-Create `~/.config/bluebubbles-tui/bluebubbles.yaml`:
+`~/.config/bluebubbles-tui/bluebubbles.yaml`:
 
 ```yaml
 server_url: "https://xxx.xxx.xxx.xxx:1234"
@@ -60,11 +45,26 @@ message_limit: 50
 chat_limit: 50
 ```
 
-## Usage
+---
+
+## Building
+
+```bash
+go build -o bluebubbles-tui .            # terminal UI
+go build -o bluebubbles-gui ./cmd/gui/  # windowed GUI
+```
+
+---
+
+## TUI
+
+### Usage
 
 ```bash
 ./bluebubbles-tui
 ```
+
+Logs to `~/.bluebubbles-tui.log`.
 
 ### Keyboard Shortcuts
 
@@ -73,27 +73,25 @@ chat_limit: 50
 | Key | Action |
 |-----|--------|
 | `Tab` | Toggle focus between chat list and current window |
-| `Escape` | Return to chat list from any window |
-| `←` | Move to window on the left (or chat list if leftmost) |
-| `→` | Move to window on the right |
-| `Ctrl+↑` | Move to window above |
-| `Ctrl+↓` | Move to window below |
-| `↑` / `↓` or `k` / `j` | Navigate chat list / scroll messages |
-| `g` (chat list) | Jump to top of chat list |
-| `G` (chat list) | Jump to bottom of chat list |
-| `Enter` (chat list) | Open selected chat in the focused window |
+| `Escape` | Return to chat list |
+| `← / →` | Move between windows |
+| `Ctrl+↑ / Ctrl+↓` | Move to window above/below |
+| `↑ / ↓` or `k / j` | Navigate chat list / scroll messages |
+| `g` (chat list) | Jump to top |
+| `G` (chat list) | Jump to bottom |
+| `Enter` (chat list) | Open chat in focused window |
 | `Enter` (input) | Send message |
-| `Shift+Enter` (input) | New line in message |
+| `Shift+Enter` (input) | New line |
 
 #### Split Windows
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+F` | Split focused window horizontally (side by side) |
-| `Ctrl+G` | Split focused window vertically (stacked) |
+| `Ctrl+F` | Split focused window horizontally |
+| `Ctrl+G` | Split focused window vertically |
 | `Ctrl+W` | Close focused window |
 
-Up to 4 windows can be open simultaneously. Navigate to the chat list and press `Enter` to open a chat in whichever window is currently focused.
+Up to 4 windows can be open at once.
 
 #### Toggles
 
@@ -103,62 +101,167 @@ Up to 4 windows can be open simultaneously. Navigate to the chat list and press 
 | `Ctrl+T` | Toggle message timestamps |
 | `q` / `Ctrl+C` | Quit |
 
-## Architecture
+---
 
-- **models/types.go** - Data structures (Chat, Message, Handle)
-- **api/client.go** - REST API client for BlueBubbles server
-- **ws/client.go** - WebSocket client for real-time updates (Socket.IO)
-- **tui/app.go** - Main TUI model and orchestration
-- **tui/chatlist.go** - Chat list component
-- **tui/simplelist.go** - Custom scrollable list widget (no auto-centering)
-- **tui/messages.go** - Message thread viewport
-- **tui/input.go** - Message input box
-- **config/config.go** - Configuration loading
+## GUI
 
-## How It Works
+A windowed Fyne v2 app with a dark, compact theme. Designed to feel like the TUI but in a proper desktop window.
 
-1. **Contact Lookup**: Fetches all contacts from BlueBubbles and maps phone numbers to display names
-2. **Chat Loading**: Loads all chats and sorts them by most recent message activity
-3. **API Connection**: Connects to BlueBubbles REST API to fetch chats and messages with contact names enriched
-4. **WebSocket**: Attempts to establish real-time WebSocket connection (Socket.IO) for live updates
-5. **Message Sending**: Uses the `/api/v1/message/text` endpoint with Apple Script method and unique tempGuid
-6. **Real-time Updates**: Receives new messages via WebSocket with auto-reconnect; incoming messages for inactive chats are highlighted in red and moved to the top of the list
-7. **TUI Rendering**: Bubble Tea handles all terminal rendering and event loop
+### Usage
+
+```bash
+./bluebubbles-gui
+```
+
+Or launch from Walker / any app launcher (see [Desktop Launcher](#desktop-launcher)).
+
+Logs to `~/.bluebubbles-gui.log`.
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+H` | Split focused pane side by side |
+| `Ctrl+J` | Split focused pane top/bottom |
+| `Ctrl+W` | Close focused pane |
+| `Ctrl+S` | Toggle chat list visibility |
+
+Up to 4 panes can be open at once. Click in a pane's input field to focus it, then select a chat from the list to load it into that pane.
+
+### Desktop Launcher
+
+Create `~/.local/share/applications/bluebubbles-gui.desktop`:
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=BlueBubbles
+GenericName=iMessage Client
+Comment=iMessage via BlueBubbles relay
+Exec=env FYNE_SCALE=1.3 /home/stefan/Code/bluebubbles-tui/bluebubbles-gui
+Icon=internet-chat
+Terminal=false
+Categories=Network;Chat;InstantMessaging;
+Keywords=imessage;messages;chat;bluebubbles;
+StartupWMClass=BlueBubbles
+```
+
+`FYNE_SCALE=1.3` renders at 130% internal resolution. This is the recommended workaround for Fyne's grayscale font anti-aliasing on 1440p displays — it makes glyphs noticeably smoother without changing the perceived window size much.
+
+### Font (Lato)
+
+The theme loads Lato from `/usr/share/fonts/TTF/Lato-*.ttf` if available, with graceful fallback to Fyne's built-in sans-serif. Install on Arch:
+
+```bash
+sudo pacman -S ttf-lato
+```
+
+### View Menu
+
+All appearance settings live under **View** in the menu bar:
+
+| Item | Action |
+|------|--------|
+| A+ Larger | Increase font size (max 20) |
+| A- Smaller | Decrease font size (min 8) |
+| Bold: Off/On | Toggle bold weight for all text |
+| Font → | Submenu listing installed font families |
+| Switch to Light/Dark Mode | Toggle between dark and light theme |
+
+Changes apply instantly without restarting.
+
+### GUI Architecture
+
+```
+cmd/gui/main.go      — Entry point (config → ping → wsClient → gui.NewApp().Run())
+gui/app.go           — App struct, layout wiring, menu, WebSocket event loop
+gui/chatlist.go      — Left-side chat list (widget.List)
+gui/messages.go      — Message thread (VScroll + VBox of labels)
+gui/input.go         — Input area (Entry + Send button)
+gui/pane.go          — Single chat pane (messages + input)
+gui/panemanager.go   — Binary tree of panes, split/close logic
+gui/theme.go         — Mutable theme: dark/light, font size, font family, bold
+gui/util.go          — stripEmojis(), formatMessageTime(), truncateString()
+```
+
+### Fyne Themes
+
+Fyne's theming system is interface-based. Any type that implements `fyne.Theme` can be passed to `fyneApp.Settings().SetTheme()`. The interface has four methods:
+
+```go
+type Theme interface {
+    Color(name ThemeColorName, variant ThemeVariant) color.Color
+    Font(style TextStyle) Resource
+    Icon(name ThemeIconName) Resource
+    Size(name ThemeSizeName) float32
+}
+```
+
+Rather than embedding a base theme, `compactTheme` implements all four methods explicitly and delegates to a `base()` method that returns either `theme.DarkTheme()` or `theme.LightTheme()` depending on the `dark` field. This makes live switching between dark and light straightforward — just flip the field and call `Settings().SetTheme()` again.
+
+```go
+type compactTheme struct {
+    dark      bool
+    fontSize  float32
+    boldAll   bool
+    fonts     map[string]fontSet
+    curFamily string
+}
+
+func (t *compactTheme) base() fyne.Theme {
+    if t.dark { return theme.DarkTheme() }
+    return theme.LightTheme()
+}
+```
+
+Calling `Settings().SetTheme()` with a mutated instance of the same struct broadcasts a theme-change event to all widgets, causing an immediate full re-render.
+
+**`Font(style fyne.TextStyle) fyne.Resource`** — called every time Fyne renders text. The `boldAll` flag forces `style.Bold = true` before the font lookup, making every widget use its bold variant regardless of what style it requested.
+
+**`Size(name fyne.ThemeSizeName) float32`** — controls spacing and text size. Key names:
+
+| Constant | Affects |
+|---|---|
+| `theme.SizeNamePadding` | Outer padding around widgets |
+| `theme.SizeNameInnerPadding` | Inner padding (e.g. inside buttons) |
+| `theme.SizeNameText` | Body text size |
+| `theme.SizeNameSubHeadingText` | Sub-heading text size |
+| `theme.SizeNameScrollBar` | Scroll bar width (set to 0 to hide) |
+| `theme.SizeNameScrollBarSmall` | Scroll bar width when inactive (set to 0 to hide) |
+
+This app sets both scroll bar sizes to 0 — scrollbars are invisible but scroll still works via mouse wheel and touchpad.
+
+---
+
+## Architecture (shared backend)
+
+| Package | Purpose |
+|---|---|
+| `models/types.go` | Data structures (Chat, Message, Handle) |
+| `api/client.go` | REST API client for BlueBubbles server |
+| `ws/client.go` | WebSocket client for real-time updates (Socket.IO) |
+| `config/config.go` | Configuration loading |
+| `tui/` | Bubble Tea terminal UI |
+| `gui/` | Fyne windowed UI |
+
+---
 
 ## Troubleshooting
 
 ### Connection fails with "certificate signed by unknown authority"
-BlueBubbles uses self-signed HTTPS certificates. The client automatically skips TLS verification - this is expected.
+BlueBubbles uses self-signed HTTPS certificates. The client skips TLS verification — this is expected.
 
 ### Seeing phone numbers instead of contact names
-1. Ensure contacts are synced in your BlueBubbles server
-2. Check the web interface contacts: https://xxx.xxx.xxx.xxx:1234/web
-3. The client fetches contacts from BlueBubbles - if they're not there, names won't appear
-4. Try restarting BlueBubbles server
+Ensure contacts are synced in your BlueBubbles server. Check the web interface at your server URL. If contacts aren't there, names won't appear.
 
 ### No chats showing
-1. Ensure your BlueBubbles server has synced iMessages
-2. Check the web interface: https://xxx.xxx.xxx.xxx:1234
-3. Restart BlueBubbles if needed
-4. Verify credentials are correct
-5. Most active chats (with recent messages) will appear at the top
+Verify your BlueBubbles server has synced iMessages. Check credentials and restart BlueBubbles if needed.
 
 ### Message sending fails
-1. Verify you have an active chat selected (press Enter on a chat)
-2. Make sure the input box is focused (press Tab to navigate)
-3. Press Enter to send (not Ctrl+D)
-4. Check the log file (~/.bluebubbles-tui.log) for API errors
+Make sure a chat is selected and the input box is focused. Check the log file for API errors.
 
 ### Messages not updating in real-time
-1. WebSocket connection may have failed - check network/firewall rules
-2. Real-time updates require the WebSocket connection to be active
-3. Check firewall/network rules between this client and BlueBubbles server
+WebSocket connection may have failed. Check network/firewall rules between the client and BlueBubbles server.
 
-## Building from Source
-
-```bash
-export PATH="/usr/local/go/bin:$PATH"
-cd ~/bluebubbles-tui
-go mod tidy
-go build
-```
+### GUI fonts look jagged
+Use `FYNE_SCALE=1.3` (or higher) when launching. Fyne uses grayscale anti-aliasing only — sub-pixel rendering (ClearType) is not available. A higher scale renders glyphs at higher internal resolution, which reduces jaggedness at the cost of slightly larger UI elements.
