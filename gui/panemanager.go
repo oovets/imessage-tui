@@ -91,10 +91,11 @@ func (n *paneNode) remove(target *ChatPane) bool {
 // that holds the rendered split layout. All methods must be called from
 // the Fyne main goroutine.
 type PaneManager struct {
-	root     paneNode
-	focused  *ChatPane
-	holder   *fyne.Container
-	maxPanes int
+	root       paneNode
+	focused    *ChatPane
+	holder     *fyne.Container
+	maxPanes   int
+	appFocused bool
 
 	onSend          func(*ChatPane, string, *models.Message)
 	onFocused       func(*ChatPane)
@@ -102,7 +103,10 @@ type PaneManager struct {
 }
 
 func NewPaneManager(onSend func(*ChatPane, string, *models.Message), onFocused func(*ChatPane), onInputShortcut func(fyne.Shortcut) bool) *PaneManager {
-	pm := &PaneManager{onSend: onSend, onFocused: onFocused, onInputShortcut: onInputShortcut, maxPanes: defaultMaxPanes}
+	pm := &PaneManager{
+		onSend: onSend, onFocused: onFocused, onInputShortcut: onInputShortcut,
+		maxPanes: defaultMaxPanes, appFocused: true,
+	}
 
 	first := pm.newPane()
 	pm.root = paneNode{pane: first}
@@ -114,7 +118,7 @@ func NewPaneManager(onSend func(*ChatPane, string, *models.Message), onFocused f
 }
 
 func (pm *PaneManager) newPane() *ChatPane {
-	return newChatPane(
+	p := newChatPane(
 		pm.onSend,
 		func(p *ChatPane) {
 			if pm.focused != p {
@@ -124,10 +128,13 @@ func (pm *PaneManager) newPane() *ChatPane {
 				pm.focused = p
 				p.SetFocused(true)
 			}
+			pm.syncInputVisibility()
 			pm.onFocused(p)
 		},
 		pm.onInputShortcut,
 	)
+	p.SetInputVisible(pm.appFocused && p == pm.focused)
+	return p
 }
 
 // Widget returns the holder container embedded in the main window layout.
@@ -163,6 +170,7 @@ func (pm *PaneManager) SplitFocused(dir splitDir) {
 	}
 	pm.focused = newPane
 	newPane.SetFocused(true)
+	pm.syncInputVisibility()
 
 	pm.rebuildHolder()
 }
@@ -201,6 +209,7 @@ func (pm *PaneManager) CloseFocused() {
 	if next != nil {
 		next.SetFocused(true)
 	}
+	pm.syncInputVisibility()
 
 	pm.rebuildHolder()
 }
@@ -215,9 +224,26 @@ func (pm *PaneManager) SetFocus(pane *ChatPane) {
 	}
 	pm.focused = pane
 	pane.SetFocused(true)
+	pm.syncInputVisibility()
 }
 
 func (pm *PaneManager) rebuildHolder() {
 	pm.holder.Objects = []fyne.CanvasObject{pm.root.buildWidget()}
 	pm.holder.Refresh()
+}
+
+// SetAppFocused updates app focus state and syncs pane input visibility.
+func (pm *PaneManager) SetAppFocused(focused bool) {
+	if pm.appFocused == focused {
+		return
+	}
+	pm.appFocused = focused
+	pm.syncInputVisibility()
+}
+
+func (pm *PaneManager) syncInputVisibility() {
+	for _, p := range pm.AllPanes() {
+		p.SetFocused(pm.appFocused && p == pm.focused)
+		p.SetInputVisible(pm.appFocused && p == pm.focused)
+	}
 }

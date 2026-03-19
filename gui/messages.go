@@ -28,6 +28,7 @@ import (
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/storage"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/bluebubbles-tui/api"
 	"github.com/bluebubbles-tui/models"
@@ -136,6 +137,14 @@ var senderNamePalette = []color.NRGBA{
 // tsColor is the fully-opaque colour used for the hover timestamp.
 var tsColor = color.NRGBA{R: 100, G: 106, B: 130, A: 180}
 
+func hoverTimestampTextSize() float32 {
+	size := theme.TextSize() - 1
+	if size < 8 {
+		size = 8
+	}
+	return size
+}
+
 type hoverMessageRow struct {
 	widget.BaseWidget
 	host      *fyne.Container
@@ -144,11 +153,12 @@ type hoverMessageRow struct {
 	timestamp *canvas.Text // canvas.Text so we can animate its alpha
 	tsAnim    *fyne.Animation
 	hovered   bool
+	onHover   func()
 }
 
-func newHoverMessageRow(rowMain fyne.CanvasObject, replyBtn fyne.CanvasObject, timestamp *canvas.Text) *hoverMessageRow {
+func newHoverMessageRow(rowMain fyne.CanvasObject, replyBtn fyne.CanvasObject, timestamp *canvas.Text, onHover func()) *hoverMessageRow {
 	host := container.NewVBox(rowMain)
-	r := &hoverMessageRow{host: host, rowMain: rowMain, replyBtn: replyBtn, timestamp: timestamp}
+	r := &hoverMessageRow{host: host, rowMain: rowMain, replyBtn: replyBtn, timestamp: timestamp, onHover: onHover}
 	r.ExtendBaseWidget(r)
 	return r
 }
@@ -159,6 +169,9 @@ func (r *hoverMessageRow) CreateRenderer() fyne.WidgetRenderer {
 
 func (r *hoverMessageRow) MouseIn(_ *desktop.MouseEvent) {
 	r.hovered = true
+	if r.onHover != nil {
+		r.onHover()
+	}
 
 	if r.replyBtn != nil {
 		r.replyBtn.Show()
@@ -169,6 +182,7 @@ func (r *hoverMessageRow) MouseIn(_ *desktop.MouseEvent) {
 
 	if r.timestamp != nil {
 		// Ensure the timestamp slot is in the layout before animating.
+		r.timestamp.TextSize = hoverTimestampTextSize()
 		r.timestamp.Color = color.NRGBA{R: tsColor.R, G: tsColor.G, B: tsColor.B, A: 0}
 		r.timestamp.Show()
 		var left, right fyne.CanvasObject = r.timestamp, nil
@@ -245,36 +259,32 @@ func (r *hoverMessageRow) MouseMoved(_ *desktop.MouseEvent) {}
 // MessageView renders the message history for the selected chat.
 // All methods must be called from the Fyne main goroutine.
 type MessageView struct {
-	header   *widget.Label
-	vbox     *fyne.Container
-	scroll   *container.Scroll
-	panel    fyne.CanvasObject
-	messages []models.Message
-	onReply  func(models.Message)
+	vbox        *fyne.Container
+	scroll      *container.Scroll
+	panel       fyne.CanvasObject
+	messages    []models.Message
+	onReply     func(models.Message)
+	onHover     func()
+	showSenders bool
 
 	autoScrollUntil atomic.Int64
 }
 
-func NewMessageView(onReply func(models.Message)) *MessageView {
-	mv := &MessageView{onReply: onReply}
-	mv.header = widget.NewLabel("")
-	mv.header.TextStyle = fyne.TextStyle{Bold: true}
-
+func NewMessageView(onReply func(models.Message), onHover func()) *MessageView {
+	mv := &MessageView{onReply: onReply, onHover: onHover, showSenders: true}
 	mv.vbox = container.NewVBox()
 	mv.scroll = container.NewVScroll(mv.vbox)
-	mv.panel = container.NewBorder(mv.header, nil, nil, nil, mv.scroll)
+	mv.panel = mv.scroll
 	return mv
 }
 
-// Widget returns the full message panel (header + scroll area).
+// Widget returns the full message panel.
 func (mv *MessageView) Widget() fyne.CanvasObject {
 	return mv.panel
 }
 
-// SetChatName updates the chat name header.
-func (mv *MessageView) SetChatName(name string) {
-	mv.header.SetText(stripEmojis(name))
-}
+// SetChatName is a no-op in GUI mode: pane headers are intentionally hidden.
+func (mv *MessageView) SetChatName(_ string) {}
 
 // SetMessages replaces all messages and scrolls to the bottom.
 // Passing nil or an empty slice clears the view and resets scroll to the top
@@ -305,14 +315,16 @@ func (mv *MessageView) AppendMessage(msg models.Message) {
 	mv.rebuildVBox()
 }
 
-// SetFocused highlights the header when this pane is the focused one.
+// SetFocused toggles whether sender labels are shown for this pane.
 func (mv *MessageView) SetFocused(focused bool) {
-	if focused {
-		mv.header.Importance = widget.HighImportance
-	} else {
-		mv.header.Importance = widget.MediumImportance
+	if mv.showSenders == focused {
+		return
 	}
-	mv.header.Refresh()
+	mv.showSenders = focused
+	if len(mv.messages) == 0 {
+		return
+	}
+	mv.rebuildVBox()
 }
 
 // ScrollToBottom attempts to scroll to the bottom at several increasing delays
@@ -343,16 +355,16 @@ func (mv *MessageView) rebuildVBox() {
 	mv.extendAutoScrollWindow(2 * time.Second)
 	mv.vbox.Objects = nil
 	for i, msg := range mv.messages {
-		showSender := true
+		showSender := mv.showSenders
 		if i > 0 {
 			prev := mv.messages[i-1]
 			sameSender := messageSenderName(prev) == messageSenderName(msg)
 			closeInTime := msg.ParsedTime().Sub(prev.ParsedTime()) < groupingWindow
-			if sameSender && closeInTime {
+			if showSender && sameSender && closeInTime {
 				showSender = false
 			}
 		}
-		mv.vbox.Add(buildMessageRow(msg, mv.onReply, showSender, mv.maybeScrollAfterAsyncResize))
+		mv.vbox.Add(buildMessageRow(msg, mv.onReply, mv.onHover, showSender, mv.maybeScrollAfterAsyncResize))
 	}
 	mv.vbox.Refresh()
 	mv.ScrollToBottom()
@@ -371,7 +383,7 @@ func messageSenderName(msg models.Message) string {
 	return "Unknown"
 }
 
-func buildMessageRow(msg models.Message, onReply func(models.Message), showSender bool, onAsyncResize func()) fyne.CanvasObject {
+func buildMessageRow(msg models.Message, onReply func(models.Message), onHover func(), showSender bool, onAsyncResize func()) fyne.CanvasObject {
 	timeStr := formatHoverTimestamp(msg.ParsedTime())
 	senderName := messageSenderName(msg)
 
@@ -405,7 +417,7 @@ func buildMessageRow(msg models.Message, onReply func(models.Message), showSende
 	var tsLabel *canvas.Text
 	if !msg.IsFromMe {
 		tsLabel = canvas.NewText("["+timeStr+"]", color.NRGBA{R: tsColor.R, G: tsColor.G, B: tsColor.B, A: 0})
-		tsLabel.TextSize = 11
+		tsLabel.TextSize = hoverTimestampTextSize()
 	}
 
 	rowMain := content
@@ -421,7 +433,7 @@ func buildMessageRow(msg models.Message, onReply func(models.Message), showSende
 		}
 	}
 
-	row := newHoverMessageRow(rowMain, replyBtn, tsLabel)
+	row := newHoverMessageRow(rowMain, replyBtn, tsLabel, onHover)
 	return applyMessageSideIndent(row, msg.IsFromMe)
 }
 

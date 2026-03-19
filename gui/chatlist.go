@@ -34,6 +34,17 @@ func NewChatList(onSelect func(*models.Chat)) *ChatList {
 	return cl
 }
 
+// UnreadChatsCount returns how many chats currently have unread/new state.
+func (cl *ChatList) UnreadChatsCount() int {
+	count := 0
+	for _, c := range cl.chats {
+		if c.HasNewMessage || c.UnreadCount > 0 {
+			count++
+		}
+	}
+	return count
+}
+
 // Widget returns the Fyne canvas object for embedding in layouts.
 func (cl *ChatList) Widget() fyne.CanvasObject {
 	return cl.scroll

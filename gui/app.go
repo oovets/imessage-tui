@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,11 +30,13 @@ type App struct {
 	apiClient *api.Client
 	wsClient  *ws.Client
 
-	chatListComp  *ChatList
-	paneManager   *PaneManager
-	chatListPane  *fixedWidthWrap
-	contentHolder *fyne.Container
-	showChatList  bool
+	chatListComp   *ChatList
+	paneManager    *PaneManager
+	chatListPane   *fixedWidthWrap
+	unreadBadge    *widget.Label
+	unreadBadgeBox *fyne.Container
+	contentHolder  *fyne.Container
+	showChatList   bool
 
 	linkPreviewsEnabled bool
 	maxLinkPreviews     int
@@ -43,6 +46,16 @@ type App struct {
 }
 
 const fixedChatListWidth = float32(105)
+
+const (
+	prefShowChatList       = "ui.show_chat_list"
+	prefDarkMode           = "ui.dark_mode"
+	prefFontSize           = "ui.font_size"
+	prefBoldAll            = "ui.bold_all"
+	prefFontFamily         = "ui.font_family"
+	prefEnableLinkPreviews = "ui.enable_link_previews"
+	prefMaxLinkPreviews    = "ui.max_link_previews"
+)
 
 type fixedWidthWrap struct {
 	widget.BaseWidget
@@ -96,6 +109,7 @@ func (a *App) Run() {
 
 	a.fyneApp = app.New()
 	a.appTheme = newCompactTheme()
+	a.loadUIState()
 	a.fyneApp.Settings().SetTheme(a.appTheme)
 
 	a.win = a.fyneApp.NewWindow("BlueBubbles")
@@ -114,6 +128,10 @@ func (a *App) Run() {
 		a.refreshPaneNameForChat(guid)
 	}
 	a.chatListPane = newFixedWidthWrap(a.chatListComp.Widget(), fixedChatListWidth)
+	a.unreadBadge = widget.NewLabel("")
+	a.unreadBadge.Importance = widget.HighImportance
+	a.unreadBadge.Hide()
+	a.unreadBadgeBox = container.NewPadded(a.unreadBadge)
 
 	a.paneManager = NewPaneManager(
 		func(pane *ChatPane, text string, replyTo *models.Message) { a.sendMessageFromPane(pane, text, replyTo) },
@@ -121,9 +139,22 @@ func (a *App) Run() {
 		a.handleInputShortcut,
 	)
 
-	a.showChatList = true
 	a.contentHolder = container.NewMax(a.mainContent())
 	a.win.SetContent(a.contentHolder)
+	a.refreshUnreadBadge()
+	a.fyneApp.Lifecycle().SetOnExitedForeground(func() {
+		fyne.Do(func() {
+			a.paneManager.SetAppFocused(false)
+			a.scrollAllPanes()
+		})
+	})
+	a.fyneApp.Lifecycle().SetOnEnteredForeground(func() {
+		fyne.Do(func() {
+			a.paneManager.SetAppFocused(true)
+			a.focusFocusedPaneInput()
+			a.scrollAllPanes()
+		})
+	})
 	a.focusFocusedPaneInput()
 
 	// Keyboard shortcuts ─────────────────────────────────────────────────
@@ -194,15 +225,19 @@ func (a *App) closeFocusedPane() {
 
 func (a *App) toggleChatListVisibility() {
 	a.showChatList = !a.showChatList
+	a.fyneApp.Preferences().SetBool(prefShowChatList, a.showChatList)
 	a.contentHolder.Objects = []fyne.CanvasObject{a.mainContent()}
 	a.contentHolder.Refresh()
+	a.refreshUnreadBadge()
 }
 
 func (a *App) mainContent() fyne.CanvasObject {
-	if !a.showChatList {
-		return a.paneManager.Widget()
+	base := a.paneManager.Widget()
+	if a.showChatList {
+		base = container.NewBorder(nil, nil, a.chatListPane, nil, base)
 	}
-	return container.NewBorder(nil, nil, a.chatListPane, nil, a.paneManager.Widget())
+	// Discreet unread indicator remains visible even when chat list is hidden.
+	return container.NewBorder(nil, nil, nil, a.unreadBadgeBox, base)
 }
 
 func (a *App) refreshChatListWidth() {
@@ -214,6 +249,7 @@ func (a *App) refreshChatListWidth() {
 		a.contentHolder.Objects = []fyne.CanvasObject{a.mainContent()}
 		a.contentHolder.Refresh()
 	}
+	a.refreshUnreadBadge()
 }
 
 func (a *App) refreshAllMessageViews() {
@@ -223,9 +259,29 @@ func (a *App) refreshAllMessageViews() {
 	}
 }
 
+func (a *App) refreshUnreadBadge() {
+	if a.unreadBadge == nil || a.chatListComp == nil {
+		return
+	}
+	count := a.chatListComp.UnreadChatsCount()
+	if count <= 0 || a.showChatList {
+		a.unreadBadge.Hide()
+		if a.unreadBadgeBox != nil {
+			a.unreadBadgeBox.Refresh()
+		}
+		return
+	}
+	a.unreadBadge.SetText("• " + strconv.Itoa(count))
+	a.unreadBadge.Show()
+	if a.unreadBadgeBox != nil {
+		a.unreadBadgeBox.Refresh()
+	}
+}
+
 func (a *App) setLinkPreviewsEnabled(enabled bool) {
 	a.linkPreviewsEnabled = enabled
 	setLinkPreviewEnabled(enabled)
+	a.fyneApp.Preferences().SetBool(prefEnableLinkPreviews, enabled)
 	a.refreshAllMessageViews()
 	a.win.SetMainMenu(a.buildMainMenu())
 }
@@ -236,6 +292,7 @@ func (a *App) setMaxLinkPreviews(max int) {
 	}
 	a.maxLinkPreviews = max
 	setMaxLinkPreviewsPerMessage(max)
+	a.fyneApp.Preferences().SetInt(prefMaxLinkPreviews, max)
 	a.refreshAllMessageViews()
 	a.win.SetMainMenu(a.buildMainMenu())
 }
@@ -245,6 +302,7 @@ func (a *App) setDarkMode(enabled bool) {
 		return
 	}
 	a.appTheme.dark = enabled
+	a.fyneApp.Preferences().SetBool(prefDarkMode, enabled)
 	a.fyneApp.Settings().SetTheme(a.appTheme)
 	a.win.SetMainMenu(a.buildMainMenu())
 }
@@ -271,7 +329,39 @@ func (a *App) setFont(family string) {
 		return
 	}
 	a.appTheme.curFamily = family
+	a.fyneApp.Preferences().SetString(prefFontFamily, family)
 	a.fyneApp.Settings().SetTheme(a.appTheme)
+}
+
+func (a *App) loadUIState() {
+	if a.fyneApp == nil || a.appTheme == nil {
+		return
+	}
+	prefs := a.fyneApp.Preferences()
+
+	a.showChatList = prefs.BoolWithFallback(prefShowChatList, true)
+	a.linkPreviewsEnabled = prefs.BoolWithFallback(prefEnableLinkPreviews, a.linkPreviewsEnabled)
+	a.maxLinkPreviews = prefs.IntWithFallback(prefMaxLinkPreviews, a.maxLinkPreviews)
+	if a.maxLinkPreviews < 0 {
+		a.maxLinkPreviews = 0
+	}
+
+	a.appTheme.dark = prefs.BoolWithFallback(prefDarkMode, a.appTheme.dark)
+	fontSize := prefs.IntWithFallback(prefFontSize, int(a.appTheme.fontSize))
+	if fontSize < 8 {
+		fontSize = 8
+	}
+	if fontSize > 20 {
+		fontSize = 20
+	}
+	a.appTheme.fontSize = float32(fontSize)
+	a.appTheme.boldAll = prefs.BoolWithFallback(prefBoldAll, a.appTheme.boldAll)
+
+	if family := prefs.StringWithFallback(prefFontFamily, a.appTheme.curFamily); family != "" {
+		if _, ok := a.appTheme.fonts[family]; ok {
+			a.appTheme.curFamily = family
+		}
+	}
 }
 
 func (a *App) buildMainMenu() *fyne.MainMenu {
@@ -305,19 +395,24 @@ func (a *App) buildMainMenu() *fyne.MainMenu {
 		fyne.NewMenuItem("A+ Larger", func() {
 			if a.appTheme.fontSize < 20 {
 				a.appTheme.fontSize++
+				a.fyneApp.Preferences().SetInt(prefFontSize, int(a.appTheme.fontSize))
 				a.fyneApp.Settings().SetTheme(a.appTheme)
 				a.refreshChatListWidth()
+				a.refreshAllMessageViews()
 			}
 		}),
 		fyne.NewMenuItem("A- Smaller", func() {
 			if a.appTheme.fontSize > 8 {
 				a.appTheme.fontSize--
+				a.fyneApp.Preferences().SetInt(prefFontSize, int(a.appTheme.fontSize))
 				a.fyneApp.Settings().SetTheme(a.appTheme)
 				a.refreshChatListWidth()
+				a.refreshAllMessageViews()
 			}
 		}),
 		fyne.NewMenuItem("Toggle Bold", func() {
 			a.appTheme.boldAll = !a.appTheme.boldAll
+			a.fyneApp.Preferences().SetBool(prefBoldAll, a.appTheme.boldAll)
 			a.fyneApp.Settings().SetTheme(a.appTheme)
 		}),
 		fontItem,
@@ -377,6 +472,7 @@ func (a *App) selectChat(chat *models.Chat) {
 	pane.ClearReplyTarget()
 
 	a.chatListComp.ClearNewMessage(chatGUID)
+	a.refreshUnreadBadge()
 	a.chatListComp.SetSelected(chatGUID)
 	pane.msgView.SetChatName(chatDisplayName(*chat))
 	pane.msgView.SetMessages(nil)
@@ -515,6 +611,7 @@ func (a *App) loadChats() {
 
 	fyne.Do(func() {
 		a.chatListComp.SetChats(chats)
+		a.refreshUnreadBadge()
 		if len(chats) > 0 {
 			first := chats[0]
 			a.chatListComp.SetSelected(first.GUID)
@@ -600,6 +697,7 @@ func (a *App) handleWSEvent(event models.WSEvent) {
 				}
 			} else {
 				a.chatListComp.MarkNewMessage(msg.ChatGUID)
+				a.refreshUnreadBadge()
 			}
 		})
 	}
