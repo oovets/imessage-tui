@@ -37,9 +37,12 @@ type App struct {
 	unreadBadgeBox *fyne.Container
 	contentHolder  *fyne.Container
 	showChatList   bool
+	unreadAnim     *fyne.Animation
 
 	linkPreviewsEnabled bool
 	maxLinkPreviews     int
+	windowWidth         float32
+	windowHeight        float32
 
 	mu       sync.Mutex
 	msgCache map[string][]models.Message
@@ -56,6 +59,10 @@ const (
 	prefFontFamily         = "ui.font_family"
 	prefEnableLinkPreviews = "ui.enable_link_previews"
 	prefMaxLinkPreviews    = "ui.max_link_previews"
+	prefCompactMode        = "ui.compact_mode"
+	prefWindowWidth        = "ui.window_width"
+	prefWindowHeight       = "ui.window_height"
+	prefPaneLayoutState    = "ui.pane_layout_state"
 )
 
 type fixedWidthWrap struct {
@@ -114,7 +121,7 @@ func (a *App) Run() {
 	a.fyneApp.Settings().SetTheme(a.appTheme)
 
 	a.win = a.fyneApp.NewWindow("BlueBubbles")
-	a.win.Resize(fyne.NewSize(960, 640))
+	a.win.Resize(fyne.NewSize(a.windowWidth, a.windowHeight))
 	a.win.SetMainMenu(a.buildMainMenu())
 
 	setLinkPreviewEnabled(a.linkPreviewsEnabled)
@@ -136,9 +143,10 @@ func (a *App) Run() {
 
 	a.paneManager = NewPaneManager(
 		func(pane *ChatPane, text string, replyTo *models.Message) { a.sendMessageFromPane(pane, text, replyTo) },
-		func(pane *ChatPane) { /* focus tracked inside PaneManager */ },
+		func(pane *ChatPane) { _ = pane },
 		a.handleInputShortcut,
 	)
+	a.restorePaneLayoutState()
 
 	a.contentHolder = container.NewMax(a.mainContent())
 	a.win.SetContent(a.contentHolder)
@@ -195,18 +203,24 @@ func (a *App) Run() {
 	})
 	go a.loadChats()
 	go a.runWebSocket()
+	a.win.SetOnClosed(func() {
+		a.saveWindowSizePreference()
+		a.savePaneLayoutState()
+	})
 
 	a.win.ShowAndRun()
 }
 
 func (a *App) splitFocusedHorizontal() {
 	a.paneManager.SplitFocused(splitHorizontal)
+	a.savePaneLayoutState()
 	a.focusFocusedPaneInput()
 	a.scrollAllPanes()
 }
 
 func (a *App) splitFocusedVertical() {
 	a.paneManager.SplitFocused(splitVertical)
+	a.savePaneLayoutState()
 	a.focusFocusedPaneInput()
 	a.scrollAllPanes()
 }
@@ -221,6 +235,7 @@ func (a *App) focusFocusedPaneInput() {
 
 func (a *App) closeFocusedPane() {
 	a.paneManager.CloseFocused()
+	a.savePaneLayoutState()
 	a.scrollAllPanes()
 }
 
@@ -254,9 +269,11 @@ func (a *App) refreshChatListWidth() {
 }
 
 func (a *App) refreshAllMessageViews() {
+	a.savePaneLayoutState()
 	for _, p := range a.paneManager.AllPanes() {
 		msgs := append([]models.Message(nil), p.msgView.messages...)
 		p.msgView.SetMessages(msgs)
+		p.RefreshLayout()
 	}
 }
 
@@ -266,16 +283,95 @@ func (a *App) refreshUnreadBadge() {
 	}
 	count := a.chatListComp.UnreadChatsCount()
 	if count <= 0 || a.showChatList {
-		a.unreadBadge.Hide()
+		a.animateUnreadBadge(false, count)
+		return
+	}
+	a.animateUnreadBadge(true, count)
+}
+
+func (a *App) animateUnreadBadge(show bool, count int) {
+	if a.unreadBadge == nil {
+		return
+	}
+	if a.unreadAnim != nil {
+		a.unreadAnim.Stop()
+	}
+	if show {
+		a.unreadBadge.SetText("• " + strconv.Itoa(count))
+		a.unreadBadge.Show()
 		if a.unreadBadgeBox != nil {
 			a.unreadBadgeBox.Refresh()
 		}
+		a.unreadAnim = fyne.NewAnimation(140*time.Millisecond, func(f float32) {
+			alpha := uint8(80 + f*175)
+			a.unreadBadge.Importance = widget.MediumImportance
+			a.unreadBadge.TextStyle = fyne.TextStyle{Bold: alpha > 180}
+			a.unreadBadge.Refresh()
+		})
+		a.unreadAnim.Curve = fyne.AnimationEaseOut
+		a.unreadAnim.Start()
 		return
 	}
-	a.unreadBadge.SetText("• " + strconv.Itoa(count))
-	a.unreadBadge.Show()
-	if a.unreadBadgeBox != nil {
-		a.unreadBadgeBox.Refresh()
+	startVisible := a.unreadBadge.Visible()
+	if !startVisible {
+		return
+	}
+	a.unreadAnim = fyne.NewAnimation(110*time.Millisecond, func(f float32) {
+		a.unreadBadge.Importance = widget.LowImportance
+		a.unreadBadge.Refresh()
+	})
+	a.unreadAnim.Curve = fyne.AnimationEaseIn
+	a.unreadAnim.Start()
+	time.AfterFunc(110*time.Millisecond, func() {
+		fyne.Do(func() {
+			if a.chatListComp == nil || a.unreadBadge == nil {
+				return
+			}
+			if a.showChatList || a.chatListComp.UnreadChatsCount() == 0 {
+				a.unreadBadge.Hide()
+				if a.unreadBadgeBox != nil {
+					a.unreadBadgeBox.Refresh()
+				}
+			}
+		})
+	})
+}
+
+func (a *App) saveWindowSizePreference() {
+	if a.fyneApp == nil || a.win == nil {
+		return
+	}
+	size := a.win.Canvas().Size()
+	if size.Width <= 0 || size.Height <= 0 {
+		return
+	}
+	prefs := a.fyneApp.Preferences()
+	prefs.SetFloat(prefWindowWidth, float64(size.Width))
+	prefs.SetFloat(prefWindowHeight, float64(size.Height))
+}
+
+func (a *App) savePaneLayoutState() {
+	if a.fyneApp == nil || a.paneManager == nil {
+		return
+	}
+	raw, err := a.paneManager.SerializeState()
+	if err != nil {
+		log.Printf("[GUI] serialize pane state failed: %v", err)
+		return
+	}
+	a.fyneApp.Preferences().SetString(prefPaneLayoutState, raw)
+}
+
+func (a *App) restorePaneLayoutState() {
+	if a.fyneApp == nil || a.paneManager == nil {
+		return
+	}
+	raw := a.fyneApp.Preferences().StringWithFallback(prefPaneLayoutState, "")
+	if strings.TrimSpace(raw) == "" {
+		return
+	}
+	if err := a.paneManager.RestoreState(raw); err != nil {
+		log.Printf("[GUI] restore pane state failed: %v", err)
 	}
 }
 
@@ -305,6 +401,17 @@ func (a *App) setDarkMode(enabled bool) {
 	a.appTheme.dark = enabled
 	a.fyneApp.Preferences().SetBool(prefDarkMode, enabled)
 	a.fyneApp.Settings().SetTheme(a.appTheme)
+	a.win.SetMainMenu(a.buildMainMenu())
+}
+
+func (a *App) setCompactMode(enabled bool) {
+	if a.appTheme == nil {
+		return
+	}
+	a.appTheme.compactMode = enabled
+	a.fyneApp.Preferences().SetBool(prefCompactMode, enabled)
+	a.fyneApp.Settings().SetTheme(a.appTheme)
+	a.refreshAllMessageViews()
 	a.win.SetMainMenu(a.buildMainMenu())
 }
 
@@ -357,6 +464,15 @@ func (a *App) loadUIState() {
 	}
 	a.appTheme.fontSize = float32(fontSize)
 	a.appTheme.boldAll = prefs.BoolWithFallback(prefBoldAll, a.appTheme.boldAll)
+	a.appTheme.compactMode = prefs.BoolWithFallback(prefCompactMode, a.appTheme.compactMode)
+	a.windowWidth = float32(prefs.FloatWithFallback(prefWindowWidth, 960))
+	a.windowHeight = float32(prefs.FloatWithFallback(prefWindowHeight, 640))
+	if a.windowWidth < 640 {
+		a.windowWidth = 640
+	}
+	if a.windowHeight < 420 {
+		a.windowHeight = 420
+	}
 
 	if family := prefs.StringWithFallback(prefFontFamily, a.appTheme.curFamily); family != "" {
 		if _, ok := a.appTheme.fonts[family]; ok {
@@ -374,6 +490,10 @@ func (a *App) buildMainMenu() *fyne.MainMenu {
 	colorModeLabel := "Switch to Light Mode"
 	if !a.appTheme.dark {
 		colorModeLabel = "Switch to Dark Mode"
+	}
+	compactLabel := "Enable Compact Mode"
+	if a.appTheme.compactMode {
+		compactLabel = "Disable Compact Mode"
 	}
 
 	// Build font submenu from installed families.
@@ -417,6 +537,9 @@ func (a *App) buildMainMenu() *fyne.MainMenu {
 			a.fyneApp.Settings().SetTheme(a.appTheme)
 		}),
 		fontItem,
+		fyne.NewMenuItem(compactLabel, func() {
+			a.setCompactMode(!a.appTheme.compactMode)
+		}),
 		fyne.NewMenuItem(colorModeLabel, func() {
 			a.setDarkMode(!a.appTheme.dark)
 		}),
@@ -471,6 +594,7 @@ func (a *App) selectChat(chat *models.Chat) {
 	chatGUID := chat.GUID
 	pane.ChatGUID = chatGUID
 	pane.ClearReplyTarget()
+	a.savePaneLayoutState()
 
 	a.chatListComp.ClearNewMessage(chatGUID)
 	a.refreshUnreadBadge()
@@ -613,7 +737,21 @@ func (a *App) loadChats() {
 	fyne.Do(func() {
 		a.chatListComp.SetChats(chats)
 		a.refreshUnreadBadge()
-		if len(chats) > 0 {
+		hasAssigned := false
+		for _, p := range a.paneManager.AllPanes() {
+			if p.ChatGUID == "" {
+				continue
+			}
+			for i := range chats {
+				if chats[i].GUID == p.ChatGUID {
+					hasAssigned = true
+					p.msgView.SetMessages(nil)
+					go a.loadMessagesForPane(p, p.ChatGUID)
+					break
+				}
+			}
+		}
+		if !hasAssigned && len(chats) > 0 {
 			first := chats[0]
 			a.chatListComp.SetSelected(first.GUID)
 			a.selectChat(&first)

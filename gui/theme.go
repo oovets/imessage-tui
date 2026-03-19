@@ -118,11 +118,12 @@ func loadFirstFont(paths []string) fyne.Resource {
 
 // compactTheme is a mutable theme supporting dark/light mode, font size, font family, and bold.
 type compactTheme struct {
-	dark      bool
-	fontSize  float32
-	boldAll   bool
-	fonts     map[string]fontSet
-	curFamily string
+	dark        bool
+	fontSize    float32
+	boldAll     bool
+	compactMode bool
+	fonts       map[string]fontSet
+	curFamily   string
 }
 
 func newCompactTheme() *compactTheme {
@@ -185,9 +186,8 @@ func (t *compactTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant
 			// Match Alacritty theme background (Tokyo Night): #1a1b26.
 			return color.NRGBA{R: 26, G: 27, B: 38, A: 255}
 		case theme.ColorNameInputBackground:
-			// Slightly darker than the main background so the input area is
-			// subtly distinct without needing a border.
-			return color.NRGBA{R: 16, G: 17, B: 26, A: 255}
+			// Input should blend into the main background.
+			return color.NRGBA{R: 26, G: 27, B: 38, A: 255}
 		case theme.ColorNameInputBorder:
 			// Transparent border — the stroke is invisible but SizeNameInputBorder
 			// must be non-zero so Fyne can draw the cursor with a real width.
@@ -210,7 +210,7 @@ func (t *compactTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant
 		case theme.ColorNameBackground:
 			return color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 		case theme.ColorNameInputBackground:
-			return color.NRGBA{R: 245, G: 245, B: 245, A: 255}
+			return color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 		case theme.ColorNameInputBorder:
 			return color.NRGBA{A: 0}
 		case theme.ColorNameForeground:
@@ -257,8 +257,14 @@ func (t *compactTheme) Font(style fyne.TextStyle) fyne.Resource {
 func (t *compactTheme) Size(name fyne.ThemeSizeName) float32 {
 	switch name {
 	case theme.SizeNamePadding:
+		if t.compactMode {
+			return 1
+		}
 		return 2
 	case theme.SizeNameInnerPadding:
+		if t.compactMode {
+			return 1
+		}
 		return 2
 	case theme.SizeNameInputRadius:
 		return 0

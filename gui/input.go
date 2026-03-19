@@ -62,20 +62,34 @@ type focusEntryRenderer struct {
 	inner fyne.WidgetRenderer
 }
 
-func (r *focusEntryRenderer) Layout(size fyne.Size)            { r.inner.Layout(size) }
-func (r *focusEntryRenderer) MinSize() fyne.Size               { return r.inner.MinSize() }
-func (r *focusEntryRenderer) Destroy()                         { r.inner.Destroy() }
-func (r *focusEntryRenderer) Objects() []fyne.CanvasObject     { return r.inner.Objects() }
+func (r *focusEntryRenderer) Layout(size fyne.Size)        { r.inner.Layout(size) }
+func (r *focusEntryRenderer) MinSize() fyne.Size           { return r.inner.MinSize() }
+func (r *focusEntryRenderer) Destroy()                     { r.inner.Destroy() }
+func (r *focusEntryRenderer) Objects() []fyne.CanvasObject { return r.inner.Objects() }
 
 func (r *focusEntryRenderer) Refresh() {
 	r.inner.Refresh()
-	// Fyne draws a primary-coloured stroke border when the entry is focused.
-	// Clear any stroke on the top-level rectangles so only the cursor shows.
+	// Fyne draws stroke borders for entry layers; clear them recursively
+	// so only content/cursor remain visible.
 	for _, obj := range r.inner.Objects() {
-		if rect, ok := obj.(*canvas.Rectangle); ok && rect.StrokeWidth > 0 {
+		clearStrokeRecursive(obj)
+	}
+}
+
+func clearStrokeRecursive(obj fyne.CanvasObject) {
+	if obj == nil {
+		return
+	}
+	if rect, ok := obj.(*canvas.Rectangle); ok {
+		if rect.StrokeWidth != 0 || rect.StrokeColor != color.Transparent {
 			rect.StrokeWidth = 0
 			rect.StrokeColor = color.Transparent
 			rect.Refresh()
+		}
+	}
+	if containerObj, ok := obj.(*fyne.Container); ok {
+		for _, child := range containerObj.Objects {
+			clearStrokeRecursive(child)
 		}
 	}
 }
@@ -133,7 +147,8 @@ func NewInputArea(onSend func(string, *models.Message), onFocused func()) *Input
 	ia.replyLabel.Importance = widget.LowImportance
 	ia.replyHolder = container.NewMax()
 
-	indentedEntry := container.NewBorder(nil, nil, fixedWidthSpacer(16), fixedWidthSpacer(16), ia.entry)
+	indent := inputSideIndent()
+	indentedEntry := container.NewBorder(nil, nil, fixedWidthSpacer(indent), fixedWidthSpacer(indent), ia.entry)
 	ia.panel = container.NewVBox(ia.replyHolder, indentedEntry)
 	ia.updateInputHeight()
 	return ia
@@ -151,7 +166,8 @@ func NewInputAreaWithShortcutHandler(onSend func(string, *models.Message), onFoc
 	ia.replyLabel.Importance = widget.LowImportance
 	ia.replyHolder = container.NewMax()
 
-	indentedEntry := container.NewBorder(nil, nil, fixedWidthSpacer(16), fixedWidthSpacer(16), ia.entry)
+	indent := inputSideIndent()
+	indentedEntry := container.NewBorder(nil, nil, fixedWidthSpacer(indent), fixedWidthSpacer(indent), ia.entry)
 	ia.panel = container.NewVBox(ia.replyHolder, indentedEntry)
 	ia.updateInputHeight()
 	return ia

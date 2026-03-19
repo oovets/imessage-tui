@@ -1,6 +1,10 @@
 package gui
 
 import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"github.com/bluebubbles-tui/models"
@@ -100,6 +104,19 @@ type PaneManager struct {
 	onSend          func(*ChatPane, string, *models.Message)
 	onFocused       func(*ChatPane)
 	onInputShortcut func(fyne.Shortcut) bool
+}
+
+type paneManagerState struct {
+	Root          *paneStateNode `json:"root"`
+	FocusedPaneID int            `json:"focusedPaneID"`
+}
+
+type paneStateNode struct {
+	PaneID   int            `json:"paneID,omitempty"`
+	ChatGUID string         `json:"chatGUID,omitempty"`
+	Dir      string         `json:"dir,omitempty"`
+	Left     *paneStateNode `json:"left,omitempty"`
+	Right    *paneStateNode `json:"right,omitempty"`
 }
 
 func NewPaneManager(onSend func(*ChatPane, string, *models.Message), onFocused func(*ChatPane), onInputShortcut func(fyne.Shortcut) bool) *PaneManager {
@@ -246,4 +263,122 @@ func (pm *PaneManager) syncInputVisibility() {
 		p.SetFocused(pm.appFocused && p == pm.focused)
 		p.SetInputVisible(pm.appFocused && p == pm.focused)
 	}
+}
+
+// SerializeState returns a JSON snapshot of split layout, focused pane and chat assignments.
+func (pm *PaneManager) SerializeState() (string, error) {
+	state := paneManagerState{
+		Root:          serializePaneNode(&pm.root),
+		FocusedPaneID: -1,
+	}
+	if pm.focused != nil {
+		state.FocusedPaneID = pm.focused.id
+	}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+// RestoreState restores split layout, focused pane and chat assignments from JSON.
+func (pm *PaneManager) RestoreState(raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var state paneManagerState
+	if err := json.Unmarshal([]byte(raw), &state); err != nil {
+		return err
+	}
+	if state.Root == nil {
+		return fmt.Errorf("invalid pane state: missing root")
+	}
+
+	idMap := make(map[int]*ChatPane)
+	root, err := pm.restorePaneNode(state.Root, idMap)
+	if err != nil {
+		return err
+	}
+	pm.root = *root
+
+	for _, p := range pm.AllPanes() {
+		p.SetFocused(false)
+	}
+	pm.focused = idMap[state.FocusedPaneID]
+	if pm.focused == nil {
+		panes := pm.AllPanes()
+		if len(panes) > 0 {
+			pm.focused = panes[0]
+		}
+	}
+
+	pm.rebuildHolder()
+	pm.syncInputVisibility()
+	paneIDCounter = maxPaneID(pm.AllPanes()) + 1
+	return nil
+}
+
+func serializePaneNode(n *paneNode) *paneStateNode {
+	if n == nil {
+		return nil
+	}
+	if n.isLeaf() {
+		return &paneStateNode{
+			PaneID:   n.pane.id,
+			ChatGUID: n.pane.ChatGUID,
+		}
+	}
+	dir := "horizontal"
+	if n.dir == splitVertical {
+		dir = "vertical"
+	}
+	return &paneStateNode{
+		Dir:   dir,
+		Left:  serializePaneNode(n.left),
+		Right: serializePaneNode(n.right),
+	}
+}
+
+func (pm *PaneManager) restorePaneNode(n *paneStateNode, idMap map[int]*ChatPane) (*paneNode, error) {
+	if n == nil {
+		return nil, fmt.Errorf("invalid pane node")
+	}
+	if n.Left == nil && n.Right == nil {
+		p := pm.newPane()
+		p.ChatGUID = n.ChatGUID
+		p.id = n.PaneID
+		idMap[p.id] = p
+		return &paneNode{pane: p}, nil
+	}
+	if n.Left == nil || n.Right == nil {
+		return nil, fmt.Errorf("invalid split node")
+	}
+	left, err := pm.restorePaneNode(n.Left, idMap)
+	if err != nil {
+		return nil, err
+	}
+	right, err := pm.restorePaneNode(n.Right, idMap)
+	if err != nil {
+		return nil, err
+	}
+	var dir splitDir
+	switch strings.ToLower(n.Dir) {
+	case "horizontal":
+		dir = splitHorizontal
+	case "vertical":
+		dir = splitVertical
+	default:
+		return nil, fmt.Errorf("invalid split dir: %q", n.Dir)
+	}
+	return &paneNode{left: left, right: right, dir: dir}, nil
+}
+
+func maxPaneID(panes []*ChatPane) int {
+	maxID := -1
+	for _, p := range panes {
+		if p != nil && p.id > maxID {
+			maxID = p.id
+		}
+	}
+	return maxID
 }
