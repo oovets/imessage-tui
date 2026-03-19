@@ -92,6 +92,8 @@ func NewApp(apiClient *api.Client, wsClient *ws.Client, cfg *config.Config) *App
 
 // Run builds the window and blocks until the window is closed.
 func (a *App) Run() {
+	loadAliasStore()
+
 	a.fyneApp = app.New()
 	a.appTheme = newCompactTheme()
 	a.fyneApp.Settings().SetTheme(a.appTheme)
@@ -108,6 +110,9 @@ func (a *App) Run() {
 	a.chatListComp = NewChatList(func(chat *models.Chat) {
 		a.selectChat(chat)
 	})
+	a.chatListComp.onRename = func(guid string) {
+		a.refreshPaneNameForChat(guid)
+	}
 	a.chatListPane = newFixedWidthWrap(a.chatListComp.Widget(), fixedChatListWidth)
 
 	a.paneManager = NewPaneManager(
@@ -244,6 +249,31 @@ func (a *App) setDarkMode(enabled bool) {
 	a.win.SetMainMenu(a.buildMainMenu())
 }
 
+// refreshPaneNameForChat updates the header of any open pane showing chatGUID
+// after an alias change.
+func (a *App) refreshPaneNameForChat(guid string) {
+	for _, c := range a.chatListComp.chats {
+		if c.GUID != guid {
+			continue
+		}
+		name := chatDisplayName(c)
+		for _, p := range a.paneManager.AllPanes() {
+			if p.ChatGUID == guid {
+				p.msgView.SetChatName(name)
+			}
+		}
+		return
+	}
+}
+
+func (a *App) setFont(family string) {
+	if a.appTheme == nil {
+		return
+	}
+	a.appTheme.curFamily = family
+	a.fyneApp.Settings().SetTheme(a.appTheme)
+}
+
 func (a *App) buildMainMenu() *fyne.MainMenu {
 	previewLabel := "Disable Previews"
 	if !a.linkPreviewsEnabled {
@@ -254,6 +284,22 @@ func (a *App) buildMainMenu() *fyne.MainMenu {
 	if !a.appTheme.dark {
 		colorModeLabel = "Switch to Dark Mode"
 	}
+
+	// Build font submenu from installed families.
+	fontItems := make([]*fyne.MenuItem, 0)
+	for _, name := range a.appTheme.availableFamilies() {
+		n := name // capture loop variable
+		label := n
+		if n == a.appTheme.curFamily {
+			label = "✓ " + n
+		}
+		fontItems = append(fontItems, fyne.NewMenuItem(label, func() {
+			a.setFont(n)
+			a.win.SetMainMenu(a.buildMainMenu())
+		}))
+	}
+	fontItem := fyne.NewMenuItem("Font", nil)
+	fontItem.ChildMenu = fyne.NewMenu("", fontItems...)
 
 	viewMenu := fyne.NewMenu("View",
 		fyne.NewMenuItem("A+ Larger", func() {
@@ -274,6 +320,7 @@ func (a *App) buildMainMenu() *fyne.MainMenu {
 			a.appTheme.boldAll = !a.appTheme.boldAll
 			a.fyneApp.Settings().SetTheme(a.appTheme)
 		}),
+		fontItem,
 		fyne.NewMenuItem(colorModeLabel, func() {
 			a.setDarkMode(!a.appTheme.dark)
 		}),
@@ -330,7 +377,8 @@ func (a *App) selectChat(chat *models.Chat) {
 	pane.ClearReplyTarget()
 
 	a.chatListComp.ClearNewMessage(chatGUID)
-	pane.msgView.SetChatName(chat.GetDisplayName())
+	a.chatListComp.SetSelected(chatGUID)
+	pane.msgView.SetChatName(chatDisplayName(*chat))
 	pane.msgView.SetMessages(nil)
 	pane.FocusInput(a.win.Canvas())
 
@@ -469,6 +517,7 @@ func (a *App) loadChats() {
 		a.chatListComp.SetChats(chats)
 		if len(chats) > 0 {
 			first := chats[0]
+			a.chatListComp.SetSelected(first.GUID)
 			a.selectChat(&first)
 		}
 	})

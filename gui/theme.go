@@ -205,8 +205,21 @@ func (t *compactTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant
 			return color.NRGBA{A: 0}
 		}
 	}
-	if !t.dark && name == theme.ColorNameSuccess {
-		return color.NRGBA{R: 140, G: 140, B: 140, A: 255}
+	if !t.dark {
+		switch name {
+		case theme.ColorNameBackground:
+			return color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+		case theme.ColorNameInputBackground:
+			return color.NRGBA{R: 245, G: 245, B: 245, A: 255}
+		case theme.ColorNameInputBorder:
+			return color.NRGBA{A: 0}
+		case theme.ColorNameForeground:
+			return color.NRGBA{R: 15, G: 15, B: 15, A: 255}
+		case theme.ColorNameSuccess:
+			return color.NRGBA{R: 100, G: 100, B: 100, A: 255}
+		case theme.ColorNameSeparator:
+			return color.NRGBA{A: 0}
+		}
 	}
 	return t.base().Color(name, variant)
 }

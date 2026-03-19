@@ -17,6 +17,11 @@ type Chat struct {
 	LastMessageText string   `json:"-"` // Preview of latest message (not from API)
 }
 
+// IsGroup returns true when the chat has more than one participant (group chat).
+func (c *Chat) IsGroup() bool {
+	return len(c.Participants) > 1
+}
+
 // GetDisplayName returns a suitable name for the chat
 func (c *Chat) GetDisplayName() string {
 	// For 1:1 chats, try to use contact name from participants first
