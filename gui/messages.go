@@ -440,9 +440,9 @@ func buildMessageRow(msg models.Message, onReply func(models.Message), onHover f
 func applyMessageSideIndent(row fyne.CanvasObject, isFromMe bool) fyne.CanvasObject {
 	const indentPx float32 = 24 // requested indentation
 	if isFromMe {
-		return container.NewBorder(nil, nil, nil, fixedWidthSpacer(indentPx), row)
+		row = rightAlignMessageContent(row)
 	}
-	return container.NewBorder(nil, nil, fixedWidthSpacer(indentPx), nil, row)
+	return container.NewBorder(nil, nil, fixedWidthSpacer(indentPx), fixedWidthSpacer(indentPx), row)
 }
 
 func fixedWidthSpacer(width float32) fyne.CanvasObject {
@@ -502,9 +502,6 @@ func buildMessageContent(body string, msg models.Message) fyne.CanvasObject {
 
 	rich := widget.NewRichText(segments...)
 	rich.Wrapping = fyne.TextWrapWord
-	if msg.IsFromMe {
-		return rightAlignMessageContent(rich)
-	}
 	return rich
 }
 

@@ -46,6 +46,7 @@ type App struct {
 }
 
 const fixedChatListWidth = float32(105)
+const appPreferencesID = "com.bluebubbles-tui.gui"
 
 const (
 	prefShowChatList       = "ui.show_chat_list"
@@ -107,7 +108,7 @@ func NewApp(apiClient *api.Client, wsClient *ws.Client, cfg *config.Config) *App
 func (a *App) Run() {
 	loadAliasStore()
 
-	a.fyneApp = app.New()
+	a.fyneApp = app.NewWithID(appPreferencesID)
 	a.appTheme = newCompactTheme()
 	a.loadUIState()
 	a.fyneApp.Settings().SetTheme(a.appTheme)
