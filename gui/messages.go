@@ -147,22 +147,20 @@ func hoverTimestampTextSize() float32 {
 
 type hoverMessageRow struct {
 	widget.BaseWidget
-	host             *fyne.Container
-	rowMain          fyne.CanvasObject
-	content          *fyne.Container
-	senderRow        fyne.CanvasObject
-	senderText       *canvas.Text
-	senderColor      color.NRGBA
-	senderPersistent bool
-	senderAnim       *fyne.Animation
-	replyBtn         fyne.CanvasObject
-	timestamp        *canvas.Text // canvas.Text so we can animate its alpha
-	tsAnim           *fyne.Animation
-	hovered          bool
-	onHover          func()
+	host        *fyne.Container
+	rowMain     fyne.CanvasObject
+	content     *fyne.Container
+	senderRow   fyne.CanvasObject
+	senderText  *canvas.Text
+	senderMeta  *canvas.Text
+	senderColor color.NRGBA
+	senderAnim  *fyne.Animation
+	replyBtn    fyne.CanvasObject
+	hovered     bool
+	onHover     func()
 }
 
-func newHoverMessageRow(content *fyne.Container, senderRow fyne.CanvasObject, senderText *canvas.Text, senderPersistent bool, replyBtn fyne.CanvasObject, timestamp *canvas.Text, onHover func()) *hoverMessageRow {
+func newHoverMessageRow(content *fyne.Container, senderRow fyne.CanvasObject, senderText *canvas.Text, senderMeta *canvas.Text, replyBtn fyne.CanvasObject, onHover func()) *hoverMessageRow {
 	rowMain := fyne.CanvasObject(content)
 	host := container.NewVBox(rowMain)
 	base := color.NRGBA{A: 255}
@@ -172,16 +170,15 @@ func newHoverMessageRow(content *fyne.Container, senderRow fyne.CanvasObject, se
 		}
 	}
 	r := &hoverMessageRow{
-		host:             host,
-		rowMain:          rowMain,
-		content:          content,
-		senderRow:        senderRow,
-		senderText:       senderText,
-		senderColor:      base,
-		senderPersistent: senderPersistent,
-		replyBtn:         replyBtn,
-		timestamp:        timestamp,
-		onHover:          onHover,
+		host:        host,
+		rowMain:     rowMain,
+		content:     content,
+		senderRow:   senderRow,
+		senderText:  senderText,
+		senderMeta:  senderMeta,
+		senderColor: base,
+		replyBtn:    replyBtn,
+		onHover:     onHover,
 	}
 	r.ExtendBaseWidget(r)
 	return r
@@ -203,47 +200,15 @@ func (r *hoverMessageRow) MouseIn(_ *desktop.MouseEvent) {
 		if g, ok := r.replyBtn.(*glyphAction); ok {
 			g.SetEmphasis(true)
 		}
-	}
-
-	if r.timestamp != nil {
-		// Ensure the timestamp slot is in the layout before animating.
-		r.timestamp.TextSize = hoverTimestampTextSize()
-		r.timestamp.Color = color.NRGBA{R: tsColor.R, G: tsColor.G, B: tsColor.B, A: 0}
-		r.timestamp.Show()
-		var left, right fyne.CanvasObject = r.timestamp, nil
-		if r.replyBtn != nil {
-			right = r.replyBtn
-		}
-		r.host.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, left, right, r.rowMain)}
+		r.host.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, nil, r.replyBtn, r.rowMain)}
 		r.host.Refresh()
-
-		if r.tsAnim != nil {
-			r.tsAnim.Stop()
-		}
-		startA := r.timestamp.Color.(color.NRGBA).A
-		targetA := tsColor.A
-		r.tsAnim = fyne.NewAnimation(150*time.Millisecond, func(f float32) {
-			a := startA + uint8(float32(targetA-startA)*f)
-			r.timestamp.Color = color.NRGBA{R: tsColor.R, G: tsColor.G, B: tsColor.B, A: a}
-			canvas.Refresh(r.timestamp)
-		})
-		r.tsAnim.Curve = fyne.AnimationEaseOut
-		r.tsAnim.Start()
-	} else {
-		var right fyne.CanvasObject
-		if r.replyBtn != nil {
-			right = r.replyBtn
-		}
-		r.host.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, nil, right, r.rowMain)}
-		r.host.Refresh()
+		return
 	}
 }
 
 func (r *hoverMessageRow) MouseOut() {
 	r.hovered = false
-	if !r.senderPersistent {
-		r.setSenderVisible(false)
-	}
+	r.setSenderVisible(false)
 
 	if r.replyBtn != nil {
 		if g, ok := r.replyBtn.(*glyphAction); ok {
@@ -251,35 +216,8 @@ func (r *hoverMessageRow) MouseOut() {
 		}
 		r.replyBtn.Hide()
 	}
-
-	if r.timestamp == nil {
-		r.host.Objects = []fyne.CanvasObject{r.rowMain}
-		r.host.Refresh()
-		return
-	}
-
-	if r.tsAnim != nil {
-		r.tsAnim.Stop()
-	}
-	startA := r.timestamp.Color.(color.NRGBA).A
-	const dur = 120 * time.Millisecond
-	r.tsAnim = fyne.NewAnimation(dur, func(f float32) {
-		a := uint8(float32(startA) * (1 - f))
-		r.timestamp.Color = color.NRGBA{R: tsColor.R, G: tsColor.G, B: tsColor.B, A: a}
-		canvas.Refresh(r.timestamp)
-	})
-	r.tsAnim.Curve = fyne.AnimationEaseIn
-	r.tsAnim.Start()
-
-	time.AfterFunc(dur, func() {
-		fyne.Do(func() {
-			if !r.hovered {
-				r.timestamp.Hide()
-				r.host.Objects = []fyne.CanvasObject{r.rowMain}
-				r.host.Refresh()
-			}
-		})
-	})
+	r.host.Objects = []fyne.CanvasObject{r.rowMain}
+	r.host.Refresh()
 }
 
 func (r *hoverMessageRow) MouseMoved(_ *desktop.MouseEvent) {}
@@ -294,11 +232,6 @@ func (r *hoverMessageRow) setSenderVisible(visible bool) {
 			r.content.Objects = append([]fyne.CanvasObject{r.senderRow}, r.content.Objects...)
 			r.content.Refresh()
 		}
-		if r.senderPersistent {
-			r.senderText.Color = r.senderColor
-			canvas.Refresh(r.senderText)
-			return
-		}
 		if r.senderAnim != nil {
 			r.senderAnim.Stop()
 		}
@@ -311,12 +244,13 @@ func (r *hoverMessageRow) setSenderVisible(visible bool) {
 			a := startA + uint8(float32(255-startA)*f)
 			r.senderText.Color = color.NRGBA{R: r.senderColor.R, G: r.senderColor.G, B: r.senderColor.B, A: a}
 			canvas.Refresh(r.senderText)
+			if r.senderMeta != nil {
+				r.senderMeta.Color = color.NRGBA{R: tsColor.R, G: tsColor.G, B: tsColor.B, A: a}
+				canvas.Refresh(r.senderMeta)
+			}
 		})
 		r.senderAnim.Curve = fyne.AnimationEaseOut
 		r.senderAnim.Start()
-		return
-	}
-	if r.senderPersistent {
 		return
 	}
 	if r.senderAnim != nil {
@@ -331,12 +265,16 @@ func (r *hoverMessageRow) setSenderVisible(visible bool) {
 		a := uint8(float32(startA) * (1 - f))
 		r.senderText.Color = color.NRGBA{R: r.senderColor.R, G: r.senderColor.G, B: r.senderColor.B, A: a}
 		canvas.Refresh(r.senderText)
+		if r.senderMeta != nil {
+			r.senderMeta.Color = color.NRGBA{R: tsColor.R, G: tsColor.G, B: tsColor.B, A: a}
+			canvas.Refresh(r.senderMeta)
+		}
 	})
 	r.senderAnim.Curve = fyne.AnimationEaseIn
 	r.senderAnim.Start()
 	time.AfterFunc(dur, func() {
 		fyne.Do(func() {
-			if r.hovered || r.senderPersistent {
+			if r.hovered {
 				return
 			}
 			if len(r.content.Objects) > 0 && r.content.Objects[0] == r.senderRow {
@@ -444,16 +382,8 @@ func (mv *MessageView) rebuildVBox() {
 	mv.extendAutoScrollWindow(2 * time.Second)
 	mv.vbox.Objects = nil
 
-	latestIndexBySender := make(map[string]int, len(mv.messages))
-	if mv.showSenders {
-		for i, msg := range mv.messages {
-			latestIndexBySender[messageSenderName(msg)] = i
-		}
-	}
-
-	for i, msg := range mv.messages {
-		showSender := mv.showSenders && latestIndexBySender[messageSenderName(msg)] == i
-		mv.vbox.Add(buildMessageRow(msg, mv.onReply, mv.onHover, showSender, mv.maybeScrollAfterAsyncResize))
+	for _, msg := range mv.messages {
+		mv.vbox.Add(buildMessageRow(msg, mv.onReply, mv.onHover, false, mv.maybeScrollAfterAsyncResize))
 	}
 	mv.vbox.Refresh()
 	mv.ScrollToBottom()
@@ -476,13 +406,20 @@ func buildMessageRow(msg models.Message, onReply func(models.Message), onHover f
 	timeStr := formatHoverTimestamp(msg.ParsedTime())
 	senderName := messageSenderName(msg)
 
-	sender := canvas.NewText(senderName, senderNameColor(senderName, msg.IsFromMe))
+	senderColor := senderNameColor(senderName, msg.IsFromMe)
+	senderNRGBA, ok := senderColor.(color.NRGBA)
+	if !ok {
+		senderNRGBA = color.NRGBA{R: 169, G: 177, B: 214, A: 255}
+	}
+	sender := canvas.NewText(senderName, color.NRGBA{R: senderNRGBA.R, G: senderNRGBA.G, B: senderNRGBA.B, A: 0})
 	sender.TextStyle = fyne.TextStyle{Bold: true}
+	tsInline := canvas.NewText("["+timeStr+"]", color.NRGBA{R: tsColor.R, G: tsColor.G, B: tsColor.B, A: 0})
+	tsInline.TextSize = hoverTimestampTextSize()
 	var senderRow fyne.CanvasObject
 	if msg.IsFromMe {
-		senderRow = container.NewHBox(layout.NewSpacer(), sender)
+		senderRow = container.NewHBox(layout.NewSpacer(), sender, fixedWidthSpacer(8), tsInline)
 	} else {
-		senderRow = container.NewHBox(sender, layout.NewSpacer())
+		senderRow = container.NewHBox(sender, fixedWidthSpacer(8), tsInline, layout.NewSpacer())
 	}
 
 	var objs []fyne.CanvasObject
@@ -504,12 +441,6 @@ func buildMessageRow(msg models.Message, onReply func(models.Message), onHover f
 	}
 	content := container.NewVBox(objs...)
 
-	var tsLabel *canvas.Text
-	if !msg.IsFromMe {
-		tsLabel = canvas.NewText("["+timeStr+"]", color.NRGBA{R: tsColor.R, G: tsColor.G, B: tsColor.B, A: 0})
-		tsLabel.TextSize = hoverTimestampTextSize()
-	}
-
 	var replyBtn fyne.CanvasObject
 	if onReply != nil {
 		replyGlyph := newGlyphAction("↩", func() {
@@ -522,7 +453,7 @@ func buildMessageRow(msg models.Message, onReply func(models.Message), onHover f
 		}
 	}
 
-	row := newHoverMessageRow(content, senderRow, sender, showSender, replyBtn, tsLabel, onHover)
+	row := newHoverMessageRow(content, senderRow, sender, tsInline, replyBtn, onHover)
 	return applyMessageSideIndent(row, msg.IsFromMe)
 }
 

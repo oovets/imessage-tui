@@ -160,6 +160,9 @@ func (pm *PaneManager) Widget() fyne.CanvasObject { return pm.holder }
 // FocusedPane returns the currently focused pane.
 func (pm *PaneManager) FocusedPane() *ChatPane { return pm.focused }
 
+// AppFocused reports whether the app window is currently focused/foregrounded.
+func (pm *PaneManager) AppFocused() bool { return pm.appFocused }
+
 // AllPanes returns all panes in tree order.
 func (pm *PaneManager) AllPanes() []*ChatPane { return pm.root.allPanes() }
 

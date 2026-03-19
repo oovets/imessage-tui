@@ -143,7 +143,18 @@ func (a *App) Run() {
 
 	a.paneManager = NewPaneManager(
 		func(pane *ChatPane, text string, replyTo *models.Message) { a.sendMessageFromPane(pane, text, replyTo) },
-		func(pane *ChatPane) { _ = pane },
+		func(pane *ChatPane) {
+			if pane == nil || a.win == nil {
+				return
+			}
+			if a.paneManager == nil || a.paneManager.FocusedPane() != pane {
+				return
+			}
+			if !a.paneManager.AppFocused() || pane.IsInputFocused() {
+				return
+			}
+			pane.FocusInput(a.win.Canvas())
+		},
 		a.handleInputShortcut,
 	)
 	a.restorePaneLayoutState()

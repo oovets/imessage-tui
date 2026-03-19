@@ -2,7 +2,6 @@ package gui
 
 import (
 	"image/color"
-	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -23,7 +22,6 @@ type ChatPane struct {
 	widget       *fyne.Container
 	surface      *paneSurface
 	inputVisible bool
-	revealAnim   *fyne.Animation
 }
 
 type paneSurface struct {
@@ -119,11 +117,8 @@ func (p *ChatPane) SetInputVisible(visible bool) {
 	if p.inputVisible == visible {
 		return
 	}
-	if p.revealAnim != nil {
-		p.revealAnim.Stop()
-	}
 	p.inputVisible = visible
-	p.rebuildLayout(visible)
+	p.rebuildLayout(false)
 	p.msgView.ScrollToBottom()
 }
 
@@ -138,35 +133,18 @@ func (p *ChatPane) RefreshLayout() {
 func (p *ChatPane) rebuildLayout(reveal bool) {
 	var bottom fyne.CanvasObject
 	if p.inputVisible {
-		var revealSpacer *canvas.Rectangle
-		revealStart := float32(0)
-		if reveal {
-			revealStart = inputBottomGapHeight()
-			revealSpacer = canvas.NewRectangle(color.Transparent)
-			revealSpacer.SetMinSize(fyne.NewSize(1, revealStart))
-		}
 		gapBelow := canvas.NewRectangle(color.Transparent)
 		gapBelow.SetMinSize(fyne.NewSize(1, inputBottomGapHeight()))
-		if revealSpacer != nil {
-			bottom = container.NewVBox(revealSpacer, p.inputArea.Widget(), gapBelow)
-		} else {
-			bottom = container.NewVBox(p.inputArea.Widget(), gapBelow)
-		}
+		bottom = container.NewVBox(p.inputArea.Widget(), gapBelow)
 
 		p.widget.Objects = []fyne.CanvasObject{
 			container.NewBorder(nil, bottom, nil, nil, p.msgView.Widget()),
 		}
 		p.widget.Refresh()
 
-		if revealSpacer != nil {
-			p.revealAnim = fyne.NewAnimation(140*time.Millisecond, func(f float32) {
-				h := revealStart * (1 - f)
-				revealSpacer.SetMinSize(fyne.NewSize(1, h))
-				p.widget.Refresh()
-			})
-			p.revealAnim.Curve = fyne.AnimationEaseOut
-			p.revealAnim.Start()
-			return
+		if reveal {
+			// Kept for API compatibility; we intentionally avoid extra gap animation
+			// to ensure a stable single-line spacing between messages and input.
 		}
 	} else {
 		hiddenSpacer := canvas.NewRectangle(color.Transparent)
