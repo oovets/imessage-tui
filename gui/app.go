@@ -620,6 +620,9 @@ func (a *App) handleInputShortcut(shortcut fyne.Shortcut) bool {
 	case fyne.KeyName("S"):
 		a.toggleChatListVisibility()
 		return true
+	case fyne.KeyName("W"):
+		a.closeFocusedPane()
+		return true
 	default:
 		return false
 	}

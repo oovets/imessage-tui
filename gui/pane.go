@@ -1,9 +1,6 @@
 package gui
 
 import (
-	"image/color"
-	"time"
-
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
@@ -14,16 +11,50 @@ import (
 
 var paneIDCounter int
 
-// ChatPane is a single panel showing one conversation (messages + input).
+// floatingBottomLayout places objects[0] at full container size and objects[1]
+// as an overlay card anchored to the bottom with horizontal and bottom padding.
+// The background (msgView) is never resized by the card — true overlay.
+type floatingBottomLayout struct {
+	hPad float32
+	bPad float32
+}
+
+func (l *floatingBottomLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	if len(objs) == 0 {
+		return
+	}
+	objs[0].Move(fyne.NewPos(0, 0))
+	objs[0].Resize(size)
+	if len(objs) < 2 || !objs[1].Visible() {
+		return
+	}
+	cardW := size.Width - 2*l.hPad
+	if cardW < 0 {
+		cardW = 0
+	}
+	cardH := objs[1].MinSize().Height
+	objs[1].Resize(fyne.NewSize(cardW, cardH))
+	objs[1].Move(fyne.NewPos(l.hPad, size.Height-cardH-l.bPad))
+}
+
+func (l *floatingBottomLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	if len(objs) == 0 {
+		return fyne.NewSize(0, 0)
+	}
+	return objs[0].MinSize()
+}
+
+// ChatPane is a single panel showing one conversation.
+// The input card is a permanent overlay at the bottom of the message view.
 type ChatPane struct {
-	id           int
-	msgView      *MessageView
-	inputArea    *InputArea
-	ChatGUID     string
-	widget       *fyne.Container
-	surface      *paneSurface
-	inputVisible bool
-	revealAnim   *fyne.Animation
+	id        int
+	msgView   *MessageView
+	inputArea *InputArea
+	ChatGUID  string
+	widget    fyne.CanvasObject
+	surface   *paneSurface
+	inputCard *fyne.Container
+	inputBg   *canvas.Rectangle
 }
 
 type paneSurface struct {
@@ -54,10 +85,7 @@ func (s *paneSurface) TappedSecondary(_ *fyne.PointEvent) {
 	}
 }
 
-func (s *paneSurface) MouseIn(_ *desktop.MouseEvent) {
-	// Sticky focus: hover should not steal pane focus.
-}
-
+func (s *paneSurface) MouseIn(_ *desktop.MouseEvent)    {}
 func (s *paneSurface) MouseOut()                        {}
 func (s *paneSurface) MouseMoved(_ *desktop.MouseEvent) {}
 
@@ -69,17 +97,27 @@ func newChatPane(onSend func(*ChatPane, string, *models.Message), onFocused func
 		onFocused(p)
 		p.inputArea.SetReplyTarget(msg)
 	}, nil)
+	// Reserve space at the bottom of the scroll so the last message is
+	// visible above the floating input card.
+	p.msgView.SetBottomPad(floatingCardBottomPad())
+
 	p.inputArea = NewInputAreaWithShortcutHandler(
 		func(text string, replyTo *models.Message) { onSend(p, text, replyTo) },
 		func() { onFocused(p) },
 		onInputShortcut,
 	)
-	gapBelow := canvas.NewRectangle(color.Transparent)
-	gapBelow.SetMinSize(fyne.NewSize(1, inputBottomGapHeight()))
-	inputWithGap := container.NewVBox(p.inputArea.Widget(), gapBelow)
-	p.inputVisible = true
-	p.widget = container.NewMax()
-	p.widget.Objects = []fyne.CanvasObject{container.NewBorder(nil, inputWithGap, nil, nil, p.msgView.Widget())}
+
+	// Floating input card: colored background + input, always visible.
+	p.inputBg = canvas.NewRectangle(floatingInputBgColor())
+	p.inputBg.CornerRadius = 10
+	p.inputCard = container.NewMax(p.inputBg, p.inputArea.Widget())
+
+	p.widget = container.New(
+		&floatingBottomLayout{hPad: floatingCardOuterHPad(), bPad: floatingCardBPad()},
+		p.msgView.Widget(),
+		p.inputCard,
+	)
+
 	p.surface = newPaneSurface(p.widget, func() { onFocused(p) })
 	return p
 }
@@ -107,68 +145,16 @@ func (p *ChatPane) FocusInput(c fyne.Canvas) {
 	p.inputArea.FocusEntry(c)
 }
 
-// SetInputVisible toggles whether the pane's input box is rendered.
-func (p *ChatPane) SetInputVisible(visible bool) {
-	if p.widget == nil {
-		return
-	}
-	if p.inputVisible == visible {
-		return
-	}
-	if p.revealAnim != nil {
-		p.revealAnim.Stop()
-		p.revealAnim = nil
-	}
-	p.inputVisible = visible
-	p.rebuildLayout(visible)
-	p.msgView.ScrollToBottom()
-}
+// SetInputVisible is kept for PaneManager compatibility; ignored since the
+// input card is always visible.
+func (p *ChatPane) SetInputVisible(_ bool) {}
 
-// RefreshLayout rebuilds pane spacing/layout while preserving input visibility state.
+// RefreshLayout updates theme-sensitive colours and sizes.
 func (p *ChatPane) RefreshLayout() {
-	if p.widget == nil {
-		return
+	if p.inputBg != nil {
+		p.inputBg.FillColor = floatingInputBgColor()
+		p.inputBg.Refresh()
 	}
-	if p.revealAnim != nil {
-		p.revealAnim.Stop()
-		p.revealAnim = nil
-	}
-	p.rebuildLayout(false)
-}
-
-func (p *ChatPane) rebuildLayout(reveal bool) {
-	var bottom fyne.CanvasObject
-	if p.inputVisible {
-		p.inputArea.RefreshLayout()
-		gapBelow := canvas.NewRectangle(color.Transparent)
-		gapBelow.SetMinSize(fyne.NewSize(1, inputBottomGapHeight()))
-		if reveal {
-			revealSpacer := canvas.NewRectangle(color.Transparent)
-			start := inputRevealSlideHeight()
-			revealSpacer.SetMinSize(fyne.NewSize(1, start))
-			bottom = container.NewVBox(revealSpacer, p.inputArea.Widget(), gapBelow)
-			p.widget.Objects = []fyne.CanvasObject{
-				container.NewBorder(nil, bottom, nil, nil, p.msgView.Widget()),
-			}
-			p.widget.Refresh()
-			p.revealAnim = fyne.NewAnimation(130*time.Millisecond, func(f float32) {
-				h := start * (1 - f)
-				revealSpacer.SetMinSize(fyne.NewSize(1, h))
-				p.widget.Refresh()
-			})
-			p.revealAnim.Curve = fyne.AnimationEaseOut
-			p.revealAnim.Start()
-			return
-		}
-		bottom = container.NewVBox(p.inputArea.Widget(), gapBelow)
-	} else {
-		hiddenSpacer := canvas.NewRectangle(color.Transparent)
-		hiddenSpacer.SetMinSize(fyne.NewSize(1, hiddenInputSpacerHeight()))
-		bottom = hiddenSpacer
-	}
-
-	p.widget.Objects = []fyne.CanvasObject{
-		container.NewBorder(nil, bottom, nil, nil, p.msgView.Widget()),
-	}
-	p.widget.Refresh()
+	p.inputArea.RefreshLayout()
+	p.msgView.SetBottomPad(floatingCardBottomPad())
 }

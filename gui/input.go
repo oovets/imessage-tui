@@ -2,9 +2,7 @@ package gui
 
 import (
 	"image/color"
-	"math"
 	"strings"
-	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -15,23 +13,21 @@ import (
 	"github.com/bluebubbles-tui/models"
 )
 
-// focusEntry is a widget.Entry that fires onFocused when it gains keyboard focus.
-// This lets the PaneManager know which pane the user is interacting with.
+// focusEntry is a single-line widget.Entry that fires onFocused / onBlurred
+// on keyboard focus changes and intercepts shortcuts before the entry does.
 type focusEntry struct {
 	widget.Entry
 	onFocused  func()
+	onBlurred  func()
 	onShortcut func(fyne.Shortcut) bool
 	onSubmit   func(string)
 	focused    bool
-	skipReturn bool
 }
 
 func newFocusEntry(placeholder string, onFocused func(), onShortcut func(fyne.Shortcut) bool, onSubmit func(string)) *focusEntry {
 	e := &focusEntry{onFocused: onFocused, onShortcut: onShortcut, onSubmit: onSubmit}
 	e.Entry.PlaceHolder = placeholder
-	e.Entry.MultiLine = true
-	e.Entry.Wrapping = fyne.TextWrapWord
-	e.Entry.SetMinRowsVisible(2)
+	e.Entry.MultiLine = false
 	e.ExtendBaseWidget(e)
 	return e
 }
@@ -47,11 +43,12 @@ func (e *focusEntry) FocusGained() {
 func (e *focusEntry) FocusLost() {
 	e.Entry.FocusLost()
 	e.focused = false
+	if e.onBlurred != nil {
+		e.onBlurred()
+	}
 }
 
-func (e *focusEntry) IsFocused() bool {
-	return e.focused
-}
+func (e *focusEntry) IsFocused() bool { return e.focused }
 
 // CreateRenderer wraps the standard Entry renderer and removes the
 // focus-highlight border so only the blinking cursor is visible.
@@ -70,8 +67,6 @@ func (r *focusEntryRenderer) Objects() []fyne.CanvasObject { return r.inner.Obje
 
 func (r *focusEntryRenderer) Refresh() {
 	r.inner.Refresh()
-	// Fyne draws stroke borders for entry layers; clear them recursively
-	// so only content/cursor remain visible.
 	for _, obj := range r.inner.Objects() {
 		clearStrokeRecursive(obj)
 		clearFillRecursive(obj)
@@ -114,15 +109,6 @@ func clearFillRecursive(obj fyne.CanvasObject) {
 }
 
 func (e *focusEntry) TypedShortcut(shortcut fyne.Shortcut) {
-	if custom, ok := shortcut.(*desktop.CustomShortcut); ok {
-		if custom.KeyName == fyne.KeyReturn || custom.KeyName == fyne.KeyEnter {
-			if custom.Modifier&fyne.KeyModifierShift != 0 {
-				e.skipReturn = true
-				e.Entry.TypedRune('\n')
-				return
-			}
-		}
-	}
 	if e.onShortcut != nil && e.onShortcut(shortcut) {
 		return
 	}
@@ -136,10 +122,6 @@ func (e *focusEntry) TypedKey(key *fyne.KeyEvent) {
 		return
 	}
 	if key.Name == fyne.KeyReturn || key.Name == fyne.KeyEnter {
-		if e.skipReturn {
-			e.skipReturn = false
-			return
-		}
 		if e.onSubmit != nil {
 			e.onSubmit(e.Text)
 		}
@@ -148,7 +130,7 @@ func (e *focusEntry) TypedKey(key *fyne.KeyEvent) {
 	e.Entry.TypedKey(key)
 }
 
-// InputArea holds the message entry box and send button.
+// InputArea holds the single-line message entry and reply banner.
 // All methods must be called from the Fyne main goroutine.
 type InputArea struct {
 	entry       *focusEntry
@@ -158,67 +140,47 @@ type InputArea struct {
 	cancelBtn   *glyphAction
 	onSend      func(string, *models.Message)
 	replyTarget *models.Message
-	heightRetry bool
 }
 
 func NewInputArea(onSend func(string, *models.Message), onFocused func()) *InputArea {
-	ia := &InputArea{onSend: onSend}
-
-	ia.entry = newFocusEntry("", onFocused, nil, func(text string) {
-		ia.submit(text)
-	})
-	ia.entry.OnChanged = func(_ string) { ia.updateInputHeight() }
-	ia.replyLabel = canvas.NewText("", theme.Color(theme.ColorNameDisabled))
-	ia.replyHolder = container.NewMax()
-	ia.cancelBtn = newGlyphAction("×", func() {
-		ia.ClearReplyTarget()
-	})
-
-	indent := inputSideIndent()
-	indentedEntry := container.NewBorder(nil, nil, fixedWidthSpacer(indent), fixedWidthSpacer(indent), ia.entry)
-	ia.panel = container.NewVBox(ia.replyHolder, indentedEntry)
-	ia.RefreshLayout()
-	ia.updateInputHeight()
-	return ia
+	return newInputArea(onSend, onFocused, nil)
 }
 
 func NewInputAreaWithShortcutHandler(onSend func(string, *models.Message), onFocused func(), onShortcut func(fyne.Shortcut) bool) *InputArea {
+	return newInputArea(onSend, onFocused, onShortcut)
+}
+
+func newInputArea(onSend func(string, *models.Message), onFocused func(), onShortcut func(fyne.Shortcut) bool) *InputArea {
 	ia := &InputArea{onSend: onSend}
 
 	ia.entry = newFocusEntry("", onFocused, onShortcut, func(text string) {
 		ia.submit(text)
 	})
-	ia.entry.OnChanged = func(_ string) { ia.updateInputHeight() }
 	ia.replyLabel = canvas.NewText("", theme.Color(theme.ColorNameDisabled))
 	ia.replyHolder = container.NewMax()
-	ia.cancelBtn = newGlyphAction("×", func() {
-		ia.ClearReplyTarget()
-	})
+	ia.cancelBtn = newGlyphAction("×", func() { ia.ClearReplyTarget() })
 
 	indent := inputSideIndent()
 	indentedEntry := container.NewBorder(nil, nil, fixedWidthSpacer(indent), fixedWidthSpacer(indent), ia.entry)
 	ia.panel = container.NewVBox(ia.replyHolder, indentedEntry)
 	ia.RefreshLayout()
-	ia.updateInputHeight()
 	return ia
 }
 
 // Widget returns the input panel for embedding in layouts.
-func (ia *InputArea) Widget() fyne.CanvasObject {
-	return ia.panel
-}
+func (ia *InputArea) Widget() fyne.CanvasObject { return ia.panel }
 
 // IsEntryFocused reports whether the text entry currently has keyboard focus.
-func (ia *InputArea) IsEntryFocused() bool {
-	return ia.entry.IsFocused()
-}
+func (ia *InputArea) IsEntryFocused() bool { return ia.entry.IsFocused() }
+
+// SetOnBlurred registers a callback fired when the text entry loses keyboard focus.
+func (ia *InputArea) SetOnBlurred(fn func()) { ia.entry.onBlurred = fn }
 
 // FocusEntry requests keyboard focus for the input entry.
 func (ia *InputArea) FocusEntry(c fyne.Canvas) {
-	if c == nil {
-		return
+	if c != nil {
+		c.Focus(ia.entry)
 	}
-	c.Focus(ia.entry)
 }
 
 // SetReplyTarget enables reply mode for the next sent message.
@@ -244,51 +206,10 @@ func (ia *InputArea) submit(text string) {
 	}
 	reply := ia.replyTarget
 	ia.entry.SetText("")
-	ia.updateInputHeight()
 	ia.ClearReplyTarget()
 	if ia.onSend != nil {
 		ia.onSend(text, reply)
 	}
-}
-
-func (ia *InputArea) updateInputHeight() {
-	if ia.entry == nil {
-		return
-	}
-
-	textSize := float32(theme.TextSize())
-	lineHeight := fyne.MeasureText("Mg", textSize, fyne.TextStyle{}).Height
-	if lineHeight <= 0 {
-		lineHeight = 16
-	}
-
-	availableWidth := ia.entry.Size().Width
-	if panelWidth := ia.panel.Size().Width - (2 * inputSideIndent()); panelWidth > availableWidth {
-		availableWidth = panelWidth
-	}
-	if availableWidth <= 0 {
-		availableWidth = 320
-		if !ia.heightRetry {
-			ia.heightRetry = true
-			time.AfterFunc(40*time.Millisecond, func() {
-				fyne.Do(func() {
-					ia.heightRetry = false
-					ia.updateInputHeight()
-				})
-			})
-		}
-	}
-
-	wrappedLines := estimateWrappedLines(ia.entry.Text, availableWidth, textSize)
-	if wrappedLines < 2 {
-		wrappedLines = 2
-	}
-	if wrappedLines > 8 {
-		wrappedLines = 8
-	}
-
-	ia.entry.SetMinRowsVisible(wrappedLines)
-	ia.entry.Refresh()
 }
 
 func (ia *InputArea) RefreshLayout() {
@@ -300,28 +221,10 @@ func (ia *InputArea) RefreshLayout() {
 	if ia.cancelBtn != nil {
 		ia.cancelBtn.SetTextSize(glyphTextSize())
 	}
-	ia.updateInputHeight()
 }
 
-func estimateWrappedLines(text string, width float32, textSize float32) int {
-	if strings.TrimSpace(text) == "" {
-		return 1
-	}
-	lines := 0
-	for _, raw := range strings.Split(text, "\n") {
-		line := raw
-		if line == "" {
-			lines++
-			continue
-		}
-		measure := fyne.MeasureText(line, textSize, fyne.TextStyle{}).Width
-		if width <= 0 {
-			width = 1
-		}
-		lines += int(math.Max(1, math.Ceil(float64(measure/width))))
-	}
-	if lines < 1 {
-		return 1
-	}
-	return lines
-}
+// Ensure focusEntry satisfies desktop.Mouseable so Fyne doesn't lose hover
+// state when the cursor is over the entry inside the floating card.
+func (e *focusEntry) MouseIn(_ *desktop.MouseEvent)    {}
+func (e *focusEntry) MouseOut()                        {}
+func (e *focusEntry) MouseMoved(_ *desktop.MouseEvent) {}

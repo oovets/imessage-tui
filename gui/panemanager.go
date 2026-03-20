@@ -150,7 +150,6 @@ func (pm *PaneManager) newPane() *ChatPane {
 		},
 		pm.onInputShortcut,
 	)
-	p.SetInputVisible(pm.appFocused && p == pm.focused)
 	return p
 }
 
@@ -264,7 +263,10 @@ func (pm *PaneManager) SetAppFocused(focused bool) {
 func (pm *PaneManager) syncInputVisibility() {
 	for _, p := range pm.AllPanes() {
 		p.SetFocused(pm.appFocused && p == pm.focused)
-		p.SetInputVisible(pm.appFocused && p == pm.focused)
+		if !pm.appFocused {
+			// Hide all input cards when the app window loses focus.
+			p.SetInputVisible(false)
+		}
 	}
 }
 

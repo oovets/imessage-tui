@@ -284,6 +284,7 @@ type MessageView struct {
 	onReply     func(models.Message)
 	onHover     func()
 	showSenders bool
+	bottomPad   float32
 
 	autoScrollUntil atomic.Int64
 }
@@ -294,6 +295,15 @@ func NewMessageView(onReply func(models.Message), onHover func()) *MessageView {
 	mv.scroll = container.NewVScroll(mv.vbox)
 	mv.panel = mv.scroll
 	return mv
+}
+
+// SetBottomPad sets a transparent spacer height appended after messages so the
+// last message stays visible above a floating input card overlay.
+func (mv *MessageView) SetBottomPad(h float32) {
+	mv.bottomPad = h
+	if len(mv.messages) > 0 {
+		mv.rebuildVBox()
+	}
 }
 
 // Widget returns the full message panel.
@@ -373,6 +383,11 @@ func (mv *MessageView) rebuildVBox() {
 
 	for _, msg := range mv.messages {
 		mv.vbox.Add(buildMessageRow(msg, mv.onReply, mv.onHover, false, mv.maybeScrollAfterAsyncResize))
+	}
+	if mv.bottomPad > 0 {
+		spacer := canvas.NewRectangle(color.Transparent)
+		spacer.SetMinSize(fyne.NewSize(1, mv.bottomPad))
+		mv.vbox.Add(spacer)
 	}
 	mv.vbox.Refresh()
 	mv.ScrollToBottom()
