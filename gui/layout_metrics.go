@@ -1,6 +1,9 @@
 package gui
 
-import "fyne.io/fyne/v2"
+import (
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/theme"
+)
 
 func compactModeEnabled() bool {
 	app := fyne.CurrentApp()
@@ -37,4 +40,45 @@ func hiddenInputSpacerHeight() float32 {
 		return 8
 	}
 	return 12
+}
+
+func inputRevealSlideHeight() float32 {
+	if compactModeEnabled() {
+		return 10
+	}
+	return 14
+}
+
+func hoverSenderTextSize() float32 {
+	size := float32(theme.TextSize())
+	if compactModeEnabled() {
+		size -= 2
+	} else {
+		size -= 1
+	}
+	if size < 8 {
+		size = 8
+	}
+	return size
+}
+
+func hoverTimestampTextSize() float32 {
+	size := hoverSenderTextSize() - 1
+	if size < 8 {
+		size = 8
+	}
+	return size
+}
+
+func glyphTextSize() float32 {
+	size := float32(theme.TextSize())
+	if compactModeEnabled() {
+		size -= 3
+	} else {
+		size -= 1
+	}
+	if size < 8 {
+		size = 8
+	}
+	return size
 }

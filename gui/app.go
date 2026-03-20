@@ -3,6 +3,8 @@ package gui
 import (
 	"encoding/json"
 	"log"
+	"os"
+	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -153,7 +155,7 @@ func (a *App) Run() {
 			if !a.paneManager.AppFocused() || pane.IsInputFocused() {
 				return
 			}
-			pane.FocusInput(a.win.Canvas())
+			a.focusPaneInputWithRetry(pane)
 		},
 		a.handleInputShortcut,
 	)
@@ -178,10 +180,17 @@ func (a *App) Run() {
 	a.focusFocusedPaneInput()
 
 	// Keyboard shortcuts ─────────────────────────────────────────────────
+	// Ctrl+N  open new GUI window
 	// Ctrl+H  split focused pane side by side (horizontal)
 	// Ctrl+J  split focused pane top/bottom   (vertical)
 	// Ctrl+W  close focused pane
 	c := a.win.Canvas()
+	c.AddShortcut(&desktop.CustomShortcut{
+		KeyName:  fyne.KeyName("N"),
+		Modifier: fyne.KeyModifierControl,
+	}, func(_ fyne.Shortcut) {
+		a.openNewWindow()
+	})
 	c.AddShortcut(&desktop.CustomShortcut{
 		KeyName:  fyne.KeyName("H"),
 		Modifier: fyne.KeyModifierControl,
@@ -198,11 +207,6 @@ func (a *App) Run() {
 		KeyName:  fyne.KeyName("W"),
 		Modifier: fyne.KeyModifierControl,
 	}, func(_ fyne.Shortcut) {
-		// GLFW may emit Ctrl+W while typing in Entry before normal shortcut handling.
-		// Ignore close-pane in that state to avoid accidental pane closes.
-		if a.paneManager.IsFocusedInputActive() {
-			return
-		}
 		a.closeFocusedPane()
 	})
 	// Ctrl+S  toggle chat list visibility
@@ -241,7 +245,25 @@ func (a *App) focusFocusedPaneInput() {
 	if p == nil || a.win == nil {
 		return
 	}
+	a.focusPaneInputWithRetry(p)
+}
+
+func (a *App) focusPaneInputWithRetry(p *ChatPane) {
+	if p == nil || a.win == nil || a.paneManager == nil {
+		return
+	}
 	p.FocusInput(a.win.Canvas())
+	time.AfterFunc(40*time.Millisecond, func() {
+		fyne.Do(func() {
+			if a.win == nil || a.paneManager == nil {
+				return
+			}
+			if !a.paneManager.AppFocused() || a.paneManager.FocusedPane() != p || p.IsInputFocused() {
+				return
+			}
+			p.FocusInput(a.win.Canvas())
+		})
+	})
 }
 
 func (a *App) closeFocusedPane() {
@@ -523,6 +545,12 @@ func (a *App) buildMainMenu() *fyne.MainMenu {
 	fontItem := fyne.NewMenuItem("Font", nil)
 	fontItem.ChildMenu = fyne.NewMenu("", fontItems...)
 
+	windowMenu := fyne.NewMenu("Window",
+		fyne.NewMenuItem("New Window", func() {
+			a.openNewWindow()
+		}),
+	)
+
 	viewMenu := fyne.NewMenu("View",
 		fyne.NewMenuItem("A+ Larger", func() {
 			if a.appTheme.fontSize < 20 {
@@ -566,7 +594,7 @@ func (a *App) buildMainMenu() *fyne.MainMenu {
 		}),
 	)
 
-	return fyne.NewMainMenu(viewMenu)
+	return fyne.NewMainMenu(windowMenu, viewMenu)
 }
 
 func (a *App) handleInputShortcut(shortcut fyne.Shortcut) bool {
@@ -580,6 +608,9 @@ func (a *App) handleInputShortcut(shortcut fyne.Shortcut) bool {
 
 	key := fyne.KeyName(strings.ToUpper(string(custom.KeyName)))
 	switch key {
+	case fyne.KeyName("N"):
+		a.openNewWindow()
+		return true
 	case fyne.KeyName("H"):
 		a.splitFocusedHorizontal()
 		return true
@@ -591,6 +622,18 @@ func (a *App) handleInputShortcut(shortcut fyne.Shortcut) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func (a *App) openNewWindow() {
+	exe, err := os.Executable()
+	if err != nil || strings.TrimSpace(exe) == "" {
+		log.Printf("[GUI] Failed to resolve executable for new window: %v", err)
+		return
+	}
+	cmd := exec.Command(exe)
+	if err := cmd.Start(); err != nil {
+		log.Printf("[GUI] Failed to launch new window: %v", err)
 	}
 }
 

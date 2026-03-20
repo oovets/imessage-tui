@@ -3,6 +3,11 @@ package gui
 import (
 	"image/color"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/theme"
@@ -96,6 +101,11 @@ var knownFonts = []fontDef{
 	},
 }
 
+var (
+	alacrittyFontDottedRE = regexp.MustCompile(`(?mi)^\s*(?:normal|bold|italic|bold_italic)\.family\s*=\s*["']?([^"'\n#]+)`)
+	alacrittyFontFlatRE   = regexp.MustCompile(`(?mi)^\s*family\s*[:=]\s*["']?([^"'\n#]+)`)
+)
+
 func loadFont(path string) fyne.Resource {
 	if path == "" {
 		return nil
@@ -116,6 +126,95 @@ func loadFirstFont(paths []string) fyne.Resource {
 	return nil
 }
 
+func detectAlacrittyFontFamily() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	paths := []string{
+		filepath.Join(home, ".config", "alacritty", "alacritty.toml"),
+		filepath.Join(home, ".alacritty.toml"),
+		filepath.Join(home, ".config", "alacritty", "alacritty.yml"),
+		filepath.Join(home, ".config", "alacritty", "alacritty.yaml"),
+		filepath.Join(home, ".alacritty.yml"),
+		filepath.Join(home, ".alacritty.yaml"),
+	}
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		if m := alacrittyFontDottedRE.FindSubmatch(data); len(m) > 1 {
+			return strings.TrimSpace(string(m[1]))
+		}
+		if m := alacrittyFontFlatRE.FindSubmatch(data); len(m) > 1 {
+			return strings.TrimSpace(string(m[1]))
+		}
+	}
+	return ""
+}
+
+func fontDefFromFontConfig(family string) (fontDef, bool) {
+	family = strings.TrimSpace(family)
+	if family == "" {
+		return fontDef{}, false
+	}
+	cmd := exec.Command("fc-list", "--format=%{file}\t%{family}\t%{style}\n")
+	out, err := cmd.Output()
+	if err != nil || len(out) == 0 {
+		return fontDef{}, false
+	}
+	def := fontDef{Name: family}
+	familyLower := strings.ToLower(family)
+
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		file := strings.TrimSpace(parts[0])
+		families := strings.Split(parts[1], ",")
+		style := strings.ToLower(parts[2])
+
+		matched := false
+		for _, f := range families {
+			if strings.EqualFold(strings.TrimSpace(f), familyLower) || strings.EqualFold(strings.TrimSpace(f), family) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			for _, f := range families {
+				if strings.Contains(strings.ToLower(strings.TrimSpace(f)), familyLower) {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
+			continue
+		}
+
+		switch {
+		case strings.Contains(style, "bold") && (strings.Contains(style, "italic") || strings.Contains(style, "oblique")):
+			def.BoldItalic = append(def.BoldItalic, file)
+		case strings.Contains(style, "bold"):
+			def.Bold = append(def.Bold, file)
+		case strings.Contains(style, "italic") || strings.Contains(style, "oblique"):
+			def.Italic = append(def.Italic, file)
+		default:
+			def.Regular = append(def.Regular, file)
+		}
+	}
+	if len(def.Regular) == 0 && len(def.Bold) == 0 && len(def.Italic) == 0 && len(def.BoldItalic) == 0 {
+		return fontDef{}, false
+	}
+	return def, true
+}
+
 // compactTheme is a mutable theme supporting dark/light mode, font size, font family, and bold.
 type compactTheme struct {
 	dark        bool
@@ -132,8 +231,14 @@ func newCompactTheme() *compactTheme {
 		fontSize: 11,
 		fonts:    make(map[string]fontSet),
 	}
+	fontDefs := append([]fontDef{}, knownFonts...)
+	alacrittyFamily := detectAlacrittyFontFamily()
+	if alacrittyDef, ok := fontDefFromFontConfig(alacrittyFamily); ok {
+		fontDefs = append(fontDefs, alacrittyDef)
+	}
+
 	// Load all installed font families.
-	for _, def := range knownFonts {
+	for _, def := range fontDefs {
 		if def.Name == "Default" {
 			t.fonts["Default"] = fontSet{} // all nil → Fyne built-in
 			continue
@@ -149,7 +254,14 @@ func newCompactTheme() *compactTheme {
 			boldItalic: loadFirstFont(def.BoldItalic),
 		}
 	}
-	// Prefer Lato if installed.
+
+	// Prefer user's Alacritty family when available, otherwise keep previous default.
+	if alacrittyFamily != "" {
+		if _, ok := t.fonts[alacrittyFamily]; ok {
+			t.curFamily = alacrittyFamily
+			return t
+		}
+	}
 	if _, ok := t.fonts["Lato"]; ok {
 		t.curFamily = "Lato"
 	} else {
@@ -160,15 +272,15 @@ func newCompactTheme() *compactTheme {
 
 // availableFamilies returns the names of installed font families in display order.
 func (t *compactTheme) availableFamilies() []string {
-	out := []string{"Default"}
-	for _, def := range knownFonts {
-		if def.Name == "Default" {
+	out := make([]string, 0, len(t.fonts))
+	for name := range t.fonts {
+		if name == "Default" {
 			continue
 		}
-		if _, ok := t.fonts[def.Name]; ok {
-			out = append(out, def.Name)
-		}
+		out = append(out, name)
 	}
+	sort.Strings(out)
+	out = append([]string{"Default"}, out...)
 	return out
 }
 
@@ -274,6 +386,19 @@ func (t *compactTheme) Size(name fyne.ThemeSizeName) float32 {
 		return 0
 	case theme.SizeNameText, theme.SizeNameSubHeadingText:
 		return t.fontSize
+	case theme.SizeNameCaptionText:
+		if t.compactMode {
+			sz := t.fontSize - 2
+			if sz < 8 {
+				return 8
+			}
+			return sz
+		}
+		sz := t.fontSize - 1
+		if sz < 8 {
+			return 8
+		}
+		return sz
 	default:
 		return t.base().Size(name)
 	}

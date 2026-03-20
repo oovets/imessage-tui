@@ -28,7 +28,6 @@ import (
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/storage"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/bluebubbles-tui/api"
 	"github.com/bluebubbles-tui/models"
@@ -137,14 +136,6 @@ var senderNamePalette = []color.NRGBA{
 // tsColor is the fully-opaque colour used for the hover timestamp.
 var tsColor = color.NRGBA{R: 100, G: 106, B: 130, A: 180}
 
-func hoverTimestampTextSize() float32 {
-	size := theme.TextSize() - 1
-	if size < 8 {
-		size = 8
-	}
-	return size
-}
-
 type hoverMessageRow struct {
 	widget.BaseWidget
 	host        *fyne.Container
@@ -190,9 +181,7 @@ func (r *hoverMessageRow) CreateRenderer() fyne.WidgetRenderer {
 
 func (r *hoverMessageRow) MouseIn(_ *desktop.MouseEvent) {
 	r.hovered = true
-	if r.onHover != nil {
-		r.onHover()
-	}
+	// Sticky pane focus: hover effects should not re-focus panes.
 	r.setSenderVisible(true)
 
 	if r.replyBtn != nil {
@@ -413,6 +402,7 @@ func buildMessageRow(msg models.Message, onReply func(models.Message), onHover f
 	}
 	sender := canvas.NewText(senderName, color.NRGBA{R: senderNRGBA.R, G: senderNRGBA.G, B: senderNRGBA.B, A: 0})
 	sender.TextStyle = fyne.TextStyle{Bold: true}
+	sender.TextSize = hoverSenderTextSize()
 	tsInline := canvas.NewText("["+timeStr+"]", color.NRGBA{R: tsColor.R, G: tsColor.G, B: tsColor.B, A: 0})
 	tsInline.TextSize = hoverTimestampTextSize()
 	var senderRow fyne.CanvasObject
@@ -459,9 +449,6 @@ func buildMessageRow(msg models.Message, onReply func(models.Message), onHover f
 
 func applyMessageSideIndent(row fyne.CanvasObject, isFromMe bool) fyne.CanvasObject {
 	indentPx := messageSideIndent()
-	if isFromMe {
-		row = rightAlignMessageContent(row)
-	}
 	return container.NewBorder(nil, nil, fixedWidthSpacer(indentPx), fixedWidthSpacer(indentPx), row)
 }
 

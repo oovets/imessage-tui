@@ -4,6 +4,7 @@ import (
 	"image/color"
 	"math"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -73,6 +74,7 @@ func (r *focusEntryRenderer) Refresh() {
 	// so only content/cursor remain visible.
 	for _, obj := range r.inner.Objects() {
 		clearStrokeRecursive(obj)
+		clearFillRecursive(obj)
 	}
 }
 
@@ -94,6 +96,23 @@ func clearStrokeRecursive(obj fyne.CanvasObject) {
 	}
 }
 
+func clearFillRecursive(obj fyne.CanvasObject) {
+	if obj == nil {
+		return
+	}
+	if rect, ok := obj.(*canvas.Rectangle); ok {
+		if rect.FillColor != color.Transparent {
+			rect.FillColor = color.Transparent
+			rect.Refresh()
+		}
+	}
+	if containerObj, ok := obj.(*fyne.Container); ok {
+		for _, child := range containerObj.Objects {
+			clearFillRecursive(child)
+		}
+	}
+}
+
 func (e *focusEntry) TypedShortcut(shortcut fyne.Shortcut) {
 	if custom, ok := shortcut.(*desktop.CustomShortcut); ok {
 		if custom.KeyName == fyne.KeyReturn || custom.KeyName == fyne.KeyEnter {
@@ -111,6 +130,11 @@ func (e *focusEntry) TypedShortcut(shortcut fyne.Shortcut) {
 }
 
 func (e *focusEntry) TypedKey(key *fyne.KeyEvent) {
+	if key.Name == fyne.KeyEscape {
+		e.Entry.FocusLost()
+		e.focused = false
+		return
+	}
 	if key.Name == fyne.KeyReturn || key.Name == fyne.KeyEnter {
 		if e.skipReturn {
 			e.skipReturn = false
@@ -130,9 +154,11 @@ type InputArea struct {
 	entry       *focusEntry
 	panel       fyne.CanvasObject
 	replyHolder *fyne.Container
-	replyLabel  *widget.Label
+	replyLabel  *canvas.Text
+	cancelBtn   *glyphAction
 	onSend      func(string, *models.Message)
 	replyTarget *models.Message
+	heightRetry bool
 }
 
 func NewInputArea(onSend func(string, *models.Message), onFocused func()) *InputArea {
@@ -142,14 +168,16 @@ func NewInputArea(onSend func(string, *models.Message), onFocused func()) *Input
 		ia.submit(text)
 	})
 	ia.entry.OnChanged = func(_ string) { ia.updateInputHeight() }
-	ia.replyLabel = widget.NewLabel("")
-	ia.replyLabel.Wrapping = fyne.TextWrapWord
-	ia.replyLabel.Importance = widget.LowImportance
+	ia.replyLabel = canvas.NewText("", theme.Color(theme.ColorNameDisabled))
 	ia.replyHolder = container.NewMax()
+	ia.cancelBtn = newGlyphAction("×", func() {
+		ia.ClearReplyTarget()
+	})
 
 	indent := inputSideIndent()
 	indentedEntry := container.NewBorder(nil, nil, fixedWidthSpacer(indent), fixedWidthSpacer(indent), ia.entry)
 	ia.panel = container.NewVBox(ia.replyHolder, indentedEntry)
+	ia.RefreshLayout()
 	ia.updateInputHeight()
 	return ia
 }
@@ -161,14 +189,16 @@ func NewInputAreaWithShortcutHandler(onSend func(string, *models.Message), onFoc
 		ia.submit(text)
 	})
 	ia.entry.OnChanged = func(_ string) { ia.updateInputHeight() }
-	ia.replyLabel = widget.NewLabel("")
-	ia.replyLabel.Wrapping = fyne.TextWrapWord
-	ia.replyLabel.Importance = widget.LowImportance
+	ia.replyLabel = canvas.NewText("", theme.Color(theme.ColorNameDisabled))
 	ia.replyHolder = container.NewMax()
+	ia.cancelBtn = newGlyphAction("×", func() {
+		ia.ClearReplyTarget()
+	})
 
 	indent := inputSideIndent()
 	indentedEntry := container.NewBorder(nil, nil, fixedWidthSpacer(indent), fixedWidthSpacer(indent), ia.entry)
 	ia.panel = container.NewVBox(ia.replyHolder, indentedEntry)
+	ia.RefreshLayout()
 	ia.updateInputHeight()
 	return ia
 }
@@ -195,11 +225,9 @@ func (ia *InputArea) FocusEntry(c fyne.Canvas) {
 func (ia *InputArea) SetReplyTarget(msg models.Message) {
 	reply := msg
 	ia.replyTarget = &reply
-	ia.replyLabel.SetText("Replying to: " + truncateString(stripEmojis(msg.Text), 80))
-	cancelBtn := newGlyphAction("×", func() {
-		ia.ClearReplyTarget()
-	})
-	ia.replyHolder.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, nil, cancelBtn, ia.replyLabel)}
+	ia.replyLabel.Text = "Replying to: " + truncateString(stripEmojis(msg.Text), 80)
+	ia.replyLabel.Refresh()
+	ia.replyHolder.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, nil, ia.cancelBtn, ia.replyLabel)}
 	ia.replyHolder.Refresh()
 }
 
@@ -235,8 +263,20 @@ func (ia *InputArea) updateInputHeight() {
 	}
 
 	availableWidth := ia.entry.Size().Width
+	if panelWidth := ia.panel.Size().Width - (2 * inputSideIndent()); panelWidth > availableWidth {
+		availableWidth = panelWidth
+	}
 	if availableWidth <= 0 {
 		availableWidth = 320
+		if !ia.heightRetry {
+			ia.heightRetry = true
+			time.AfterFunc(40*time.Millisecond, func() {
+				fyne.Do(func() {
+					ia.heightRetry = false
+					ia.updateInputHeight()
+				})
+			})
+		}
 	}
 
 	wrappedLines := estimateWrappedLines(ia.entry.Text, availableWidth, textSize)
@@ -249,6 +289,18 @@ func (ia *InputArea) updateInputHeight() {
 
 	ia.entry.SetMinRowsVisible(wrappedLines)
 	ia.entry.Refresh()
+}
+
+func (ia *InputArea) RefreshLayout() {
+	if ia.replyLabel != nil {
+		ia.replyLabel.TextSize = hoverTimestampTextSize()
+		ia.replyLabel.Color = theme.Color(theme.ColorNameDisabled)
+		ia.replyLabel.Refresh()
+	}
+	if ia.cancelBtn != nil {
+		ia.cancelBtn.SetTextSize(glyphTextSize())
+	}
+	ia.updateInputHeight()
 }
 
 func estimateWrappedLines(text string, width float32, textSize float32) int {

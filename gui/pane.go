@@ -2,6 +2,7 @@ package gui
 
 import (
 	"image/color"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -22,6 +23,7 @@ type ChatPane struct {
 	widget       *fyne.Container
 	surface      *paneSurface
 	inputVisible bool
+	revealAnim   *fyne.Animation
 }
 
 type paneSurface struct {
@@ -53,9 +55,7 @@ func (s *paneSurface) TappedSecondary(_ *fyne.PointEvent) {
 }
 
 func (s *paneSurface) MouseIn(_ *desktop.MouseEvent) {
-	if s.onActivate != nil {
-		s.onActivate()
-	}
+	// Sticky focus: hover should not steal pane focus.
 }
 
 func (s *paneSurface) MouseOut()                        {}
@@ -68,9 +68,7 @@ func newChatPane(onSend func(*ChatPane, string, *models.Message), onFocused func
 	p.msgView = NewMessageView(func(msg models.Message) {
 		onFocused(p)
 		p.inputArea.SetReplyTarget(msg)
-	}, func() {
-		onFocused(p)
-	})
+	}, nil)
 	p.inputArea = NewInputAreaWithShortcutHandler(
 		func(text string, replyTo *models.Message) { onSend(p, text, replyTo) },
 		func() { onFocused(p) },
@@ -117,8 +115,12 @@ func (p *ChatPane) SetInputVisible(visible bool) {
 	if p.inputVisible == visible {
 		return
 	}
+	if p.revealAnim != nil {
+		p.revealAnim.Stop()
+		p.revealAnim = nil
+	}
 	p.inputVisible = visible
-	p.rebuildLayout(false)
+	p.rebuildLayout(visible)
 	p.msgView.ScrollToBottom()
 }
 
@@ -127,35 +129,42 @@ func (p *ChatPane) RefreshLayout() {
 	if p.widget == nil {
 		return
 	}
+	if p.revealAnim != nil {
+		p.revealAnim.Stop()
+		p.revealAnim = nil
+	}
 	p.rebuildLayout(false)
 }
 
 func (p *ChatPane) rebuildLayout(reveal bool) {
 	var bottom fyne.CanvasObject
 	if p.inputVisible {
+		p.inputArea.RefreshLayout()
 		gapBelow := canvas.NewRectangle(color.Transparent)
 		gapBelow.SetMinSize(fyne.NewSize(1, inputBottomGapHeight()))
-		bottom = container.NewVBox(p.inputArea.Widget(), gapBelow)
-
-		p.widget.Objects = []fyne.CanvasObject{
-			container.NewBorder(nil, bottom, nil, nil, p.msgView.Widget()),
-		}
-		p.widget.Refresh()
-
 		if reveal {
-			// Kept for API compatibility; we intentionally avoid extra gap animation
-			// to ensure a stable single-line spacing between messages and input.
+			revealSpacer := canvas.NewRectangle(color.Transparent)
+			start := inputRevealSlideHeight()
+			revealSpacer.SetMinSize(fyne.NewSize(1, start))
+			bottom = container.NewVBox(revealSpacer, p.inputArea.Widget(), gapBelow)
+			p.widget.Objects = []fyne.CanvasObject{
+				container.NewBorder(nil, bottom, nil, nil, p.msgView.Widget()),
+			}
+			p.widget.Refresh()
+			p.revealAnim = fyne.NewAnimation(130*time.Millisecond, func(f float32) {
+				h := start * (1 - f)
+				revealSpacer.SetMinSize(fyne.NewSize(1, h))
+				p.widget.Refresh()
+			})
+			p.revealAnim.Curve = fyne.AnimationEaseOut
+			p.revealAnim.Start()
+			return
 		}
+		bottom = container.NewVBox(p.inputArea.Widget(), gapBelow)
 	} else {
 		hiddenSpacer := canvas.NewRectangle(color.Transparent)
 		hiddenSpacer.SetMinSize(fyne.NewSize(1, hiddenInputSpacerHeight()))
 		bottom = hiddenSpacer
-
-		p.widget.Objects = []fyne.CanvasObject{
-			container.NewBorder(nil, bottom, nil, nil, p.msgView.Widget()),
-		}
-		p.widget.Refresh()
-		return
 	}
 
 	p.widget.Objects = []fyne.CanvasObject{
