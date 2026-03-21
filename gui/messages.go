@@ -608,7 +608,7 @@ func buildAttachmentRow(att models.Attachment, onAsyncResize func()) fyne.Canvas
 		log.Printf("[attachment] trying local URI: %s", uri.String())
 		if img := buildInlineImage(uri); img != nil {
 			log.Printf("[attachment] local image OK: %s", uri.String())
-			return img
+			return newCollapsibleCard("Image: "+name, img, nil)
 		}
 		log.Printf("[attachment] local image failed (not an image or unreadable): %s", uri.String())
 	} else {
@@ -637,24 +637,22 @@ func buildAttachmentRow(att models.Attachment, onAsyncResize func()) fyne.Canvas
 	return label
 }
 
-// buildAsyncAttachmentImage shows a placeholder label and replaces it with the
-// actual image once the API download completes.
+// buildAsyncAttachmentImage shows a collapsed card and reveals the image when loaded.
 func buildAsyncAttachmentImage(guid, name string, fetch func(string) ([]byte, string, error), onAsyncResize func()) fyne.CanvasObject {
-	placeholder := widget.NewLabel("Loading image…")
-	placeholder.Importance = widget.LowImportance
-	box := container.NewVBox(placeholder)
+	content := container.NewVBox()
+	collapsed := newCollapsibleCard("Image: "+name, content, onAsyncResize)
 
 	go func() {
 		data, mimeType, err := fetch(guid)
 		if err != nil {
 			log.Printf("[attachment] API download error guid=%q: %v", guid, err)
-			fyne.Do(func() { placeholder.SetText("Image: " + name) })
+			fyne.Do(func() { collapsed.SetSummary("Image: " + name + " (failed)") })
 			return
 		}
 		log.Printf("[attachment] API download OK guid=%q bytes=%d mime=%q", guid, len(data), mimeType)
 		if _, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil {
 			log.Printf("[attachment] image decode failed guid=%q: %v", guid, err)
-			fyne.Do(func() { placeholder.SetText("Image: " + name) })
+			fyne.Do(func() { collapsed.SetSummary("Image: " + name + " (decode failed)") })
 			return
 		}
 		res := fyne.NewStaticResource(guid, data)
@@ -662,15 +660,16 @@ func buildAsyncAttachmentImage(guid, name string, fetch func(string) ([]byte, st
 		img.FillMode = canvas.ImageFillContain
 		img.SetMinSize(fyne.NewSize(220, 140))
 		fyne.Do(func() {
-			box.Objects = []fyne.CanvasObject{img}
-			box.Refresh()
-			if onAsyncResize != nil {
+			content.Objects = []fyne.CanvasObject{img}
+			content.Refresh()
+			// Only trigger resize if the card is already open.
+			if collapsed.expanded && onAsyncResize != nil {
 				onAsyncResize()
 			}
 		})
 	}()
 
-	return box
+	return collapsed
 }
 
 func buildLinkPreviewRows(body string, _ bool, onAsyncResize func()) []fyne.CanvasObject {
@@ -698,55 +697,106 @@ func buildLinkPreviewRows(body string, _ bool, onAsyncResize func()) []fyne.Canv
 	return rows
 }
 
+// collapsibleCard is a tappable widget that starts collapsed and reveals
+// content on click. The header line shows "▶ summary" / "▼ summary".
+type collapsibleCard struct {
+	widget.BaseWidget
+	summaryText  string
+	summaryLabel *widget.Label
+	content      fyne.CanvasObject
+	expanded     bool
+	onResize     func()
+	host         *fyne.Container
+}
+
+func newCollapsibleCard(summary string, content fyne.CanvasObject, onResize func()) *collapsibleCard {
+	c := &collapsibleCard{summaryText: summary, content: content, onResize: onResize}
+	c.summaryLabel = widget.NewLabel("▶ " + summary)
+	c.summaryLabel.Importance = widget.LowImportance
+	c.host = container.NewVBox(c.summaryLabel)
+	c.ExtendBaseWidget(c)
+	return c
+}
+
+func (c *collapsibleCard) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(c.host)
+}
+
+// SetSummary updates the header text without changing expanded state.
+func (c *collapsibleCard) SetSummary(text string) {
+	c.summaryText = text
+	prefix := "▶ "
+	if c.expanded {
+		prefix = "▼ "
+	}
+	c.summaryLabel.SetText(prefix + text)
+}
+
+func (c *collapsibleCard) Tapped(_ *fyne.PointEvent) {
+	c.expanded = !c.expanded
+	if c.expanded {
+		c.summaryLabel.SetText("▼ " + c.summaryText)
+		c.host.Objects = []fyne.CanvasObject{c.summaryLabel, c.content}
+	} else {
+		c.summaryLabel.SetText("▶ " + c.summaryText)
+		c.host.Objects = []fyne.CanvasObject{c.summaryLabel}
+	}
+	c.host.Refresh()
+	if c.onResize != nil {
+		c.onResize()
+	}
+}
+
 func buildLinkPreviewCard(rawURL string, onAsyncResize func()) fyne.CanvasObject {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return widget.NewLabel(rawURL)
 	}
 
+	hostname := parsed.Hostname()
 	card := container.NewVBox()
-	title := widget.NewLabel("Loading preview...")
+	title := widget.NewLabel(hostname)
 	title.Wrapping = fyne.TextWrapWord
 	title.TextStyle = fyne.TextStyle{Bold: true}
-
-	site := widget.NewLabel(parsed.Hostname())
+	site := widget.NewLabel(hostname)
 	site.Importance = widget.LowImportance
-
 	link := widget.NewHyperlink("Open link", parsed)
+	card.Objects = []fyne.CanvasObject{title, site, link}
 
-	card.Add(title)
-	card.Add(site)
-	card.Add(link)
-
-	row := fyne.CanvasObject(card)
+	collapsed := newCollapsibleCard(hostname, card, onAsyncResize)
 
 	go func() {
 		meta := getLinkPreview(rawURL)
 		fyne.Do(func() {
 			if meta.Err != "" {
-				title.SetText(parsed.Hostname())
+				title.SetText(hostname)
 				site.SetText("Preview unavailable")
+				card.Refresh()
 				return
 			}
 
+			displayTitle := hostname
 			if meta.Title != "" {
+				displayTitle = meta.Title
 				title.SetText(meta.Title)
 			} else {
-				title.SetText(parsed.Hostname())
+				title.SetText(hostname)
 			}
-
 			if meta.SiteName != "" {
 				site.SetText(meta.SiteName)
 			} else {
-				site.SetText(parsed.Hostname())
+				site.SetText(hostname)
 			}
+			// Update collapsed header to show the actual page title.
+			collapsed.SetSummary(displayTitle)
 
 			if meta.Description != "" {
 				desc := widget.NewLabel(meta.Description)
 				desc.Wrapping = fyne.TextWrapWord
 				desc.Importance = widget.LowImportance
-				card.Objects = append([]fyne.CanvasObject{title, site, desc}, link)
-				if onAsyncResize != nil {
+				card.Objects = []fyne.CanvasObject{title, site, desc, link}
+				card.Refresh()
+				if collapsed.expanded && onAsyncResize != nil {
 					onAsyncResize()
 				}
 			}
@@ -757,7 +807,7 @@ func buildLinkPreviewCard(rawURL string, onAsyncResize func()) fyne.CanvasObject
 						fyne.Do(func() {
 							card.Objects = prependCanvasObject(card.Objects, img)
 							card.Refresh()
-							if onAsyncResize != nil {
+							if collapsed.expanded && onAsyncResize != nil {
 								onAsyncResize()
 							}
 						})
@@ -766,13 +816,10 @@ func buildLinkPreviewCard(rawURL string, onAsyncResize func()) fyne.CanvasObject
 			}
 
 			card.Refresh()
-			if onAsyncResize != nil {
-				onAsyncResize()
-			}
 		})
 	}()
 
-	return row
+	return collapsed
 }
 
 func prependCanvasObject(objs []fyne.CanvasObject, obj fyne.CanvasObject) []fyne.CanvasObject {
