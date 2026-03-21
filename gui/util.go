@@ -29,8 +29,8 @@ func formatMessageTime(t time.Time) string {
 	return t.Format("15:04")
 }
 
-// formatHoverTimestamp returns a compact timestamp for hover tooltips.
-// For today's messages it shows only time; older messages include date.
+// formatHoverTimestamp returns a compact timestamp: time only for today,
+// date+time for older messages.
 func formatHoverTimestamp(t time.Time) string {
 	now := time.Now()
 	local := t.Local()
