@@ -713,6 +713,7 @@ func newCollapsibleCard(summary string, content fyne.CanvasObject, onResize func
 	c := &collapsibleCard{summaryText: summary, content: content, onResize: onResize}
 	c.summaryLabel = widget.NewLabel("▶ " + summary)
 	c.summaryLabel.Importance = widget.LowImportance
+	c.summaryLabel.Wrapping = fyne.TextWrapWord
 	c.host = container.NewVBox(c.summaryLabel)
 	c.ExtendBaseWidget(c)
 	return c
@@ -760,6 +761,7 @@ func buildLinkPreviewCard(rawURL string, onAsyncResize func()) fyne.CanvasObject
 	title.TextStyle = fyne.TextStyle{Bold: true}
 	site := widget.NewLabel(hostname)
 	site.Importance = widget.LowImportance
+	site.Wrapping = fyne.TextWrapWord
 	link := widget.NewHyperlink("Open link", parsed)
 	card.Objects = []fyne.CanvasObject{title, site, link}
 

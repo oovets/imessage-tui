@@ -37,11 +37,10 @@ func (l *floatingBottomLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) 
 	objs[1].Move(fyne.NewPos(l.hPad, size.Height-cardH-l.bPad))
 }
 
-func (l *floatingBottomLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
-	if len(objs) == 0 {
-		return fyne.NewSize(0, 0)
-	}
-	return objs[0].MinSize()
+func (l *floatingBottomLayout) MinSize(_ []fyne.CanvasObject) fyne.Size {
+	// A small constant keeps the layout from advertising the scroll content's
+	// full minimum width (which could be very wide) to parent containers.
+	return fyne.NewSize(80, 80)
 }
 
 // ChatPane is a single panel showing one conversation.
@@ -67,6 +66,14 @@ func newPaneSurface(content fyne.CanvasObject, onActivate func()) *paneSurface {
 	s := &paneSurface{content: content, onActivate: onActivate}
 	s.ExtendBaseWidget(s)
 	return s
+}
+
+func (s *paneSurface) MinSize() fyne.Size {
+	// Return a small constant so Fyne's split containers are not forced to
+	// honour the full content MinSize (which can be hundreds of dp wide when
+	// messages contain long words, filenames, or images). Content will still
+	// be laid out at whatever width the split actually allocates.
+	return fyne.NewSize(80, 80)
 }
 
 func (s *paneSurface) CreateRenderer() fyne.WidgetRenderer {

@@ -177,8 +177,6 @@ func (a *App) Run() {
 			a.scrollAllPanes()
 		})
 	})
-	a.focusFocusedPaneInput()
-
 	// Keyboard shortcuts ─────────────────────────────────────────────────
 	// Ctrl+N  open new GUI window
 	// Ctrl+H  split focused pane side by side (horizontal)
@@ -252,8 +250,10 @@ func (a *App) focusPaneInputWithRetry(p *ChatPane) {
 	if p == nil || a.win == nil || a.paneManager == nil {
 		return
 	}
-	p.FocusInput(a.win.Canvas())
-	time.AfterFunc(40*time.Millisecond, func() {
+	// Use a short timer so the canvas has a chance to register the new layout
+	// before we request focus. An immediate call would fail if the widget tree
+	// was just rebuilt (e.g. after a split), producing Fyne "not in canvas" errors.
+	time.AfterFunc(20*time.Millisecond, func() {
 		fyne.Do(func() {
 			if a.win == nil || a.paneManager == nil {
 				return
