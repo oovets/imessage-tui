@@ -88,6 +88,7 @@ PREVIEW_PROXY_ADDR=127.0.0.1:8091 ./scripts/install.sh
 ```bash
 go build -o bluebubbles-tui .            # terminal UI
 go build -o bluebubbles-gui ./cmd/gui/  # windowed GUI
+go build -o slack-gui ./cmd/slack-gui/  # Slack GUI client
 go build -o bluebubbles-preview-proxy ./cmd/preview-proxy/ # local preview proxy
 ```
 
@@ -188,6 +189,58 @@ A windowed Fyne v2 app with a dark, compact theme. Designed to feel like the TUI
 Or launch from Walker / any app launcher (see [Desktop Launcher](#desktop-launcher)).
 
 Logs to `~/.bluebubbles-gui.log`.
+
+---
+
+## Slack GUI (new)
+
+A Slack desktop client with the same compact/dark visual style as `bluebubbles-gui`.
+
+### Configuration
+
+Use environment variables, or reuse `slack_rust` `slack_config.json` credentials format (`workspaces` + `active_workspace`).
+
+Token resolution order:
+
+1. `SLACK_BOT_TOKEN`
+2. `SLACK_TOKEN`
+3. `slack_config.json` (auto-discovered, or explicitly via `SLACK_CONFIG_PATH`)
+
+```bash
+export SLACK_BOT_TOKEN="xoxb-..."
+# Optional alternate token env:
+export SLACK_TOKEN="xoxp-..."
+# Optional (for proxy/testing):
+export SLACK_API_BASE_URL="https://slack.com/api"
+# Optional explicit config file path:
+export SLACK_CONFIG_PATH="/path/to/slack_config.json"
+```
+
+### Build + Run
+
+```bash
+go build -o slack-gui ./cmd/slack-gui/
+./slack-gui
+```
+
+Logs to `~/.slack-gui.log`.
+
+### Slack GUI Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+H` | Split focused pane side by side |
+| `Ctrl+J` | Split focused pane top/bottom |
+| `Ctrl+W` | Close focused pane |
+| `Ctrl+S` | Toggle channel list |
+| `Ctrl+N` | New window |
+
+### Threads, replies, media
+
+- Reply to a message with the `↩` action.
+- Open a thread in-place with `🧵`.
+- Image/file attachments are rendered as media/link rows, and image previews can be opened in a separate window.
+- Window size, compact mode, channel-list visibility and split pane layout (including pane channel/thread assignment) persist across restart.
 
 ### Keyboard Shortcuts
 
