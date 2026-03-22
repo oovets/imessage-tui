@@ -1,6 +1,7 @@
 package gui
 
 import (
+	_ "embed"
 	"image/color"
 	"os"
 	"os/exec"
@@ -12,6 +13,81 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/theme"
 )
+
+//go:embed fonts/Inter-Regular.ttf
+var interRegular []byte
+
+//go:embed fonts/Inter-Bold.ttf
+var interBold []byte
+
+//go:embed fonts/Inter-Italic.ttf
+var interItalic []byte
+
+//go:embed fonts/Inter-BoldItalic.ttf
+var interBoldItalic []byte
+
+//go:embed fonts/Lato-Regular.ttf
+var latoRegular []byte
+
+//go:embed fonts/Lato-Bold.ttf
+var latoBold []byte
+
+//go:embed fonts/Lato-Italic.ttf
+var latoItalic []byte
+
+//go:embed fonts/Lato-BoldItalic.ttf
+var latoBoldItalic []byte
+
+//go:embed fonts/NotoSans-Regular.ttf
+var notoSansRegular []byte
+
+//go:embed fonts/NotoSans-Bold.ttf
+var notoSansBold []byte
+
+//go:embed fonts/NotoSans-Italic.ttf
+var notoSansItalic []byte
+
+//go:embed fonts/NotoSans-BoldItalic.ttf
+var notoSansBoldItalic []byte
+
+//go:embed fonts/JetBrainsMono-Regular.ttf
+var jetBrainsMonoRegular []byte
+
+//go:embed fonts/JetBrainsMono-Bold.ttf
+var jetBrainsMonoBold []byte
+
+//go:embed fonts/JetBrainsMono-Italic.ttf
+var jetBrainsMonoItalic []byte
+
+//go:embed fonts/JetBrainsMono-BoldItalic.ttf
+var jetBrainsMonoBoldItalic []byte
+
+var bundledFonts = map[string]fontSet{
+	"Inter": {
+		regular:    fyne.NewStaticResource("Inter-Regular.ttf", interRegular),
+		bold:       fyne.NewStaticResource("Inter-Bold.ttf", interBold),
+		italic:     fyne.NewStaticResource("Inter-Italic.ttf", interItalic),
+		boldItalic: fyne.NewStaticResource("Inter-BoldItalic.ttf", interBoldItalic),
+	},
+	"Lato": {
+		regular:    fyne.NewStaticResource("Lato-Regular.ttf", latoRegular),
+		bold:       fyne.NewStaticResource("Lato-Bold.ttf", latoBold),
+		italic:     fyne.NewStaticResource("Lato-Italic.ttf", latoItalic),
+		boldItalic: fyne.NewStaticResource("Lato-BoldItalic.ttf", latoBoldItalic),
+	},
+	"Noto Sans": {
+		regular:    fyne.NewStaticResource("NotoSans-Regular.ttf", notoSansRegular),
+		bold:       fyne.NewStaticResource("NotoSans-Bold.ttf", notoSansBold),
+		italic:     fyne.NewStaticResource("NotoSans-Italic.ttf", notoSansItalic),
+		boldItalic: fyne.NewStaticResource("NotoSans-BoldItalic.ttf", notoSansBoldItalic),
+	},
+	"JetBrains Mono": {
+		regular:    fyne.NewStaticResource("JetBrainsMono-Regular.ttf", jetBrainsMonoRegular),
+		bold:       fyne.NewStaticResource("JetBrainsMono-Bold.ttf", jetBrainsMonoBold),
+		italic:     fyne.NewStaticResource("JetBrainsMono-Italic.ttf", jetBrainsMonoItalic),
+		boldItalic: fyne.NewStaticResource("JetBrainsMono-BoldItalic.ttf", jetBrainsMonoBoldItalic),
+	},
+}
 
 type fontSet struct {
 	regular, bold, italic, boldItalic fyne.Resource
@@ -231,23 +307,32 @@ func newCompactTheme() *compactTheme {
 		fontSize: 11,
 		fonts:    make(map[string]fontSet),
 	}
+
+	// Always available: bundled fonts
+	t.fonts["Default"] = fontSet{}
+	for name, fs := range bundledFonts {
+		t.fonts[name] = fs
+	}
+
+	// System fonts: add with "(system)" suffix if name already bundled
 	fontDefs := append([]fontDef{}, knownFonts...)
 	alacrittyFamily := detectAlacrittyFontFamily()
 	if alacrittyDef, ok := fontDefFromFontConfig(alacrittyFamily); ok {
 		fontDefs = append(fontDefs, alacrittyDef)
 	}
-
-	// Load all installed font families.
 	for _, def := range fontDefs {
 		if def.Name == "Default" {
-			t.fonts["Default"] = fontSet{} // all nil → Fyne built-in
 			continue
 		}
 		regular := loadFirstFont(def.Regular)
 		if regular == nil {
-			continue // not installed
+			continue
 		}
-		t.fonts[def.Name] = fontSet{
+		name := def.Name
+		if _, exists := bundledFonts[name]; exists {
+			name = name + " (system)"
+		}
+		t.fonts[name] = fontSet{
 			regular:    regular,
 			bold:       loadFirstFont(def.Bold),
 			italic:     loadFirstFont(def.Italic),
@@ -255,18 +340,14 @@ func newCompactTheme() *compactTheme {
 		}
 	}
 
-	// Prefer user's Alacritty family when available, otherwise keep previous default.
+	// Prefer user's Alacritty family when available, otherwise default to Inter.
 	if alacrittyFamily != "" {
 		if _, ok := t.fonts[alacrittyFamily]; ok {
 			t.curFamily = alacrittyFamily
 			return t
 		}
 	}
-	if _, ok := t.fonts["Lato"]; ok {
-		t.curFamily = "Lato"
-	} else {
-		t.curFamily = "Default"
-	}
+	t.curFamily = "Inter"
 	return t
 }
 
