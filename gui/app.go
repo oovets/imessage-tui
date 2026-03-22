@@ -45,6 +45,8 @@ type App struct {
 	maxLinkPreviews     int
 	windowWidth         float32
 	windowHeight        float32
+	launchChatGUID      string
+	detachedPaneMode    bool
 
 	mu       sync.Mutex
 	msgCache map[string][]models.Message
@@ -93,7 +95,7 @@ func (w *fixedWidthWrap) SetWidth(width float32) {
 }
 
 // NewApp creates a new GUI application using the given API and WebSocket clients.
-func NewApp(apiClient *api.Client, wsClient *ws.Client, cfg *config.Config) *App {
+func NewApp(apiClient *api.Client, wsClient *ws.Client, cfg *config.Config, launchChatGUID string, detachedPaneMode bool) *App {
 	enablePreviews := true
 	maxPreviews := 2
 	if cfg != nil {
@@ -110,6 +112,8 @@ func NewApp(apiClient *api.Client, wsClient *ws.Client, cfg *config.Config) *App
 		msgCache:            make(map[string][]models.Message),
 		linkPreviewsEnabled: enablePreviews,
 		maxLinkPreviews:     maxPreviews,
+		launchChatGUID:      strings.TrimSpace(launchChatGUID),
+		detachedPaneMode:    detachedPaneMode,
 	}
 }
 
@@ -159,7 +163,11 @@ func (a *App) Run() {
 		},
 		a.handleInputShortcut,
 	)
-	a.restorePaneLayoutState()
+	if a.detachedPaneMode {
+		a.showChatList = false
+	} else {
+		a.restorePaneLayoutState()
+	}
 
 	a.contentHolder = container.NewMax(a.mainContent())
 	a.win.SetContent(a.contentHolder)
@@ -179,6 +187,7 @@ func (a *App) Run() {
 	})
 	// Keyboard shortcuts ─────────────────────────────────────────────────
 	// Ctrl+N  open new GUI window
+	// Ctrl+O  move focused pane chat to a new window
 	// Ctrl+H  split focused pane side by side (horizontal)
 	// Ctrl+J  split focused pane top/bottom   (vertical)
 	// Ctrl+W  close focused pane
@@ -188,6 +197,12 @@ func (a *App) Run() {
 		Modifier: fyne.KeyModifierControl,
 	}, func(_ fyne.Shortcut) {
 		a.openNewWindow()
+	})
+	c.AddShortcut(&desktop.CustomShortcut{
+		KeyName:  fyne.KeyName("O"),
+		Modifier: fyne.KeyModifierControl,
+	}, func(_ fyne.Shortcut) {
+		a.moveFocusedPaneToNewWindow()
 	})
 	c.AddShortcut(&desktop.CustomShortcut{
 		KeyName:  fyne.KeyName("H"),
@@ -273,6 +288,9 @@ func (a *App) closeFocusedPane() {
 }
 
 func (a *App) toggleChatListVisibility() {
+	if a.detachedPaneMode {
+		return
+	}
 	a.showChatList = !a.showChatList
 	a.fyneApp.Preferences().SetBool(prefShowChatList, a.showChatList)
 	a.contentHolder.Objects = []fyne.CanvasObject{a.mainContent()}
@@ -384,6 +402,9 @@ func (a *App) saveWindowSizePreference() {
 }
 
 func (a *App) savePaneLayoutState() {
+	if a.detachedPaneMode {
+		return
+	}
 	if a.fyneApp == nil || a.paneManager == nil {
 		return
 	}
@@ -434,6 +455,9 @@ func (a *App) setDarkMode(enabled bool) {
 	a.appTheme.dark = enabled
 	a.fyneApp.Preferences().SetBool(prefDarkMode, enabled)
 	a.fyneApp.Settings().SetTheme(a.appTheme)
+	// Refresh custom-painted pane elements (e.g. floating input background)
+	// that do not automatically pick up theme changes.
+	a.refreshAllMessageViews()
 	a.win.SetMainMenu(a.buildMainMenu())
 }
 
@@ -549,6 +573,9 @@ func (a *App) buildMainMenu() *fyne.MainMenu {
 		fyne.NewMenuItem("New Window", func() {
 			a.openNewWindow()
 		}),
+		fyne.NewMenuItem("Move Focused Pane to New Window", func() {
+			a.moveFocusedPaneToNewWindow()
+		}),
 	)
 
 	viewMenu := fyne.NewMenu("View",
@@ -611,6 +638,9 @@ func (a *App) handleInputShortcut(shortcut fyne.Shortcut) bool {
 	case fyne.KeyName("N"):
 		a.openNewWindow()
 		return true
+	case fyne.KeyName("O"):
+		a.moveFocusedPaneToNewWindow()
+		return true
 	case fyne.KeyName("H"):
 		a.splitFocusedHorizontal()
 		return true
@@ -629,15 +659,68 @@ func (a *App) handleInputShortcut(shortcut fyne.Shortcut) bool {
 }
 
 func (a *App) openNewWindow() {
+	_ = a.launchWindowForChat("", false)
+}
+
+func (a *App) openFocusedPaneInNewWindow() {
+	if a.paneManager == nil {
+		a.openNewWindow()
+		return
+	}
+	p := a.paneManager.FocusedPane()
+	if p == nil || strings.TrimSpace(p.ChatGUID) == "" {
+		a.openNewWindow()
+		return
+	}
+	_ = a.launchWindowForChat(p.ChatGUID, false)
+}
+
+func (a *App) moveFocusedPaneToNewWindow() {
+	if a.paneManager == nil {
+		a.openNewWindow()
+		return
+	}
+	p := a.paneManager.FocusedPane()
+	if p == nil || strings.TrimSpace(p.ChatGUID) == "" {
+		a.openNewWindow()
+		return
+	}
+	if !a.launchWindowForChat(p.ChatGUID, true) {
+		return
+	}
+	if len(a.paneManager.AllPanes()) > 1 {
+		a.closeFocusedPane()
+		return
+	}
+	// Single-pane window: "move" means the current pane no longer shows the chat.
+	p.ChatGUID = ""
+	p.ClearReplyTarget()
+	p.msgView.SetMessages(nil)
+	if a.chatListComp != nil {
+		a.chatListComp.SetSelected("")
+	}
+	a.savePaneLayoutState()
+}
+
+func (a *App) launchWindowForChat(chatGUID string, detachedPaneMode bool) bool {
 	exe, err := os.Executable()
 	if err != nil || strings.TrimSpace(exe) == "" {
 		log.Printf("[GUI] Failed to resolve executable for new window: %v", err)
-		return
+		return false
 	}
-	cmd := exec.Command(exe)
+	args := []string{}
+	if cg := strings.TrimSpace(chatGUID); cg != "" {
+		args = append(args, "--chat-guid", cg)
+	}
+	if detachedPaneMode {
+		args = append(args, "--detached-pane")
+	}
+	cmd := exec.Command(exe, args...)
 	if err := cmd.Start(); err != nil {
 		log.Printf("[GUI] Failed to launch new window: %v", err)
+		return false
 	}
+	return true
 }
 
 // selectChat loads the given chat into the focused pane.
@@ -794,6 +877,17 @@ func (a *App) loadChats() {
 	fyne.Do(func() {
 		a.chatListComp.SetChats(chats)
 		a.refreshUnreadBadge()
+		if a.launchChatGUID != "" {
+			for i := range chats {
+				if chats[i].GUID != a.launchChatGUID {
+					continue
+				}
+				a.chatListComp.SetSelected(chats[i].GUID)
+				a.selectChat(&chats[i])
+				return
+			}
+			log.Printf("[GUI] launch chat GUID not found in chat list: %s", a.launchChatGUID)
+		}
 		hasAssigned := false
 		for _, p := range a.paneManager.AllPanes() {
 			if p.ChatGUID == "" {

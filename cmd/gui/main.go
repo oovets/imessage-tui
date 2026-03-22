@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"io"
 	"log"
 	"os"
@@ -29,6 +30,10 @@ func init() {
 }
 
 func main() {
+	chatGUID := flag.String("chat-guid", "", "open this chat GUID in the focused pane on startup")
+	detachedPane := flag.Bool("detached-pane", false, "launch in detached pane mode (no contact list, no split restore)")
+	flag.Parse()
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
@@ -47,5 +52,5 @@ func main() {
 
 	wsClient := ws.NewClient(cfg.ServerURL, cfg.Password)
 
-	gui.NewApp(apiClient, wsClient, cfg).Run()
+	gui.NewApp(apiClient, wsClient, cfg, *chatGUID, *detachedPane).Run()
 }

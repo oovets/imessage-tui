@@ -315,6 +315,8 @@ func (t *compactTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant
 			return color.NRGBA{R: 100, G: 106, B: 130, A: 200}
 		case theme.ColorNameSeparator:
 			return color.NRGBA{A: 0}
+		case theme.ColorNameShadow:
+			return color.NRGBA{A: 0}
 		}
 	}
 	if !t.dark {
@@ -330,6 +332,8 @@ func (t *compactTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant
 		case theme.ColorNameSuccess:
 			return color.NRGBA{R: 100, G: 100, B: 100, A: 255}
 		case theme.ColorNameSeparator:
+			return color.NRGBA{A: 0}
+		case theme.ColorNameShadow:
 			return color.NRGBA{A: 0}
 		}
 	}

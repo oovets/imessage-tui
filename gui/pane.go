@@ -116,7 +116,7 @@ func newChatPane(onSend func(*ChatPane, string, *models.Message), onFocused func
 
 	// Floating input card: colored background + input, always visible.
 	p.inputBg = canvas.NewRectangle(floatingInputBgColor())
-	p.inputBg.CornerRadius = 10
+	p.inputBg.CornerRadius = 0
 	p.inputCard = container.NewMax(p.inputBg, p.inputArea.Widget())
 
 	p.widget = container.New(

@@ -17,42 +17,26 @@ func compactModeEnabled() bool {
 }
 
 func messageSideIndent() float32 {
-	if compactModeEnabled() {
-		return 16
-	}
-	return 24
+	return 8
 }
 
 func inputSideIndent() float32 {
-	if compactModeEnabled() {
-		return 12
-	}
-	return 18
+	return 1
 }
 
-
 func floatingCardOuterHPad() float32 {
-	if compactModeEnabled() {
-		return 6
-	}
-	return 10
+	return 1
 }
 
 func floatingCardBPad() float32 {
-	if compactModeEnabled() {
-		return 6
-	}
-	return 10
+	return 1
 }
 
 // floatingCardBottomPad returns the scroll-bottom spacer height so the last
 // message is visible above the floating input card overlay.
 func floatingCardBottomPad() float32 {
-	// single-line entry height ≈ textSize + padding; card + bPad ≈ 50dp
-	if compactModeEnabled() {
-		return 42
-	}
-	return 50
+	// Keep room for the always-visible floating input while staying compact.
+	return 34
 }
 
 func floatingInputBgColor() color.Color {
@@ -65,9 +49,10 @@ func floatingInputBgColor() color.Color {
 			// slightly brighter than the main dark bg (#1a1b26)
 			return color.NRGBA{R: 30, G: 32, B: 50, A: 255}
 		}
-		return color.NRGBA{R: 243, G: 243, B: 246, A: 255}
+		// Keep the floating input subtle but visible in light mode.
+		return color.NRGBA{R: 244, G: 244, B: 247, A: 245}
 	}
-	return color.Transparent
+	return theme.Color(theme.ColorNameInputBackground)
 }
 
 func hoverSenderTextSize() float32 {
