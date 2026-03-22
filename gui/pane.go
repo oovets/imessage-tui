@@ -1,6 +1,8 @@
 package gui
 
 import (
+	"image/color"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
@@ -44,7 +46,7 @@ func (l *floatingBottomLayout) MinSize(_ []fyne.CanvasObject) fyne.Size {
 }
 
 // ChatPane is a single panel showing one conversation.
-// The input card is a permanent overlay at the bottom of the message view.
+// The input card sits at the bottom in a border layout.
 type ChatPane struct {
 	id        int
 	msgView   *MessageView
@@ -53,17 +55,18 @@ type ChatPane struct {
 	widget    fyne.CanvasObject
 	surface   *paneSurface
 	inputCard *fyne.Container
-	inputBg   *canvas.Rectangle
+	inputGap  fyne.CanvasObject
 }
 
 type paneSurface struct {
 	widget.BaseWidget
 	content    fyne.CanvasObject
 	onActivate func()
+	onResize   func()
 }
 
-func newPaneSurface(content fyne.CanvasObject, onActivate func()) *paneSurface {
-	s := &paneSurface{content: content, onActivate: onActivate}
+func newPaneSurface(content fyne.CanvasObject, onActivate func(), onResize func()) *paneSurface {
+	s := &paneSurface{content: content, onActivate: onActivate, onResize: onResize}
 	s.ExtendBaseWidget(s)
 	return s
 }
@@ -77,8 +80,38 @@ func (s *paneSurface) MinSize() fyne.Size {
 }
 
 func (s *paneSurface) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(s.content)
+	return &paneSurfaceRenderer{surface: s}
 }
+
+type paneSurfaceRenderer struct {
+	surface  *paneSurface
+	lastSize fyne.Size
+}
+
+func (r *paneSurfaceRenderer) Layout(size fyne.Size) {
+	r.surface.content.Move(fyne.NewPos(0, 0))
+	r.surface.content.Resize(size)
+	if size != r.lastSize {
+		r.lastSize = size
+		if r.surface.onResize != nil {
+			r.surface.onResize()
+		}
+	}
+}
+
+func (r *paneSurfaceRenderer) MinSize() fyne.Size {
+	return r.surface.content.MinSize()
+}
+
+func (r *paneSurfaceRenderer) Refresh() {
+	canvas.Refresh(r.surface.content)
+}
+
+func (r *paneSurfaceRenderer) Objects() []fyne.CanvasObject {
+	return []fyne.CanvasObject{r.surface.content}
+}
+
+func (r *paneSurfaceRenderer) Destroy() {}
 
 func (s *paneSurface) Tapped(_ *fyne.PointEvent) {
 	if s.onActivate != nil {
@@ -104,9 +137,6 @@ func newChatPane(onSend func(*ChatPane, string, *models.Message), onFocused func
 		onFocused(p)
 		p.inputArea.SetReplyTarget(msg)
 	}, nil)
-	// Reserve space at the bottom of the scroll so the last message is
-	// visible above the floating input card.
-	p.msgView.SetBottomPad(floatingCardBottomPad())
 
 	p.inputArea = NewInputAreaWithShortcutHandler(
 		func(text string, replyTo *models.Message) { onSend(p, text, replyTo) },
@@ -114,18 +144,16 @@ func newChatPane(onSend func(*ChatPane, string, *models.Message), onFocused func
 		onInputShortcut,
 	)
 
-	// Floating input card: colored background + input, always visible.
-	p.inputBg = canvas.NewRectangle(floatingInputBgColor())
-	p.inputBg.CornerRadius = 0
-	p.inputCard = container.NewMax(p.inputBg, p.inputArea.Widget())
+	// Input card: reply holder + entry row + bottom gap.
+	gap := canvas.NewRectangle(color.Transparent)
+	gap.SetMinSize(fyne.NewSize(1, 0))
+	p.inputGap = gap
+	p.inputCard = container.NewVBox(p.inputArea.Widget(), p.inputGap)
 
-	p.widget = container.New(
-		&floatingBottomLayout{hPad: floatingCardOuterHPad(), bPad: floatingCardBPad()},
-		p.msgView.Widget(),
-		p.inputCard,
-	)
+	// Border layout: message scroll on top, input card anchored at bottom.
+	p.widget = container.NewBorder(nil, p.inputCard, nil, nil, p.msgView.Widget())
 
-	p.surface = newPaneSurface(p.widget, func() { onFocused(p) })
+	p.surface = newPaneSurface(p.widget, func() { onFocused(p) }, func() { p.msgView.ScrollToBottom() })
 	return p
 }
 
@@ -158,10 +186,5 @@ func (p *ChatPane) SetInputVisible(_ bool) {}
 
 // RefreshLayout updates theme-sensitive colours and sizes.
 func (p *ChatPane) RefreshLayout() {
-	if p.inputBg != nil {
-		p.inputBg.FillColor = floatingInputBgColor()
-		p.inputBg.Refresh()
-	}
 	p.inputArea.RefreshLayout()
-	p.msgView.SetBottomPad(floatingCardBottomPad())
 }

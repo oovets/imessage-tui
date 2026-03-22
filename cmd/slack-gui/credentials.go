@@ -20,26 +20,39 @@ type slackConfigFile struct {
 	ActiveWorkspace int                    `json:"active_workspace"`
 }
 
-func resolveSlackToken() (string, string, error) {
+func resolveSlackCredentials() (string, string, string, error) {
 	if token := strings.TrimSpace(os.Getenv("SLACK_BOT_TOKEN")); token != "" {
-		return token, "SLACK_BOT_TOKEN", nil
+		appToken := strings.TrimSpace(os.Getenv("SLACK_APP_TOKEN"))
+		if appToken == "" {
+			appToken = strings.TrimSpace(os.Getenv("SLACK_SOCKET_MODE_APP_TOKEN"))
+		}
+		return token, appToken, "SLACK_BOT_TOKEN", nil
 	}
 	if token := strings.TrimSpace(os.Getenv("SLACK_TOKEN")); token != "" {
-		return token, "SLACK_TOKEN", nil
+		appToken := strings.TrimSpace(os.Getenv("SLACK_APP_TOKEN"))
+		if appToken == "" {
+			appToken = strings.TrimSpace(os.Getenv("SLACK_SOCKET_MODE_APP_TOKEN"))
+		}
+		return token, appToken, "SLACK_TOKEN", nil
 	}
 
 	for _, p := range candidateSlackConfigPaths() {
-		token, err := tokenFromSlackConfig(p)
+		token, appToken, err := credentialsFromSlackConfig(p)
 		if err != nil {
 			log.Printf("Skipping Slack config %q: %v", p, err)
 			continue
 		}
 		if token != "" {
-			return token, p, nil
+			return token, appToken, p, nil
 		}
 	}
 
-	return "", "", fmt.Errorf("no Slack token found; set SLACK_BOT_TOKEN or SLACK_TOKEN, or provide slack_config.json via SLACK_CONFIG_PATH")
+	return "", "", "", fmt.Errorf("no Slack token found; set SLACK_BOT_TOKEN or SLACK_TOKEN, or provide slack_config.json via SLACK_CONFIG_PATH")
+}
+
+func resolveSlackToken() (string, string, error) {
+	token, _, source, err := resolveSlackCredentials()
+	return token, source, err
 }
 
 func candidateSlackConfigPaths() []string {
@@ -72,18 +85,18 @@ func candidateSlackConfigPaths() []string {
 	return out
 }
 
-func tokenFromSlackConfig(path string) (string, error) {
+func credentialsFromSlackConfig(path string) (string, string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	var cfg slackConfigFile
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return "", fmt.Errorf("invalid JSON: %w", err)
+		return "", "", fmt.Errorf("invalid JSON: %w", err)
 	}
 	if len(cfg.Workspaces) == 0 {
-		return "", fmt.Errorf("no workspaces in file")
+		return "", "", fmt.Errorf("no workspaces in file")
 	}
 
 	idx := cfg.ActiveWorkspace
@@ -91,12 +104,12 @@ func tokenFromSlackConfig(path string) (string, error) {
 		idx = 0
 	}
 	if token := strings.TrimSpace(cfg.Workspaces[idx].Token); token != "" {
-		return token, nil
+		return token, strings.TrimSpace(cfg.Workspaces[idx].AppToken), nil
 	}
 	for _, ws := range cfg.Workspaces {
 		if token := strings.TrimSpace(ws.Token); token != "" {
-			return token, nil
+			return token, strings.TrimSpace(ws.AppToken), nil
 		}
 	}
-	return "", fmt.Errorf("no token field found in workspaces")
+	return "", "", fmt.Errorf("no token field found in workspaces")
 }

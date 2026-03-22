@@ -27,7 +27,7 @@ func init() {
 }
 
 func main() {
-	token, source, err := resolveSlackToken()
+	token, appToken, source, err := resolveSlackCredentials()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func main() {
 	}
 	log.Printf("Connected to Slack team: %s", info.TeamName)
 
-	slackApp := gui.New(client, info)
+	slackApp := gui.New(client, info, appToken)
 	slackApp.SetInitialOpen(os.Getenv("SLACK_OPEN_CHANNEL_ID"), os.Getenv("SLACK_OPEN_THREAD_TS"))
 	slackApp.Run()
 }

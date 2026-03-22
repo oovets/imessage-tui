@@ -45,6 +45,7 @@ type App struct {
 	maxLinkPreviews     int
 	windowWidth         float32
 	windowHeight        float32
+	showPaneSeparators  bool
 	launchChatGUID      string
 	detachedPaneMode    bool
 
@@ -67,6 +68,7 @@ const (
 	prefWindowWidth        = "ui.window_width"
 	prefWindowHeight       = "ui.window_height"
 	prefPaneLayoutState    = "ui.pane_layout_state"
+	prefPaneSeparators     = "ui.pane_separators"
 )
 
 type fixedWidthWrap struct {
@@ -163,6 +165,7 @@ func (a *App) Run() {
 		},
 		a.handleInputShortcut,
 	)
+	a.paneManager.SetShowSeparators(a.showPaneSeparators)
 	if a.detachedPaneMode {
 		a.showChatList = false
 	} else {
@@ -472,6 +475,15 @@ func (a *App) setCompactMode(enabled bool) {
 	a.win.SetMainMenu(a.buildMainMenu())
 }
 
+func (a *App) togglePaneSeparators() {
+	a.showPaneSeparators = !a.showPaneSeparators
+	if a.paneManager != nil {
+		a.paneManager.SetShowSeparators(a.showPaneSeparators)
+	}
+	a.fyneApp.Preferences().SetBool(prefPaneSeparators, a.showPaneSeparators)
+	a.win.SetMainMenu(a.buildMainMenu())
+}
+
 // refreshPaneNameForChat updates the header of any open pane showing chatGUID
 // after an alias change.
 func (a *App) refreshPaneNameForChat(guid string) {
@@ -522,6 +534,7 @@ func (a *App) loadUIState() {
 	a.appTheme.fontSize = float32(fontSize)
 	a.appTheme.boldAll = prefs.BoolWithFallback(prefBoldAll, a.appTheme.boldAll)
 	a.appTheme.compactMode = prefs.BoolWithFallback(prefCompactMode, a.appTheme.compactMode)
+	a.showPaneSeparators = prefs.BoolWithFallback(prefPaneSeparators, true)
 	a.windowWidth = float32(prefs.FloatWithFallback(prefWindowWidth, 960))
 	a.windowHeight = float32(prefs.FloatWithFallback(prefWindowHeight, 640))
 	if a.windowWidth < 640 {
@@ -551,6 +564,10 @@ func (a *App) buildMainMenu() *fyne.MainMenu {
 	compactLabel := "Enable Compact Mode"
 	if a.appTheme.compactMode {
 		compactLabel = "Disable Compact Mode"
+	}
+	separatorLabel := "Hide Pane Separators"
+	if !a.showPaneSeparators {
+		separatorLabel = "Show Pane Separators"
 	}
 
 	// Build font submenu from installed families.
@@ -603,6 +620,9 @@ func (a *App) buildMainMenu() *fyne.MainMenu {
 			a.fyneApp.Settings().SetTheme(a.appTheme)
 		}),
 		fontItem,
+		fyne.NewMenuItem(separatorLabel, func() {
+			a.togglePaneSeparators()
+		}),
 		fyne.NewMenuItem(compactLabel, func() {
 			a.setCompactMode(!a.appTheme.compactMode)
 		}),

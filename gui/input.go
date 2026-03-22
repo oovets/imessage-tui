@@ -27,7 +27,9 @@ type focusEntry struct {
 func newFocusEntry(placeholder string, onFocused func(), onShortcut func(fyne.Shortcut) bool, onSubmit func(string)) *focusEntry {
 	e := &focusEntry{onFocused: onFocused, onShortcut: onShortcut, onSubmit: onSubmit}
 	e.Entry.PlaceHolder = placeholder
-	e.Entry.MultiLine = false
+	e.Entry.MultiLine = true
+	e.Entry.Wrapping = fyne.TextWrapWord
+	e.Entry.SetMinRowsVisible(2)
 	e.ExtendBaseWidget(e)
 	return e
 }
@@ -130,7 +132,7 @@ func (e *focusEntry) TypedKey(key *fyne.KeyEvent) {
 	e.Entry.TypedKey(key)
 }
 
-// InputArea holds the single-line message entry and reply banner.
+// InputArea holds the multiline message entry and reply banner.
 // All methods must be called from the Fyne main goroutine.
 type InputArea struct {
 	entry       *focusEntry
@@ -138,6 +140,7 @@ type InputArea struct {
 	replyHolder *fyne.Container
 	replyLabel  *canvas.Text
 	cancelBtn   *glyphAction
+	inputBg     *canvas.Rectangle
 	onSend      func(string, *models.Message)
 	replyTarget *models.Message
 }
@@ -160,9 +163,14 @@ func newInputArea(onSend func(string, *models.Message), onFocused func(), onShor
 	ia.replyHolder = container.NewMax()
 	ia.cancelBtn = newGlyphAction("×", func() { ia.ClearReplyTarget() })
 
-	indent := inputSideIndent()
-	indentedEntry := container.NewBorder(nil, nil, fixedWidthSpacer(indent), fixedWidthSpacer(indent), ia.entry)
-	ia.panel = container.NewVBox(ia.replyHolder, indentedEntry)
+	inputHPad := float32(8)
+	ia.inputBg = canvas.NewRectangle(theme.Color(theme.ColorNameInputBackground))
+	entryRow := container.NewMax(
+		ia.inputBg,
+		container.NewBorder(nil, nil, fixedWidthSpacer(inputHPad), fixedWidthSpacer(inputHPad), ia.entry),
+	)
+	ia.replyHolder.Hide()
+	ia.panel = container.NewVBox(ia.replyHolder, entryRow)
 	ia.RefreshLayout()
 	return ia
 }
@@ -190,6 +198,7 @@ func (ia *InputArea) SetReplyTarget(msg models.Message) {
 	ia.replyLabel.Text = "Replying to: " + truncateString(stripEmojis(msg.Text), 80)
 	ia.replyLabel.Refresh()
 	ia.replyHolder.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, nil, ia.cancelBtn, ia.replyLabel)}
+	ia.replyHolder.Show()
 	ia.replyHolder.Refresh()
 }
 
@@ -197,6 +206,7 @@ func (ia *InputArea) SetReplyTarget(msg models.Message) {
 func (ia *InputArea) ClearReplyTarget() {
 	ia.replyTarget = nil
 	ia.replyHolder.Objects = nil
+	ia.replyHolder.Hide()
 	ia.replyHolder.Refresh()
 }
 
@@ -213,6 +223,10 @@ func (ia *InputArea) submit(text string) {
 }
 
 func (ia *InputArea) RefreshLayout() {
+	if ia.inputBg != nil {
+		ia.inputBg.FillColor = theme.Color(theme.ColorNameInputBackground)
+		ia.inputBg.Refresh()
+	}
 	if ia.replyLabel != nil {
 		ia.replyLabel.TextSize = hoverTimestampTextSize()
 		ia.replyLabel.Color = theme.Color(theme.ColorNameDisabled)

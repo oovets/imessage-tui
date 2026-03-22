@@ -21,7 +21,7 @@ func messageSideIndent() float32 {
 }
 
 func inputSideIndent() float32 {
-	return 1
+	return 52
 }
 
 func floatingCardOuterHPad() float32 {
@@ -35,8 +35,8 @@ func floatingCardBPad() float32 {
 // floatingCardBottomPad returns the scroll-bottom spacer height so the last
 // message is visible above the floating input card overlay.
 func floatingCardBottomPad() float32 {
-	// Keep room for the always-visible floating input while staying compact.
-	return 34
+	// Kept for compatibility with older floating layout paths.
+	return 60
 }
 
 func floatingInputBgColor() color.Color {

@@ -3,10 +3,14 @@ package gui
 import (
 	"encoding/json"
 	"fmt"
+	"image/color"
 	"strings"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
+	"fyne.io/fyne/v2/widget"
 	"github.com/bluebubbles-tui/models"
 )
 
@@ -34,19 +38,25 @@ type paneNode struct {
 func (n *paneNode) isLeaf() bool { return n.pane != nil }
 
 // buildWidget recursively constructs the Fyne layout for this subtree.
-func (n *paneNode) buildWidget() fyne.CanvasObject {
+func (n *paneNode) buildWidget(showSeparators bool) fyne.CanvasObject {
 	if n.isLeaf() {
 		return n.pane.Widget()
 	}
-	left := n.left.buildWidget()
-	right := n.right.buildWidget()
+	left := n.left.buildWidget(showSeparators)
+	right := n.right.buildWidget(showSeparators)
 	if n.dir == splitHorizontal {
 		s := container.NewHSplit(left, right)
 		s.SetOffset(0.5)
+		if showSeparators {
+			return newSplitWithSeparator(s, splitHorizontal)
+		}
 		return s
 	}
 	s := container.NewVSplit(left, right)
 	s.SetOffset(0.5)
+	if showSeparators {
+		return newSplitWithSeparator(s, splitVertical)
+	}
 	return s
 }
 
@@ -99,6 +109,7 @@ type PaneManager struct {
 	focused    *ChatPane
 	holder     *fyne.Container
 	maxPanes   int
+	showSeparators bool
 	appFocused bool
 
 	onSend          func(*ChatPane, string, *models.Message)
@@ -122,7 +133,7 @@ type paneStateNode struct {
 func NewPaneManager(onSend func(*ChatPane, string, *models.Message), onFocused func(*ChatPane), onInputShortcut func(fyne.Shortcut) bool) *PaneManager {
 	pm := &PaneManager{
 		onSend: onSend, onFocused: onFocused, onInputShortcut: onInputShortcut,
-		maxPanes: defaultMaxPanes, appFocused: true,
+		maxPanes: defaultMaxPanes, appFocused: true, showSeparators: true,
 	}
 
 	first := pm.newPane()
@@ -130,7 +141,7 @@ func NewPaneManager(onSend func(*ChatPane, string, *models.Message), onFocused f
 	pm.focused = first
 	first.SetFocused(true)
 
-	pm.holder = container.NewMax(pm.root.buildWidget())
+	pm.holder = container.NewMax(pm.root.buildWidget(pm.showSeparators))
 	return pm
 }
 
@@ -247,8 +258,16 @@ func (pm *PaneManager) SetFocus(pane *ChatPane) {
 }
 
 func (pm *PaneManager) rebuildHolder() {
-	pm.holder.Objects = []fyne.CanvasObject{pm.root.buildWidget()}
+	pm.holder.Objects = []fyne.CanvasObject{pm.root.buildWidget(pm.showSeparators)}
 	pm.holder.Refresh()
+}
+
+func (pm *PaneManager) SetShowSeparators(show bool) {
+	if pm.showSeparators == show {
+		return
+	}
+	pm.showSeparators = show
+	pm.rebuildHolder()
 }
 
 // SetAppFocused updates app focus state and syncs pane input visibility.
@@ -386,4 +405,79 @@ func maxPaneID(panes []*ChatPane) int {
 		}
 	}
 	return maxID
+}
+
+type splitWithSeparator struct {
+	widget.BaseWidget
+	split *container.Split
+	dir   splitDir
+	line  *canvas.Rectangle
+}
+
+func newSplitWithSeparator(split *container.Split, dir splitDir) *splitWithSeparator {
+	w := &splitWithSeparator{
+		split: split,
+		dir:   dir,
+		line:  canvas.NewRectangle(color.NRGBA{R: 132, G: 139, B: 165, A: 52}),
+	}
+	w.line.StrokeWidth = 0
+	w.ExtendBaseWidget(w)
+	return w
+}
+
+func (w *splitWithSeparator) CreateRenderer() fyne.WidgetRenderer {
+	return &splitWithSeparatorRenderer{w: w, objs: []fyne.CanvasObject{w.split, w.line}}
+}
+
+type splitWithSeparatorRenderer struct {
+	w    *splitWithSeparator
+	objs []fyne.CanvasObject
+}
+
+func (r *splitWithSeparatorRenderer) Layout(size fyne.Size) {
+	r.w.split.Resize(size)
+	r.w.split.Move(fyne.NewPos(0, 0))
+	offset := float32(r.w.split.Offset)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > 1 {
+		offset = 1
+	}
+	if r.w.dir == splitHorizontal {
+		x := size.Width*offset - 0.5
+		if x < 0 {
+			x = 0
+		}
+		r.w.line.Move(fyne.NewPos(x, 0))
+		r.w.line.Resize(fyne.NewSize(1, size.Height))
+		return
+	}
+	y := size.Height*offset - 0.5
+	if y < 0 {
+		y = 0
+	}
+	r.w.line.Move(fyne.NewPos(0, y))
+	r.w.line.Resize(fyne.NewSize(size.Width, 1))
+}
+
+func (r *splitWithSeparatorRenderer) MinSize() fyne.Size {
+	return r.w.split.MinSize()
+}
+
+func (r *splitWithSeparatorRenderer) Refresh() {
+	base := colorToNRGBA(theme.Color(theme.ColorNameForeground))
+	base.A = 52
+	r.w.line.FillColor = base
+	r.Layout(r.w.Size())
+	canvas.Refresh(r.w.line)
+	canvas.Refresh(r.w.split)
+}
+
+func (r *splitWithSeparatorRenderer) Objects() []fyne.CanvasObject { return r.objs }
+func (r *splitWithSeparatorRenderer) Destroy()                     {}
+
+func colorToNRGBA(c color.Color) color.NRGBA {
+	r, g, b, a := c.RGBA()
+	return color.NRGBA{R: uint8(r >> 8), G: uint8(g >> 8), B: uint8(b >> 8), A: uint8(a >> 8)}
 }
