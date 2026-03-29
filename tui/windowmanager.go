@@ -3,8 +3,8 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bluebubbles-tui/models"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // Direction for focus navigation
@@ -19,15 +19,16 @@ const (
 
 // WindowManager manages multiple chat windows and their layout
 type WindowManager struct {
-	root          *LayoutNode
-	windows       map[WindowID]*ChatWindow
-	nextID        WindowID
-	focusedWindow WindowID
-	maxWindows    int
+	root           *LayoutNode
+	windows        map[WindowID]*ChatWindow
+	nextID         WindowID
+	focusedWindow  WindowID
+	maxWindows     int
 	showTimestamps bool
 
 	// Message cache per chat GUID
-	messageCache map[string][]models.Message
+	messageCache     map[string][]models.Message
+	messageCacheGUID map[string]map[string]struct{}
 
 	// Available dimensions
 	width, height int
@@ -36,11 +37,12 @@ type WindowManager struct {
 // NewWindowManager creates a new window manager with a single window
 func NewWindowManager() *WindowManager {
 	wm := &WindowManager{
-		windows:      make(map[WindowID]*ChatWindow),
-		nextID:       1,
-		maxWindows:   4,
-		messageCache: make(map[string][]models.Message),
-		showTimestamps: true,
+		windows:          make(map[WindowID]*ChatWindow),
+		nextID:           1,
+		maxWindows:       4,
+		messageCache:     make(map[string][]models.Message),
+		messageCacheGUID: make(map[string]map[string]struct{}),
+		showTimestamps:   true,
 	}
 
 	// Create initial window
@@ -263,14 +265,21 @@ func (wm *WindowManager) FocusDirection(dir Direction) {
 	}
 }
 
-// CacheMessage adds a message to the cache for a chat, skipping duplicates.
-func (wm *WindowManager) CacheMessage(chatGUID string, msg models.Message) {
-	for _, existing := range wm.messageCache[chatGUID] {
-		if existing.GUID == msg.GUID {
-			return
+// CacheMessage adds a message to the cache for a chat.
+// Returns true if the message was added, false if it was a duplicate.
+func (wm *WindowManager) CacheMessage(chatGUID string, msg models.Message) bool {
+	if msg.GUID != "" {
+		if _, ok := wm.messageCacheGUID[chatGUID]; !ok {
+			wm.messageCacheGUID[chatGUID] = make(map[string]struct{})
 		}
+		if _, exists := wm.messageCacheGUID[chatGUID][msg.GUID]; exists {
+			return false
+		}
+		wm.messageCacheGUID[chatGUID][msg.GUID] = struct{}{}
 	}
+
 	wm.messageCache[chatGUID] = append(wm.messageCache[chatGUID], msg)
+	return true
 }
 
 // GetCachedMessages returns cached messages for a chat
@@ -281,6 +290,13 @@ func (wm *WindowManager) GetCachedMessages(chatGUID string) []models.Message {
 // SetCachedMessages sets the cached messages for a chat
 func (wm *WindowManager) SetCachedMessages(chatGUID string, messages []models.Message) {
 	wm.messageCache[chatGUID] = messages
+	idx := make(map[string]struct{}, len(messages))
+	for _, msg := range messages {
+		if msg.GUID != "" {
+			idx[msg.GUID] = struct{}{}
+		}
+	}
+	wm.messageCacheGUID[chatGUID] = idx
 }
 
 // WindowsShowingChat returns all windows displaying a specific chat
@@ -341,8 +357,13 @@ func (wm *WindowManager) renderNode(node *LayoutNode) string {
 	rightView := wm.renderNode(node.Right)
 
 	if node.Direction == SplitHorizontal {
+		_, _, dividerW := splitAxis(node.width, node.SplitRatio)
+		if dividerW == 0 {
+			return lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
+		}
+
 		// Render vertical divider
-		dividerHeight := node.height
+		dividerHeight := max(1, node.height)
 		divider := strings.Repeat(DividerVertical+"\n", dividerHeight-1) + DividerVertical
 		dividerStyled := lipgloss.NewStyle().
 			Foreground(ColorBorder).
@@ -351,8 +372,13 @@ func (wm *WindowManager) renderNode(node *LayoutNode) string {
 		return lipgloss.JoinHorizontal(lipgloss.Top, leftView, dividerStyled, rightView)
 	}
 
+	_, _, dividerH := splitAxis(node.height, node.SplitRatio)
+	if dividerH == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, leftView, rightView)
+	}
+
 	// Vertical split - render horizontal divider
-	dividerWidth := node.width
+	dividerWidth := max(1, node.width)
 	divider := strings.Repeat(DividerHorizontal, dividerWidth)
 	dividerStyled := lipgloss.NewStyle().
 		Foreground(ColorBorder).

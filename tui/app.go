@@ -3,6 +3,13 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"mime"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bluebubbles-tui/api"
@@ -366,7 +373,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				window := m.windowManager.FocusedWindow()
 				if window != nil && window.Chat != nil {
 					text := window.Input.GetText()
-					if text != "" {
+
+					if cmd, handled := m.handleLocalInputCommand(window, text); handled {
+						return m, cmd
+					}
+
+					if strings.TrimSpace(text) != "" {
 						return m, sendMessageCmd(m.apiClient, window.Chat.GUID, text, window.ID)
 					}
 				}
@@ -404,7 +416,13 @@ func (m *AppModel) updateLayout() {
 	if m.showChatList {
 		windowsWidth -= ChatListWidth
 	}
+	if windowsWidth < 1 {
+		windowsWidth = 1
+	}
 	windowsHeight := m.height
+	if windowsHeight < 1 {
+		windowsHeight = 1
+	}
 
 	m.windowManager.SetSize(windowsWidth, windowsHeight)
 }
@@ -477,6 +495,138 @@ func sendMessageCmd(client *api.Client, chatGUID, text string, windowID WindowID
 	}
 }
 
+func (m *AppModel) handleLocalInputCommand(window *ChatWindow, raw string) (tea.Cmd, bool) {
+	msgNum, handled, err := parseImgCommand(raw)
+	if !handled {
+		return nil, false
+	}
+	if err != nil {
+		m.err = err
+		return nil, true
+	}
+
+	att, ok := window.Messages.FirstImageAttachmentByNumber(msgNum)
+	if !ok {
+		m.err = fmt.Errorf("message #%d has no image attachment", msgNum)
+		return nil, true
+	}
+
+	window.Input.Clear()
+	return openImageAttachmentCmd(m.apiClient, att), true
+}
+
+func parseImgCommand(raw string) (int, bool, error) {
+	s := strings.TrimSpace(raw)
+	if !strings.HasPrefix(s, "/img") {
+		return 0, false, nil
+	}
+	parts := strings.Fields(s)
+	if len(parts) > 0 && parts[0] != "/img" {
+		return 0, false, nil
+	}
+	if len(parts) != 2 {
+		return 0, true, fmt.Errorf("usage: /img #<message-number>")
+	}
+	nRaw := strings.TrimPrefix(parts[1], "#")
+	n, err := strconv.Atoi(nRaw)
+	if err != nil || n < 1 {
+		return 0, true, fmt.Errorf("invalid message number: %s", parts[1])
+	}
+	return n, true, nil
+}
+
+func openImageAttachmentCmd(client *api.Client, att models.Attachment) tea.Cmd {
+	return func() tea.Msg {
+		target := attachmentOpenTarget(att)
+		if target == "" {
+			if client == nil || strings.TrimSpace(att.GUID) == "" {
+				return errMsg{err: fmt.Errorf("image has no openable target")}
+			}
+			path, err := downloadAttachmentToTemp(client, att)
+			if err != nil {
+				return errMsg{err: fmt.Errorf("failed to download image: %v", err)}
+			}
+			target = path
+		}
+		if err := openWithSystem(target); err != nil {
+			return errMsg{err: fmt.Errorf("failed to open image: %v", err)}
+		}
+		return nil
+	}
+}
+
+func attachmentOpenTarget(att models.Attachment) string {
+	for _, raw := range []string{att.URL, att.PathOnDisk, att.Path} {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "file://") {
+			return raw
+		}
+		if strings.HasPrefix(raw, "/") {
+			if _, err := os.Stat(raw); err == nil {
+				return raw
+			}
+		}
+	}
+	return ""
+}
+
+func downloadAttachmentToTemp(client *api.Client, att models.Attachment) (string, error) {
+	data, mimeType, err := client.DownloadAttachment(att.GUID)
+	if err != nil {
+		return "", err
+	}
+
+	ext := strings.TrimSpace(filepath.Ext(att.FileName))
+	if ext == "" {
+		mt := strings.TrimSpace(strings.Split(mimeType, ";")[0])
+		if mt != "" {
+			if exts, _ := mime.ExtensionsByType(mt); len(exts) > 0 {
+				ext = exts[0]
+			}
+		}
+	}
+	if ext == "" {
+		ext = ".img"
+	}
+
+	f, err := os.CreateTemp("", "bluebubbles-img-*"+ext)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	if _, err := f.Write(data); err != nil {
+		return "", err
+	}
+	return f.Name(), nil
+}
+
+func openWithSystem(target string) error {
+	name, args := openCommand(target)
+	cmd := exec.Command(name, args...)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	if cmd.Process != nil {
+		_ = cmd.Process.Release()
+	}
+	return nil
+}
+
+func openCommand(target string) (string, []string) {
+	switch runtime.GOOS {
+	case "darwin":
+		return "open", []string{target}
+	case "windows":
+		return "cmd", []string{"/c", "start", "", target}
+	default:
+		return "xdg-open", []string{target}
+	}
+}
+
 func connectWSCmd(wsClient *ws.Client) tea.Cmd {
 	return func() tea.Msg {
 		if err := wsClient.Connect(); err != nil {
@@ -503,7 +653,8 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 		// Parse incoming message
 		var wsMsg struct {
 			models.Message
-			Chats []struct {
+			ChatGUID string `json:"chatGuid"`
+			Chats    []struct {
 				GUID string `json:"guid"`
 			} `json:"chats"`
 		}
@@ -514,11 +665,15 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 		msg := wsMsg.Message
 		if len(wsMsg.Chats) > 0 {
 			msg.ChatGUID = wsMsg.Chats[0].GUID
+		} else if msg.ChatGUID == "" {
+			msg.ChatGUID = wsMsg.ChatGUID
 		}
 
 		if msg.ChatGUID != "" {
-			// Cache the message
-			m.windowManager.CacheMessage(msg.ChatGUID, msg)
+			// Cache the message (ignore duplicate WS events by GUID).
+			if !m.windowManager.CacheMessage(msg.ChatGUID, msg) {
+				return m, waitForWSEventCmd(m.wsClient)
+			}
 
 			// Update ALL windows showing this chat
 			windowsShowing := m.windowManager.WindowsShowingChat(msg.ChatGUID)
@@ -526,8 +681,13 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 				window.Messages.AppendMessage(msg)
 			}
 
-			// If no window is showing this chat, mark in chat list
-			if len(windowsShowing) == 0 {
+			// Local read/unread policy:
+			// - If chat is currently shown in any window, clear indicator.
+			// - If message is from us, don't create "new message" indicator.
+			// - Otherwise mark as new in chat list.
+			if len(windowsShowing) > 0 {
+				m.chatList.ClearNewMessage(msg.ChatGUID)
+			} else if !msg.IsFromMe {
 				m.chatList.MarkNewMessage(msg.ChatGUID)
 			}
 		}

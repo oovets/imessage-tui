@@ -62,29 +62,58 @@ func (n *LayoutNode) CalculateLayout(x, y, w, h int) {
 
 	if n.Direction == SplitHorizontal {
 		// Split horizontally: left | right
-		leftW := int(float64(w) * n.SplitRatio)
-		rightW := w - leftW
-
-		// Account for divider (1 char)
-		if leftW > 1 {
-			leftW--
+		leftW, rightW, dividerW := splitAxis(w, n.SplitRatio)
+		if n.Left != nil {
+			n.Left.CalculateLayout(x, y, leftW, h)
 		}
-
-		n.Left.CalculateLayout(x, y, leftW, h)
-		n.Right.CalculateLayout(x+leftW+1, y, rightW, h)
+		if n.Right != nil {
+			n.Right.CalculateLayout(x+leftW+dividerW, y, rightW, h)
+		}
 	} else {
 		// Split vertically: top / bottom
-		topH := int(float64(h) * n.SplitRatio)
-		bottomH := h - topH
-
-		// Account for divider (1 line)
-		if topH > 1 {
-			topH--
+		topH, bottomH, dividerH := splitAxis(h, n.SplitRatio)
+		if n.Left != nil {
+			n.Left.CalculateLayout(x, y, w, topH)
 		}
-
-		n.Left.CalculateLayout(x, y, w, topH)
-		n.Right.CalculateLayout(x, y+topH+1, w, bottomH)
+		if n.Right != nil {
+			n.Right.CalculateLayout(x, y+topH+dividerH, w, bottomH)
+		}
 	}
+}
+
+// splitAxis returns first, second, divider sizes for a split dimension.
+// It keeps both panes visible when possible and avoids overshooting the parent size.
+func splitAxis(total int, ratio float64) (int, int, int) {
+	if total <= 0 {
+		return 0, 0, 0
+	}
+
+	divider := 0
+	usable := total
+	if total >= 3 {
+		divider = 1
+		usable = total - divider
+	}
+
+	if usable <= 1 {
+		return usable, 0, divider
+	}
+
+	if ratio < 0.1 {
+		ratio = 0.1
+	} else if ratio > 0.9 {
+		ratio = 0.9
+	}
+
+	first := int(float64(usable) * ratio)
+	if first < 1 {
+		first = 1
+	}
+	if first > usable-1 {
+		first = usable - 1
+	}
+	second := usable - first
+	return first, second, divider
 }
 
 // FindWindow finds the window with the given ID in the tree

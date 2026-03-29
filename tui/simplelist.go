@@ -4,9 +4,9 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/bluebubbles-tui/models"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/bluebubbles-tui/models"
 )
 
 // stripEmojis removes emoji and symbol characters from a string using an
@@ -24,7 +24,7 @@ func stripEmojis(s string) string {
 			b.WriteRune(r)
 		case r == '-' || r == '\'' || r == '.' || r == ',' || r == '(' || r == ')':
 			b.WriteRune(r)
-		// skip everything else (emoji, symbols, variation selectors, ZWJ…)
+			// skip everything else (emoji, symbols, variation selectors, ZWJ…)
 		}
 	}
 	return strings.TrimSpace(b.String())
@@ -32,14 +32,14 @@ func stripEmojis(s string) string {
 
 // SimpleListModel is a simple scrollable list without auto-centering
 type SimpleListModel struct {
-	items            []models.Chat
-	cursor           int
-	offset           int // scroll offset (which item is at the top)
-	width            int
-	height           int
-	selectedStyle    lipgloss.Style
-	normalStyle      lipgloss.Style
-	newMessageStyle  lipgloss.Style
+	items           []models.Chat
+	cursor          int
+	offset          int // scroll offset (which item is at the top)
+	width           int
+	height          int
+	selectedStyle   lipgloss.Style
+	normalStyle     lipgloss.Style
+	newMessageStyle lipgloss.Style
 }
 
 func NewSimpleListModel() SimpleListModel {
@@ -78,6 +78,7 @@ func (m *SimpleListModel) MarkNewMessage(chatGUID string) {
 	for i, chat := range m.items {
 		if chat.GUID == chatGUID {
 			m.items[i].HasNewMessage = true
+			m.items[i].UnreadCount++
 			if i > 0 {
 				// Move chat to top
 				chat := m.items[i]
@@ -113,6 +114,7 @@ func (m *SimpleListModel) ClearNewMessage(chatGUID string) {
 	for i, chat := range m.items {
 		if chat.GUID == chatGUID {
 			m.items[i].HasNewMessage = false
+			m.items[i].UnreadCount = 0
 			return
 		}
 	}
@@ -160,7 +162,7 @@ func (m SimpleListModel) View() string {
 	}
 
 	var b strings.Builder
-	
+
 	// Title
 	title := lipgloss.NewStyle().Bold(true).Render("CHATS")
 	b.WriteString(title)
@@ -174,7 +176,7 @@ func (m SimpleListModel) View() string {
 	for i := m.offset; i < end; i++ {
 		chat := m.items[i]
 		name := stripEmojis(chat.GetDisplayName())
-		
+
 		// Truncate if too long
 		maxWidth := m.width - 4 // Leave some padding
 		if len([]rune(name)) > maxWidth {
@@ -184,8 +186,6 @@ func (m SimpleListModel) View() string {
 
 		// Add unread/new message indicator
 		if chat.HasNewMessage {
-			name = "● " + name
-		} else if chat.UnreadCount > 0 {
 			name = "● " + name
 		}
 

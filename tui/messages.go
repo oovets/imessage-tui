@@ -5,18 +5,19 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/bluebubbles-tui/models"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/bluebubbles-tui/models"
 )
 
 type MessagesModel struct {
-	viewport viewport.Model
-	messages []models.Message
-	chatName string
-	width    int
-	height   int
+	viewport       viewport.Model
+	messages       []models.Message
+	messageGUIDs   map[string]struct{}
+	chatName       string
+	width          int
+	height         int
 	showTimestamps bool
 }
 
@@ -25,29 +26,39 @@ func NewMessagesModel() MessagesModel {
 	vp.MouseWheelEnabled = true
 
 	return MessagesModel{
-		viewport: vp,
+		viewport:       vp,
+		messageGUIDs:   make(map[string]struct{}),
 		showTimestamps: true,
 	}
 }
 
 func (m *MessagesModel) SetMessages(messages []models.Message) {
 	m.messages = messages
+	m.rebuildGUIDIndex()
 	m.renderContent()
 }
 
 // AppendMessage adds a single message to the list, deduplicating by GUID and keeping chronological order.
 func (m *MessagesModel) AppendMessage(msg models.Message) {
-	// Skip if we already have this message (e.g. WS fires after API reload)
-	for _, existing := range m.messages {
-		if existing.GUID == msg.GUID {
+	if msg.GUID != "" {
+		if _, exists := m.messageGUIDs[msg.GUID]; exists {
 			return
 		}
+		m.messageGUIDs[msg.GUID] = struct{}{}
 	}
-	m.messages = append(m.messages, msg)
-	// Sort by time so buffered/delayed WS events land in the right position
-	sort.Slice(m.messages, func(i, j int) bool {
-		return m.messages[i].DateCreated < m.messages[j].DateCreated
-	})
+
+	if len(m.messages) == 0 || m.messages[len(m.messages)-1].DateCreated <= msg.DateCreated {
+		// Fast path: most WS messages are newest.
+		m.messages = append(m.messages, msg)
+	} else {
+		// Insert sorted by DateCreated.
+		pos := sort.Search(len(m.messages), func(i int) bool {
+			return m.messages[i].DateCreated > msg.DateCreated
+		})
+		m.messages = append(m.messages, models.Message{})
+		copy(m.messages[pos+1:], m.messages[pos:])
+		m.messages[pos] = msg
+	}
 	m.renderContent()
 }
 
@@ -72,6 +83,21 @@ func (m *MessagesModel) SetShowTimestamps(show bool) {
 	m.renderContent()
 }
 
+// FirstImageAttachmentByNumber returns the first image attachment for message #N
+// where N is 1-based according to the rendered message list.
+func (m *MessagesModel) FirstImageAttachmentByNumber(n int) (models.Attachment, bool) {
+	if n < 1 || n > len(m.messages) {
+		return models.Attachment{}, false
+	}
+	msg := m.messages[n-1]
+	for _, att := range msg.Attachments {
+		if isImageAttachment(att) {
+			return att, true
+		}
+	}
+	return models.Attachment{}, false
+}
+
 func (m *MessagesModel) renderContent() {
 	if len(m.messages) == 0 {
 		m.viewport.SetContent("(No messages yet)")
@@ -85,7 +111,7 @@ func (m *MessagesModel) renderContent() {
 
 	var sb strings.Builder
 
-	for _, msg := range m.messages {
+	for i, msg := range m.messages {
 		timeStr := msg.ParsedTime().Format("15:04")
 
 		var sender string
@@ -104,7 +130,18 @@ func (m *MessagesModel) renderContent() {
 			prefix = timeStr + " "
 		}
 
-		fullText := fmt.Sprintf("%s%s: %s", prefix, sender, msg.Text)
+		body := strings.TrimSpace(msg.Text)
+		if hasImageAttachment(msg) {
+			if body == "" {
+				body = "[IMG]"
+			} else {
+				body += " [IMG]"
+			}
+		}
+		fullText := fmt.Sprintf("%s#%d %s:", prefix, i+1, sender)
+		if body != "" {
+			fullText += " " + body
+		}
 
 		if msg.IsFromMe {
 			// Wrap to wrapWidth, then manually right-align each line.
@@ -128,8 +165,54 @@ func (m *MessagesModel) renderContent() {
 		}
 	}
 
+	wasAtBottom := m.viewport.AtBottom()
 	m.viewport.SetContent(sb.String())
-	m.viewport.GotoBottom()
+	if wasAtBottom {
+		m.viewport.GotoBottom()
+	}
+}
+
+func (m *MessagesModel) rebuildGUIDIndex() {
+	m.messageGUIDs = make(map[string]struct{}, len(m.messages))
+	for _, msg := range m.messages {
+		if msg.GUID != "" {
+			m.messageGUIDs[msg.GUID] = struct{}{}
+		}
+	}
+}
+
+func hasImageAttachment(msg models.Message) bool {
+	for _, att := range msg.Attachments {
+		if isImageAttachment(att) {
+			return true
+		}
+	}
+	return false
+}
+
+func isImageAttachment(att models.Attachment) bool {
+	mime := strings.ToLower(strings.TrimSpace(att.MimeType))
+	if strings.HasPrefix(mime, "image/") {
+		return true
+	}
+	for _, raw := range []string{att.FileName, att.URL, att.Path, att.PathOnDisk} {
+		s := strings.ToLower(strings.TrimSpace(raw))
+		if s == "" {
+			continue
+		}
+		switch {
+		case strings.Contains(s, ".jpg"),
+			strings.Contains(s, ".jpeg"),
+			strings.Contains(s, ".png"),
+			strings.Contains(s, ".gif"),
+			strings.Contains(s, ".webp"),
+			strings.Contains(s, ".bmp"),
+			strings.Contains(s, ".heic"),
+			strings.Contains(s, ".heif"):
+			return true
+		}
+	}
+	return false
 }
 
 func (m *MessagesModel) ScrollUp() {

@@ -1,9 +1,9 @@
 package tui
 
 import (
+	"github.com/bluebubbles-tui/models"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/bluebubbles-tui/models"
 )
 
 // WindowID uniquely identifies a chat window
@@ -38,15 +38,20 @@ func (w *ChatWindow) SetBounds(x, y, width, height int) {
 	w.width = width
 	w.height = height
 
-	// Reserve space for input (InputHeight)
-	messagesHeight := height - InputHeight
+	contentWidth := max(1, width-2)
+	// Keep at least one line for messages and one line for input.
+	maxInputHeight := max(1, height-1)
+	w.Input.SetSize(contentWidth, maxInputHeight)
+	inputHeight := w.Input.Height()
+
+	// Reserve space for input.
+	messagesHeight := height - inputHeight
 	if messagesHeight < 1 {
 		messagesHeight = 1
 	}
 
 	// Update sub-component sizes (subtract padding only)
-	w.Messages.SetSize(width-2, messagesHeight)
-	w.Input.SetSize(width - 2)
+	w.Messages.SetSize(contentWidth, messagesHeight)
 }
 
 // SetChat sets the chat displayed in this window.
@@ -95,7 +100,7 @@ func (w *ChatWindow) View() string {
 	}
 
 	// Calculate content dimensions (inside padding)
-	contentWidth := w.width - 2  // subtract padding
+	contentWidth := w.width - 2 // subtract padding
 	contentHeight := w.height
 
 	if contentWidth < 1 {
@@ -121,7 +126,10 @@ func (w *ChatWindow) View() string {
 	}
 
 	// Calculate heights for messages and input
-	inputHeight := InputHeight
+	inputHeight := w.Input.Height()
+	if inputHeight > contentHeight-1 {
+		inputHeight = max(1, contentHeight-1)
+	}
 	messagesHeight := contentHeight - inputHeight
 	if messagesHeight < 1 {
 		messagesHeight = 1
