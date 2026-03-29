@@ -20,6 +20,7 @@ type MessagesModel struct {
 	height          int
 	showTimestamps  bool
 	showLineNumbers bool
+	stickToBottom   bool
 }
 
 func NewMessagesModel() MessagesModel {
@@ -31,6 +32,7 @@ func NewMessagesModel() MessagesModel {
 		messageGUIDs:    make(map[string]struct{}),
 		showTimestamps:  true,
 		showLineNumbers: true,
+		stickToBottom:   true,
 	}
 }
 
@@ -179,9 +181,8 @@ func (m *MessagesModel) renderContent() {
 		}
 	}
 
-	wasAtBottom := m.viewport.AtBottom()
 	m.viewport.SetContent(sb.String())
-	if wasAtBottom {
+	if m.stickToBottom {
 		m.viewport.GotoBottom()
 	}
 }
@@ -231,15 +232,18 @@ func isImageAttachment(att models.Attachment) bool {
 
 func (m *MessagesModel) ScrollUp() {
 	m.viewport.LineUp(3)
+	m.stickToBottom = m.viewport.AtBottom()
 }
 
 func (m *MessagesModel) ScrollDown() {
 	m.viewport.LineDown(3)
+	m.stickToBottom = m.viewport.AtBottom()
 }
 
 func (m MessagesModel) Update(msg tea.Msg) (MessagesModel, tea.Cmd) {
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
+	m.stickToBottom = m.viewport.AtBottom()
 	return m, cmd
 }
 
