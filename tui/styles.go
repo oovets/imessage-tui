@@ -42,14 +42,14 @@ var (
 
 	// Message styles
 	MyMessageStyle = lipgloss.NewStyle().
-		Foreground(ColorSecondary)
+		Foreground(lipgloss.AdaptiveColor{Dark: "86", Light: "28"})
 
 	TheirMessageStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252")).
+		Foreground(lipgloss.AdaptiveColor{Dark: "252", Light: "236"}).
 		Align(lipgloss.Left)
 
 	TimestampStyle = lipgloss.NewStyle().
-		Foreground(ColorAccent).
+		Foreground(lipgloss.AdaptiveColor{Dark: "242", Light: "238"}).
 		PaddingRight(1)
 
 	// Status bar

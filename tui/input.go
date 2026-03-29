@@ -20,7 +20,7 @@ type InputModel struct {
 
 func NewInputModel() InputModel {
 	ta := textarea.New()
-	ta.Placeholder = "Type message (Enter send, Shift+Enter newline, /img #N open image)"
+	ta.Placeholder = ""
 	ta.Prompt = " "
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 10000

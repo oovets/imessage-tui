@@ -12,13 +12,14 @@ import (
 )
 
 type MessagesModel struct {
-	viewport       viewport.Model
-	messages       []models.Message
-	messageGUIDs   map[string]struct{}
-	chatName       string
-	width          int
-	height         int
-	showTimestamps bool
+	viewport        viewport.Model
+	messages        []models.Message
+	messageGUIDs    map[string]struct{}
+	chatName        string
+	width           int
+	height          int
+	showTimestamps  bool
+	showLineNumbers bool
 }
 
 func NewMessagesModel() MessagesModel {
@@ -26,9 +27,10 @@ func NewMessagesModel() MessagesModel {
 	vp.MouseWheelEnabled = true
 
 	return MessagesModel{
-		viewport:       vp,
-		messageGUIDs:   make(map[string]struct{}),
-		showTimestamps: true,
+		viewport:        vp,
+		messageGUIDs:    make(map[string]struct{}),
+		showTimestamps:  true,
+		showLineNumbers: true,
 	}
 }
 
@@ -80,6 +82,14 @@ func (m *MessagesModel) SetShowTimestamps(show bool) {
 		return
 	}
 	m.showTimestamps = show
+	m.renderContent()
+}
+
+func (m *MessagesModel) SetShowLineNumbers(show bool) {
+	if m.showLineNumbers == show {
+		return
+	}
+	m.showLineNumbers = show
 	m.renderContent()
 }
 
@@ -138,7 +148,11 @@ func (m *MessagesModel) renderContent() {
 				body += " [IMG]"
 			}
 		}
-		fullText := fmt.Sprintf("%s#%d %s:", prefix, i+1, sender)
+		lineNum := ""
+		if m.showLineNumbers {
+			lineNum = fmt.Sprintf("#%d ", i+1)
+		}
+		fullText := fmt.Sprintf("%s%s%s:", prefix, lineNum, sender)
 		if body != "" {
 			fullText += " " + body
 		}

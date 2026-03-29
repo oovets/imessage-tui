@@ -23,8 +23,9 @@ type WindowManager struct {
 	windows        map[WindowID]*ChatWindow
 	nextID         WindowID
 	focusedWindow  WindowID
-	maxWindows     int
-	showTimestamps bool
+	maxWindows      int
+	showTimestamps  bool
+	showLineNumbers bool
 
 	// Message cache per chat GUID
 	messageCache     map[string][]models.Message
@@ -43,11 +44,13 @@ func NewWindowManager() *WindowManager {
 		messageCache:     make(map[string][]models.Message),
 		messageCacheGUID: make(map[string]map[string]struct{}),
 		showTimestamps:   true,
+		showLineNumbers:  true,
 	}
 
 	// Create initial window
 	window := NewChatWindow(0)
 	window.Messages.SetShowTimestamps(wm.showTimestamps)
+	window.Messages.SetShowLineNumbers(wm.showLineNumbers)
 	window.Focused = true
 	wm.windows[0] = window
 	wm.focusedWindow = 0
@@ -138,6 +141,7 @@ func (wm *WindowManager) SplitWindow(direction SplitDirection) bool {
 	// Create new window
 	newWindow := NewChatWindow(wm.nextID)
 	newWindow.Messages.SetShowTimestamps(wm.showTimestamps)
+	newWindow.Messages.SetShowLineNumbers(wm.showLineNumbers)
 	wm.windows[wm.nextID] = newWindow
 	wm.nextID++
 
@@ -332,6 +336,17 @@ func (wm *WindowManager) SetShowTimestamps(show bool) {
 	wm.showTimestamps = show
 	for _, w := range wm.windows {
 		w.Messages.SetShowTimestamps(show)
+	}
+}
+
+// SetShowLineNumbers toggles line numbers for all windows.
+func (wm *WindowManager) SetShowLineNumbers(show bool) {
+	if wm.showLineNumbers == show {
+		return
+	}
+	wm.showLineNumbers = show
+	for _, w := range wm.windows {
+		w.Messages.SetShowLineNumbers(show)
 	}
 }
 

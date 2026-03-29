@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"mime"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/bluebubbles-tui/api"
+	"github.com/bluebubbles-tui/config"
 	"github.com/bluebubbles-tui/models"
 	"github.com/bluebubbles-tui/ws"
 	tea "github.com/charmbracelet/bubbletea"
@@ -66,21 +68,27 @@ type AppModel struct {
 	// Debug
 	lastKey string
 
-	showTimestamps bool
-	showChatList   bool
+	showTimestamps  bool
+	showLineNumbers bool
+	showChatList    bool
 }
 
 func NewAppModel(client *api.Client, wsClient *ws.Client) AppModel {
+	ui := config.LoadUIState()
+	wm := NewWindowManager()
+	wm.SetShowTimestamps(ui.ShowTimestamps)
+	wm.SetShowLineNumbers(ui.ShowLineNumbers)
 	return AppModel{
-		chatList:       NewChatListModel(),
-		windowManager:  NewWindowManager(),
-		apiClient:      client,
-		wsClient:       wsClient,
-		focused:        focusChatList,
-		width:          80,
-		height:         24,
-		showTimestamps: true,
-		showChatList:   true,
+		chatList:        NewChatListModel(),
+		windowManager:   wm,
+		apiClient:       client,
+		wsClient:        wsClient,
+		focused:         focusChatList,
+		width:           80,
+		height:          24,
+		showTimestamps:  ui.ShowTimestamps,
+		showLineNumbers: ui.ShowLineNumbers,
+		showChatList:    ui.ShowChatList,
 	}
 }
 
@@ -251,12 +259,21 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.updateLayout()
+			m.saveUIState()
 			return m, nil
 
 		case "ctrl+t":
 			// Toggle timestamps
 			m.showTimestamps = !m.showTimestamps
 			m.windowManager.SetShowTimestamps(m.showTimestamps)
+			m.saveUIState()
+			return m, nil
+
+		case "ctrl+n":
+			// Toggle line numbers
+			m.showLineNumbers = !m.showLineNumbers
+			m.windowManager.SetShowLineNumbers(m.showLineNumbers)
+			m.saveUIState()
 			return m, nil
 
 		case "escape":
@@ -400,6 +417,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, cmd
+}
+
+func (m *AppModel) saveUIState() {
+	if err := config.SaveUIState(config.UIState{
+		ShowTimestamps:  m.showTimestamps,
+		ShowLineNumbers: m.showLineNumbers,
+		ShowChatList:    m.showChatList,
+	}); err != nil {
+		log.Printf("failed to save ui state: %v", err)
+	}
 }
 
 func (m *AppModel) updateLayout() {
