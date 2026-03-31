@@ -2,6 +2,8 @@ package models
 
 import (
 	"encoding/json"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -28,6 +30,15 @@ func (c *Chat) GetDisplayName() string {
 	if len(c.Participants) == 1 && c.Participants[0].DisplayName != "" {
 		return c.Participants[0].DisplayName
 	}
+	// For groups, prefer a stable participant-based label over generic group metadata.
+	if c.IsGroup() {
+		if names := c.participantNames(); len(names) > 0 {
+			if len(names) > 3 {
+				return strings.Join(names[:3], ", ") + " +" + strconv.Itoa(len(names)-3)
+			}
+			return strings.Join(names, ", ")
+		}
+	}
 	// Then try the chat's own display name (for group chats)
 	if c.DisplayName != "" {
 		return c.DisplayName
@@ -43,6 +54,27 @@ func (c *Chat) GetDisplayName() string {
 	return "Unknown"
 }
 
+func (c *Chat) participantNames() []string {
+	seen := make(map[string]struct{}, len(c.Participants))
+	names := make([]string, 0, len(c.Participants))
+	for _, participant := range c.Participants {
+		name := strings.TrimSpace(participant.DisplayName)
+		if name == "" {
+			name = strings.TrimSpace(participant.Address)
+		}
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		names = append(names, name)
+	}
+	return names
+}
+
 // Handle represents a contact (phone/email)
 type Handle struct {
 	Address     string `json:"address"`
@@ -51,13 +83,16 @@ type Handle struct {
 
 // Message represents a single iMessage
 type Message struct {
-	GUID        string       `json:"guid"`
-	Text        string       `json:"text"`
-	IsFromMe    bool         `json:"isFromMe"`
-	DateCreated int64        `json:"dateCreated"` // milliseconds epoch
-	Handle      *Handle      `json:"handle"`      // nil when isFromMe=true
-	Attachments []Attachment `json:"attachments"`
-	ChatGUID    string       `json:"-"` // injected after parse
+	GUID                  string         `json:"guid"`
+	Text                  string         `json:"text"`
+	IsFromMe              bool           `json:"isFromMe"`
+	DateCreated           int64          `json:"dateCreated"` // milliseconds epoch
+	Handle                *Handle        `json:"handle"`      // nil when isFromMe=true
+	Attachments           []Attachment   `json:"attachments"`
+	AssociatedMessageGUID string         `json:"associatedMessageGuid"`
+	AssociatedMessageType string         `json:"associatedMessageType"`
+	ChatGUID              string         `json:"-"` // injected after parse
+	ReactionCounts        map[string]int `json:"-"` // folded tapbacks for rendering
 }
 
 // ParsedTime returns the message creation time

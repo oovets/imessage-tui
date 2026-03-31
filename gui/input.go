@@ -147,6 +147,7 @@ type InputArea struct {
 	inputBg         *canvas.Rectangle
 	inputBorder     *canvas.Rectangle
 	inputShadow     *canvas.Rectangle
+	entryRows       int
 	onSend          func(string, *models.Message)
 	replyTarget     *models.Message
 	onLayoutChanged func()
@@ -168,14 +169,15 @@ func newInputArea(onSend func(string, *models.Message), onFocused func(), onShor
 		ia.submit(text)
 	})
 	ia.entry.OnChanged = func(text string) {
-		ia.adjustEntryRows(text)
-		ia.notifyLayoutChanged()
+		if ia.adjustEntryRows(text) {
+			ia.notifyLayoutChanged()
+		}
 	}
 	ia.entry.SetMinRowsVisible(1)
 	ia.replyLabel = canvas.NewText("", theme.Color(theme.ColorNameDisabled))
 	ia.replyHolder = container.NewMax()
 	ia.cancelBtn = newGlyphAction("×", func() { ia.ClearReplyTarget() })
-	ia.sendBtn = newGlyphAction("↑", func() { ia.submit(ia.entry.Text) })
+	ia.sendBtn = nil
 	ia.statusLabel = widget.NewLabel("")
 	ia.statusLabel.Hide()
 
@@ -187,7 +189,7 @@ func newInputArea(onSend func(string, *models.Message), onFocused func(), onShor
 		nil,
 		nil,
 		nil,
-		container.NewPadded(ia.sendBtn),
+		nil,
 		ia.entry,
 	)
 	cardContent := container.NewPadded(container.NewVBox(
@@ -269,9 +271,9 @@ func (ia *InputArea) submit(text string) {
 	}
 }
 
-func (ia *InputArea) adjustEntryRows(text string) {
+func (ia *InputArea) adjustEntryRows(text string) bool {
 	if ia == nil || ia.entry == nil {
-		return
+		return false
 	}
 
 	entryWidth := ia.entry.Size().Width
@@ -307,7 +309,12 @@ func (ia *InputArea) adjustEntryRows(text string) {
 	if rows > 6 {
 		rows = 6
 	}
+	if rows == ia.entryRows {
+		return false
+	}
+	ia.entryRows = rows
 	ia.entry.SetMinRowsVisible(rows)
+	return true
 }
 
 func (ia *InputArea) SetTransientStatus(text string) {
@@ -330,18 +337,23 @@ func (ia *InputArea) SetTransientStatus(text string) {
 }
 
 func (ia *InputArea) RefreshLayout() {
-	baseBg := colorToNRGBA(theme.Color(theme.ColorNameInputBackground))
 	baseBorder := colorToNRGBA(theme.Color(theme.ColorNameInputBorder))
 	if ia.inputBg != nil {
-		ia.inputBg.FillColor = color.NRGBA{R: baseBg.R, G: baseBg.G, B: baseBg.B, A: 245}
+		ia.inputBg.FillColor = color.Transparent
+		ia.inputBg.StrokeWidth = 0
+		ia.inputBg.StrokeColor = color.Transparent
 		ia.inputBg.Refresh()
 	}
 	if ia.inputBorder != nil {
-		ia.inputBorder.FillColor = color.NRGBA{R: baseBorder.R, G: baseBorder.G, B: baseBorder.B, A: 90}
+		ia.inputBorder.FillColor = color.Transparent
+		ia.inputBorder.StrokeWidth = 0.6
+		ia.inputBorder.StrokeColor = color.NRGBA{R: baseBorder.R, G: baseBorder.G, B: baseBorder.B, A: 90}
 		ia.inputBorder.Refresh()
 	}
 	if ia.inputShadow != nil {
-		ia.inputShadow.FillColor = color.NRGBA{R: 0, G: 0, B: 0, A: 20}
+		ia.inputShadow.FillColor = color.Transparent
+		ia.inputShadow.StrokeWidth = 0
+		ia.inputShadow.StrokeColor = color.Transparent
 		ia.inputShadow.Refresh()
 	}
 	if ia.replyLabel != nil {
@@ -367,9 +379,6 @@ func (ia *InputArea) RefreshLayout() {
 }
 
 func (ia *InputArea) notifyLayoutChanged() {
-	if ia.panel != nil {
-		ia.panel.Refresh()
-	}
 	if ia.onLayoutChanged != nil {
 		ia.onLayoutChanged()
 	}

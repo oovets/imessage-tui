@@ -13,7 +13,7 @@ A real-time iMessage client for BlueBubbles with two frontends: a terminal UI (T
 - Toggle chat list visibility
 - Clickable links in messages (`http(s)`, `www.`, `mailto`, email addresses)
 - Basic attachment/media rendering (inline image preview when URI is available)
-- Link previews with title/metadata (toggleable in the GUI overflow menu)
+- Link previews with title/metadata (toggleable in GUI settings or overflow actions)
 
 ---
 
@@ -159,6 +159,8 @@ systemctl --user status bluebubbles-preview-proxy.service
 
 ## TUI
 
+## GUI
+
 ### Usage
 
 ```bash
@@ -259,19 +261,28 @@ Appearance and window actions live under the small overflow button in the top-ri
 
 | Item | Action |
 |------|--------|
+| Settings... | Open the full settings dialog |
 | New Window | Open another GUI window |
 | Move Focused Pane to New Window | Detach the focused pane into its own window |
 | A+ Larger | Increase font size (max 20) |
 | A- Smaller | Decrease font size (min 6) |
 | Toggle Bold | Toggle bold weight for all text |
 | Font → | Submenu listing installed font families |
-| Hide/Show Pane Separators | Toggle split-pane dividers |
 | Enable/Disable Compact Mode | Toggle compact spacing |
 | Switch to Light/Dark Mode | Toggle between dark and light theme |
 | Disable/Enable Previews | Toggle URL preview fetching |
 | Max Previews: 1 / 2 | Limit preview cards per message for performance |
 
 Changes apply instantly without restarting.
+
+### Settings Dialog
+
+The settings dialog is split into four tabs:
+
+- Appearance: color mode, font family, font size, compact mode, bold text
+- Behavior: show/hide chat list, open new window, move focused pane to new window
+- Previews: enable/disable link previews, max previews per message
+- Connection: view current server and clear saved password
 
 ### GUI Architecture
 

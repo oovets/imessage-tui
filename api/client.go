@@ -59,6 +59,22 @@ func (c *Client) addAuth(u *url.URL) {
 	u.RawQuery = q.Encode()
 }
 
+func redactedURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	q := u.Query()
+	if q.Has("guid") {
+		q.Set("guid", "***")
+	}
+	if q.Has("password") {
+		q.Set("password", "***")
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
 // GetChats fetches chats sorted by most recent activity
 func (c *Client) GetChats(limit int) ([]models.Chat, error) {
 	u, err := url.Parse(fmt.Sprintf("%s/api/v1/chat/query", c.baseURL))
@@ -70,7 +86,7 @@ func (c *Client) GetChats(limit int) ([]models.Chat, error) {
 	q.Set("guid", c.password)
 	u.RawQuery = q.Encode()
 
-	log.Printf("GetChats (POST): %s", u.String())
+	log.Printf("GetChats (POST): %s", redactedURL(u.String()))
 
 	// Request body - fetch more to account for filtering
 	payload := map[string]interface{}{}
@@ -115,8 +131,8 @@ func (c *Client) GetChats(limit int) ([]models.Chat, error) {
 
 	// Debug: log first chat structure
 	if len(chats) > 0 {
-		log.Printf("First chat debug: DisplayName='%s', ChatIdentifier='%s', Participants=%v",
-			chats[0].DisplayName, chats[0].ChatIdentifier, chats[0].Participants)
+		log.Printf("First chat debug: DisplayName=%q ChatIdentifier=%q participants=%d",
+			chats[0].DisplayName, chats[0].ChatIdentifier, len(chats[0].Participants))
 	}
 
 	// Since LastMessage is always null, we need to fetch the latest message per chat
@@ -165,7 +181,7 @@ func (c *Client) GetChats(limit int) ([]models.Chat, error) {
 			semaphore <- struct{}{}        // Acquire
 			defer func() { <-semaphore }() // Release
 
-			msgs, err := c.GetMessages(chatGUID, 1)
+			msgs, err := c.getMessages(chatGUID, 1, false)
 			result := activityResult{index: idx}
 			if err != nil {
 			} else if len(msgs) == 0 {
@@ -220,6 +236,10 @@ func (c *Client) GetChats(limit int) ([]models.Chat, error) {
 
 // GetMessages fetches messages for a chat, newest first (will be reversed by caller)
 func (c *Client) GetMessages(chatGUID string, limit int) ([]models.Message, error) {
+	return c.getMessages(chatGUID, limit, true)
+}
+
+func (c *Client) getMessages(chatGUID string, limit int, includeAttachments bool) ([]models.Message, error) {
 	u, err := url.Parse(fmt.Sprintf("%s/api/v1/chat/%s/message", c.baseURL, url.QueryEscape(chatGUID)))
 	if err != nil {
 		return nil, err
@@ -228,9 +248,14 @@ func (c *Client) GetMessages(chatGUID string, limit int) ([]models.Message, erro
 	q := u.Query()
 	q.Set("guid", c.password)
 	q.Set("limit", fmt.Sprintf("%d", limit))
+	if includeAttachments {
+		// Some BlueBubbles server versions only include attachment relations when
+		// explicitly requested; unknown params are ignored by other versions.
+		q.Set("with", "attachments")
+		q.Set("withAttachments", "true")
+		q.Set("includeAttachments", "true")
+	}
 	u.RawQuery = q.Encode()
-
-	log.Printf("GetMessages: %s", u.String())
 
 	resp, err := c.httpClient.Get(u.String())
 	if err != nil {
@@ -243,9 +268,6 @@ func (c *Client) GetMessages(chatGUID string, limit int) ([]models.Message, erro
 	if err != nil {
 		return nil, err
 	}
-
-	log.Printf("GetMessages response status: %d", resp.StatusCode)
-	log.Printf("GetMessages response body (first 500 chars): %.500s", string(body))
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("GetMessages error response: %s", string(body))
@@ -260,8 +282,6 @@ func (c *Client) GetMessages(chatGUID string, limit int) ([]models.Message, erro
 	if !result.Exists() || result.Raw == "null" {
 		result = gjson.GetBytes(body, "messages")
 	}
-
-	log.Printf("GetMessages extracted result: %.200s", result.Raw)
 
 	var messages []models.Message
 	if err := json.Unmarshal([]byte(result.Raw), &messages); err != nil {
@@ -328,8 +348,7 @@ func (c *Client) sendMessage(chatGUID, text, replyToGUID, method string) error {
 		return err
 	}
 
-	log.Printf("SendMessage POST method=%s: %s", method, u.String())
-	log.Printf("SendMessage body: %s", string(body))
+	log.Printf("SendMessage POST method=%s: %s", method, redactedURL(u.String()))
 
 	resp, err := c.httpClient.Post(u.String(), "application/json", bytes.NewReader(body))
 	if err != nil {
@@ -343,10 +362,49 @@ func (c *Client) sendMessage(chatGUID, text, replyToGUID, method string) error {
 	}
 
 	log.Printf("SendMessage response status: %d", resp.StatusCode)
-	log.Printf("SendMessage response body: %s", string(respBody))
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return fmt.Errorf("API error: %s (status %d)", string(respBody), resp.StatusCode)
+	}
+
+	return nil
+}
+
+func (c *Client) SendReaction(chatGUID, selectedMessageGUID, reaction string, partIndex int) error {
+	u, err := url.Parse(fmt.Sprintf("%s/api/v1/message/react", c.baseURL))
+	if err != nil {
+		return err
+	}
+
+	q := u.Query()
+	q.Set("guid", c.password)
+	u.RawQuery = q.Encode()
+
+	payload := map[string]interface{}{
+		"chatGuid":            chatGUID,
+		"selectedMessageGuid": selectedMessageGUID,
+		"reaction":            reaction,
+		"partIndex":           partIndex,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.Post(u.String(), "application/json", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("reaction API error: %s (status %d)", string(respBody), resp.StatusCode)
 	}
 
 	return nil
@@ -368,7 +426,7 @@ func (c *Client) GetContacts() (map[string]string, error) {
 	q.Set("guid", c.password)
 	u.RawQuery = q.Encode()
 
-	log.Printf("GetContacts (POST): %s", u.String())
+	log.Printf("GetContacts (POST): %s", redactedURL(u.String()))
 
 	resp, err := c.httpClient.Post(u.String(), "application/json", bytes.NewReader([]byte("{}")))
 	if err != nil {
@@ -383,7 +441,6 @@ func (c *Client) GetContacts() (map[string]string, error) {
 	}
 
 	log.Printf("GetContacts response status: %d", resp.StatusCode)
-	log.Printf("GetContacts response body: %s", string(body))
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("GetContacts error (status %d)", resp.StatusCode)
@@ -440,7 +497,7 @@ func (c *Client) DownloadAttachment(guid string) ([]byte, string, error) {
 	}
 	c.addAuth(u)
 
-	log.Printf("DownloadAttachment: %s", u.String())
+	log.Printf("DownloadAttachment: %s", redactedURL(u.String()))
 
 	resp, err := c.httpClient.Get(u.String())
 	if err != nil {

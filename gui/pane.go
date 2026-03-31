@@ -126,14 +126,19 @@ func (s *paneSurface) MouseIn(_ *desktop.MouseEvent)    {}
 func (s *paneSurface) MouseOut()                        {}
 func (s *paneSurface) MouseMoved(_ *desktop.MouseEvent) {}
 
-func newChatPane(onSend func(*ChatPane, string, *models.Message), onFocused func(*ChatPane), onInputShortcut func(fyne.Shortcut) bool) *ChatPane {
+func newChatPane(onSend func(*ChatPane, string, *models.Message), onReact func(*ChatPane, models.Message, string), onFocused func(*ChatPane), onInputShortcut func(fyne.Shortcut) bool) *ChatPane {
 	p := &ChatPane{id: paneIDCounter}
 	paneIDCounter++
 
 	p.msgView = NewMessageView(func(msg models.Message) {
 		onFocused(p)
 		p.inputArea.SetReplyTarget(msg)
-	}, nil)
+	}, func(msg models.Message, reaction string) {
+		onFocused(p)
+		if onReact != nil {
+			onReact(p, msg, reaction)
+		}
+	})
 
 	p.inputArea = NewInputAreaWithShortcutHandler(
 		func(text string, replyTo *models.Message) { onSend(p, text, replyTo) },

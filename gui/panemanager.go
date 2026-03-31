@@ -106,6 +106,7 @@ type PaneManager struct {
 	appFocused bool
 
 	onSend          func(*ChatPane, string, *models.Message)
+	onReact         func(*ChatPane, models.Message, string)
 	onFocused       func(*ChatPane)
 	onInputShortcut func(fyne.Shortcut) bool
 }
@@ -123,9 +124,9 @@ type paneStateNode struct {
 	Right    *paneStateNode `json:"right,omitempty"`
 }
 
-func NewPaneManager(onSend func(*ChatPane, string, *models.Message), onFocused func(*ChatPane), onInputShortcut func(fyne.Shortcut) bool) *PaneManager {
+func NewPaneManager(onSend func(*ChatPane, string, *models.Message), onReact func(*ChatPane, models.Message, string), onFocused func(*ChatPane), onInputShortcut func(fyne.Shortcut) bool) *PaneManager {
 	pm := &PaneManager{
-		onSend: onSend, onFocused: onFocused, onInputShortcut: onInputShortcut,
+		onSend: onSend, onReact: onReact, onFocused: onFocused, onInputShortcut: onInputShortcut,
 		maxPanes: defaultMaxPanes, appFocused: true,
 	}
 
@@ -141,6 +142,7 @@ func NewPaneManager(onSend func(*ChatPane, string, *models.Message), onFocused f
 func (pm *PaneManager) newPane() *ChatPane {
 	p := newChatPane(
 		pm.onSend,
+		pm.onReact,
 		func(p *ChatPane) {
 			if pm.focused != p {
 				if pm.focused != nil {

@@ -4,6 +4,8 @@ import (
 	"image/color"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -23,10 +25,16 @@ type ChatList struct {
 	selectedGUID string
 	onSelect     func(*models.Chat)
 	onRename     func(chatGUID string) // called after alias save/clear
+
+	rebuildMu    sync.Mutex
+	rebuildTimer *time.Timer
 }
 
 // SetSelected marks a chat as active and rebuilds the list to show the indicator.
 func (cl *ChatList) SetSelected(guid string) {
+	if cl.selectedGUID == guid {
+		return
+	}
 	cl.selectedGUID = guid
 	cl.rebuildVBox()
 }
@@ -61,41 +69,106 @@ func (cl *ChatList) SetChats(chats []models.Chat) {
 	cl.rebuildVBox()
 }
 
+// ApplyMessageActivity updates preview/unread state and moves the chat to the
+// top of its section when new activity arrives.
+func (cl *ChatList) ApplyMessageActivity(chatGUID string, msg models.Message, markUnread bool) {
+	for i, chat := range cl.chats {
+		if chat.GUID != chatGUID {
+			continue
+		}
+		changed := false
+		preview := messagePreviewText(msg)
+		if cl.chats[i].LastMessageText != preview {
+			cl.chats[i].LastMessageText = preview
+			changed = true
+		}
+		if markUnread {
+			if !cl.chats[i].HasNewMessage {
+				cl.chats[i].HasNewMessage = true
+				changed = true
+			}
+		}
+		if cl.moveChatToSectionTop(i) {
+			changed = true
+		}
+		if changed {
+			cl.queueRebuild()
+		}
+		return
+	}
+}
+
 // MarkNewMessage moves the chat to the top of its section and shows the new-message dot.
 func (cl *ChatList) MarkNewMessage(chatGUID string) {
 	for i, chat := range cl.chats {
 		if chat.GUID != chatGUID {
 			continue
 		}
-		cl.chats[i].HasNewMessage = true
-
-		isGroup := cl.chats[i].IsGroup()
-		sectionStart := 0
-		for j, c := range cl.chats {
-			if c.IsGroup() == isGroup {
-				sectionStart = j
-				break
-			}
+		changed := false
+		if !cl.chats[i].HasNewMessage {
+			cl.chats[i].HasNewMessage = true
+			changed = true
 		}
-		if i > sectionStart {
-			moving := cl.chats[i]
-			copy(cl.chats[sectionStart+1:i+1], cl.chats[sectionStart:i])
-			cl.chats[sectionStart] = moving
+		if cl.moveChatToSectionTop(i) {
+			changed = true
 		}
-		cl.rebuildVBox()
+		if changed {
+			cl.queueRebuild()
+		}
 		return
 	}
+}
+
+func (cl *ChatList) moveChatToSectionTop(index int) bool {
+	if index < 0 || index >= len(cl.chats) {
+		return false
+	}
+	isGroup := cl.chats[index].IsGroup()
+	sectionStart := 0
+	for j, c := range cl.chats {
+		if c.IsGroup() == isGroup {
+			sectionStart = j
+			break
+		}
+	}
+	if index <= sectionStart {
+		return false
+	}
+	moving := cl.chats[index]
+	copy(cl.chats[sectionStart+1:index+1], cl.chats[sectionStart:index])
+	cl.chats[sectionStart] = moving
+	return true
 }
 
 // ClearNewMessage clears the new-message indicator.
 func (cl *ChatList) ClearNewMessage(chatGUID string) {
 	for i, chat := range cl.chats {
 		if chat.GUID == chatGUID {
+			if !cl.chats[i].HasNewMessage {
+				return
+			}
 			cl.chats[i].HasNewMessage = false
 			cl.rebuildVBox()
 			return
 		}
 	}
+}
+
+func (cl *ChatList) queueRebuild() {
+	cl.rebuildMu.Lock()
+	if cl.rebuildTimer != nil {
+		cl.rebuildMu.Unlock()
+		return
+	}
+	cl.rebuildTimer = time.AfterFunc(50*time.Millisecond, func() {
+		fyne.Do(func() {
+			cl.rebuildVBox()
+		})
+		cl.rebuildMu.Lock()
+		cl.rebuildTimer = nil
+		cl.rebuildMu.Unlock()
+	})
+	cl.rebuildMu.Unlock()
 }
 
 // rebuildVBox rebuilds the VBox content from cl.chats.
@@ -273,6 +346,22 @@ func chatPreviewText(chat models.Chat) string {
 		return stripEmojis(text)
 	}
 	return "No messages"
+}
+
+func messagePreviewText(msg models.Message) string {
+	text := strings.TrimSpace(msg.Text)
+	if text == "" {
+		if len(msg.Attachments) > 0 {
+			text = "Attachment"
+		} else {
+			text = "No messages"
+		}
+	}
+	text = stripEmojis(text)
+	if msg.IsFromMe && text != "No messages" && text != "Attachment" {
+		return "You: " + text
+	}
+	return text
 }
 
 func (item *chatItemWidget) CreateRenderer() fyne.WidgetRenderer {

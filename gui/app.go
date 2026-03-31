@@ -58,10 +58,15 @@ type App struct {
 	wsMarkMu          sync.Mutex
 	wsPendingChatGUID map[string]struct{}
 	wsMarkTimer       *time.Timer
+
+	wsRefreshMu          sync.Mutex
+	wsPendingRefreshGUID map[string]struct{}
+	wsRefreshTimer       *time.Timer
 }
 
 const fixedChatListWidth = float32(105)
 const appPreferencesID = "com.bluebubbles-tui.gui"
+const initialMessageFetchLimit = 50
 
 const (
 	prefShowChatList       = "ui.show_chat_list"
@@ -117,15 +122,16 @@ func NewApp(apiClient *api.Client, wsClient *ws.Client, cfg *config.Config, laun
 	}
 
 	return &App{
-		apiClient:           apiClient,
-		wsClient:            wsClient,
-		msgCache:            make(map[string][]models.Message),
-		wsPendingChatGUID:   make(map[string]struct{}),
-		linkPreviewsEnabled: enablePreviews,
-		maxLinkPreviews:     maxPreviews,
-		launchChatGUID:      strings.TrimSpace(launchChatGUID),
-		detachedPaneMode:    detachedPaneMode,
-		serverURL:           serverURL,
+		apiClient:            apiClient,
+		wsClient:             wsClient,
+		msgCache:             make(map[string][]models.Message),
+		wsPendingChatGUID:    make(map[string]struct{}),
+		wsPendingRefreshGUID: make(map[string]struct{}),
+		linkPreviewsEnabled:  enablePreviews,
+		maxLinkPreviews:      maxPreviews,
+		launchChatGUID:       strings.TrimSpace(launchChatGUID),
+		detachedPaneMode:     detachedPaneMode,
+		serverURL:            serverURL,
 	}
 }
 
@@ -160,6 +166,7 @@ func (a *App) Run() {
 
 	a.paneManager = NewPaneManager(
 		func(pane *ChatPane, text string, replyTo *models.Message) { a.sendMessageFromPane(pane, text, replyTo) },
+		func(pane *ChatPane, msg models.Message, reaction string) { a.sendReactionFromPane(pane, msg, reaction) },
 		func(pane *ChatPane) {
 			if pane == nil || a.win == nil {
 				return
@@ -249,6 +256,58 @@ func (a *App) Run() {
 	})
 
 	a.win.ShowAndRun()
+}
+
+func (a *App) sendReactionFromPane(pane *ChatPane, target models.Message, reaction string) {
+	reaction = strings.TrimSpace(reaction)
+	if pane == nil || target.GUID == "" || !isReactionType(reaction) {
+		return
+	}
+	chatGUID := strings.TrimSpace(pane.ChatGUID)
+	if chatGUID == "" {
+		chatGUID = strings.TrimSpace(target.ChatGUID)
+	}
+	if chatGUID == "" {
+		return
+	}
+
+	pendingGUID := "pending-reaction-" + uuid.New().String()
+	optimistic := models.Message{
+		GUID:                  pendingGUID,
+		IsFromMe:              true,
+		DateCreated:           time.Now().UnixMilli(),
+		ChatGUID:              chatGUID,
+		AssociatedMessageGUID: "p:0/" + target.GUID,
+		AssociatedMessageType: reaction,
+	}
+
+	a.mu.Lock()
+	a.msgCache[chatGUID] = append(a.msgCache[chatGUID], optimistic)
+	snapshot := a.sortedCacheSnapshot(chatGUID)
+	a.mu.Unlock()
+
+	fyne.Do(func() {
+		if pane.ChatGUID == chatGUID {
+			pane.msgView.SetMessages(snapshot)
+			pane.inputArea.SetTransientStatus("Reaction queued")
+		}
+	})
+
+	go func() {
+		if err := a.apiClient.SendReaction(chatGUID, target.GUID, reaction, 0); err != nil {
+			log.Printf("[GUI] SendReaction error: %v", err)
+			a.mu.Lock()
+			a.removePending(chatGUID, pendingGUID)
+			snapshot := a.sortedCacheSnapshot(chatGUID)
+			a.mu.Unlock()
+			fyne.Do(func() {
+				if pane.ChatGUID == chatGUID {
+					pane.msgView.SetMessages(snapshot)
+					pane.inputArea.SetTransientStatus("Reaction failed")
+				}
+			})
+		}
+	}()
 }
 
 func (a *App) syncChatListSelectionWithPane(pane *ChatPane) {
@@ -938,7 +997,7 @@ func (a *App) selectChat(chat *models.Chat) {
 // loadMessagesForPane fetches messages and updates the given pane.
 func (a *App) loadMessagesForPane(pane *ChatPane, chatGUID string) {
 	defer perfStart("loadMessagesForPane")()
-	msgs, err := a.apiClient.GetMessages(chatGUID, 50)
+	msgs, err := a.apiClient.GetMessages(chatGUID, initialMessageFetchLimit)
 	if err != nil {
 		log.Printf("[GUI] GetMessages error: %v", err)
 		return
@@ -1011,6 +1070,7 @@ func (a *App) sendMessageFromPane(pane *ChatPane, text string, replyTo *models.M
 	a.mu.Unlock()
 
 	fyne.Do(func() {
+		a.chatListComp.ApplyMessageActivity(chatGUID, optimistic, false)
 		if pane.ChatGUID == chatGUID {
 			pane.msgView.SetMessages(snapshot)
 			pane.inputArea.SetTransientStatus("Message queued")
@@ -1162,35 +1222,123 @@ func (a *App) handleWSEvent(event models.WSEvent) {
 			out := cached[:0]
 			removed := false
 			for _, m := range cached {
-				if !removed && strings.HasPrefix(m.GUID, "pending-") && m.Text == msg.Text {
-					removed = true
-					continue
+				if !removed && strings.HasPrefix(m.GUID, "pending-") {
+					sameText := m.Text != "" && m.Text == msg.Text
+					sameReaction := isReactionType(m.AssociatedMessageType) &&
+						m.AssociatedMessageType == msg.AssociatedMessageType &&
+						normalizeAssociatedMessageGUID(m.AssociatedMessageGUID) == normalizeAssociatedMessageGUID(msg.AssociatedMessageGUID)
+					if sameText || sameReaction {
+						removed = true
+						continue
+					}
 				}
 				out = append(out, m)
 			}
 			cached = out
 		}
 		a.msgCache[msg.ChatGUID] = append(cached, msg)
-		snapshot := a.sortedCacheSnapshot(msg.ChatGUID)
 		a.mu.Unlock()
 
 		fyne.Do(func() {
+			markUnread := !msg.IsFromMe && len(a.paneManager.PanesShowingChat(msg.ChatGUID)) == 0
+			a.chatListComp.ApplyMessageActivity(msg.ChatGUID, msg, markUnread)
 			panesShowing := a.paneManager.PanesShowingChat(msg.ChatGUID)
 			if len(panesShowing) > 0 {
-				for _, p := range panesShowing {
-					if msg.IsFromMe {
-						// Own messages may replace optimistic placeholders; keep exact snapshot.
-						p.msgView.SetMessages(snapshot)
-						continue
-					}
+				if msg.IsFromMe {
+					a.queuePaneRefresh(msg.ChatGUID)
+				} else {
 					// Incoming messages can be appended without rebuilding full history.
-					p.msgView.AppendMessage(msg)
+					for _, p := range panesShowing {
+						p.msgView.AppendMessage(msg)
+					}
 				}
-			} else {
-				a.queueUnreadMark(msg.ChatGUID)
+			} else if markUnread {
+				a.refreshUnreadBadge()
 			}
 		})
+	case "updated-message", "message-updated":
+		var wsMsg struct {
+			models.Message
+			Chats []struct {
+				GUID string `json:"guid"`
+			} `json:"chats"`
+		}
+		if err := json.Unmarshal(event.Data, &wsMsg); err != nil {
+			return
+		}
+
+		msg := wsMsg.Message
+		if len(wsMsg.Chats) > 0 {
+			msg.ChatGUID = wsMsg.Chats[0].GUID
+		}
+		if msg.ChatGUID == "" || msg.GUID == "" {
+			return
+		}
+
+		a.mu.Lock()
+		cached := a.msgCache[msg.ChatGUID]
+		replaced := false
+		for i := range cached {
+			if cached[i].GUID == msg.GUID {
+				cached[i] = msg
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			cached = append(cached, msg)
+		}
+		a.msgCache[msg.ChatGUID] = cached
+		a.mu.Unlock()
+
+		a.queuePaneRefresh(msg.ChatGUID)
 	}
+}
+
+func (a *App) queuePaneRefresh(chatGUID string) {
+	chatGUID = strings.TrimSpace(chatGUID)
+	if chatGUID == "" {
+		return
+	}
+
+	a.wsRefreshMu.Lock()
+	a.wsPendingRefreshGUID[chatGUID] = struct{}{}
+	if a.wsRefreshTimer != nil {
+		a.wsRefreshMu.Unlock()
+		return
+	}
+	a.wsRefreshTimer = time.AfterFunc(70*time.Millisecond, a.flushPaneRefreshes)
+	a.wsRefreshMu.Unlock()
+}
+
+func (a *App) flushPaneRefreshes() {
+	a.wsRefreshMu.Lock()
+	pending := make([]string, 0, len(a.wsPendingRefreshGUID))
+	for guid := range a.wsPendingRefreshGUID {
+		pending = append(pending, guid)
+	}
+	a.wsPendingRefreshGUID = make(map[string]struct{})
+	a.wsRefreshTimer = nil
+	a.wsRefreshMu.Unlock()
+
+	if len(pending) == 0 {
+		return
+	}
+
+	fyne.Do(func() {
+		for _, guid := range pending {
+			panesShowing := a.paneManager.PanesShowingChat(guid)
+			if len(panesShowing) == 0 {
+				continue
+			}
+			a.mu.Lock()
+			snapshot := a.sortedCacheSnapshot(guid)
+			a.mu.Unlock()
+			for _, p := range panesShowing {
+				p.msgView.SetMessages(snapshot)
+			}
+		}
+	})
 }
 
 func (a *App) queueUnreadMark(chatGUID string) {

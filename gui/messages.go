@@ -12,11 +12,13 @@ import (
 	_ "image/png"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"net/url"
 	"path"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -73,6 +75,13 @@ var attachmentFetcher = struct {
 	sync.RWMutex
 	fn func(guid string) ([]byte, string, error)
 }{}
+
+var attachmentImageCache = struct {
+	sync.RWMutex
+	data map[string]fyne.Resource
+}{
+	data: make(map[string]fyne.Resource),
+}
 
 func setAttachmentFetcherFromAPI(client *api.Client) {
 	attachmentFetcher.Lock()
@@ -136,17 +145,17 @@ var senderNamePalette = []color.NRGBA{
 
 type hoverMessageRow struct {
 	widget.BaseWidget
-	host     *fyne.Container
-	content  *fyne.Container
-	replyBtn fyne.CanvasObject
+	host    *fyne.Container
+	content *fyne.Container
+	actions fyne.CanvasObject
 }
 
-func newHoverMessageRow(content *fyne.Container, replyBtn fyne.CanvasObject) *hoverMessageRow {
+func newHoverMessageRow(content *fyne.Container, actions fyne.CanvasObject) *hoverMessageRow {
 	host := container.NewVBox(container.NewBorder(nil, nil, nil, nil, content))
 	r := &hoverMessageRow{
-		host:     host,
-		content:  content,
-		replyBtn: replyBtn,
+		host:    host,
+		content: content,
+		actions: actions,
 	}
 	r.ExtendBaseWidget(r)
 	return r
@@ -157,16 +166,16 @@ func (r *hoverMessageRow) CreateRenderer() fyne.WidgetRenderer {
 }
 
 func (r *hoverMessageRow) MouseIn(_ *desktop.MouseEvent) {
-	if r.replyBtn != nil {
-		r.replyBtn.Show()
-		r.host.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, nil, r.replyBtn, r.content)}
+	if r.actions != nil {
+		r.actions.Show()
+		r.host.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, nil, r.actions, r.content)}
 		r.host.Refresh()
 	}
 }
 
 func (r *hoverMessageRow) MouseOut() {
-	if r.replyBtn != nil {
-		r.replyBtn.Hide()
+	if r.actions != nil {
+		r.actions.Hide()
 		r.host.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, nil, nil, r.content)}
 		r.host.Refresh()
 	}
@@ -181,15 +190,17 @@ type MessageView struct {
 	scroll    *container.Scroll
 	panel     fyne.CanvasObject
 	messages  []models.Message
+	lastSig   uint64
 	onReply   func(models.Message)
+	onReact   func(models.Message, string)
 	bottomPad float32
 
 	autoScrollUntil atomic.Int64
 	scrollSeq       atomic.Int64
 }
 
-func NewMessageView(onReply func(models.Message), _ func()) *MessageView {
-	mv := &MessageView{onReply: onReply}
+func NewMessageView(onReply func(models.Message), onReact func(models.Message, string)) *MessageView {
+	mv := &MessageView{onReply: onReply, onReact: onReact}
 	mv.vbox = container.NewVBox()
 	mv.scroll = container.NewVScroll(mv.vbox)
 	mv.panel = mv.scroll
@@ -218,8 +229,14 @@ func (mv *MessageView) SetChatName(_ string) {}
 // so a freshly selected chat doesn't inherit the previous scroll position.
 func (mv *MessageView) SetMessages(msgs []models.Message) {
 	defer perfStart("MessageView.SetMessages")()
+	sig := messageListSignature(msgs)
+	if len(msgs) > 0 && sig == mv.lastSig {
+		mv.messages = msgs
+		return
+	}
 	mv.messages = msgs
 	if len(msgs) == 0 {
+		mv.lastSig = 0
 		emptyTitle := widget.NewLabel("No conversation selected")
 		emptyTitle.TextStyle = fyne.TextStyle{Bold: true}
 		emptyHint := widget.NewLabel("Pick a chat from the list to start reading and replying.")
@@ -232,11 +249,13 @@ func (mv *MessageView) SetMessages(msgs []models.Message) {
 		mv.scroll.ScrollToTop()
 		return
 	}
+	mv.lastSig = sig
 	mv.rebuildVBox()
 }
 
 func (mv *MessageView) SetLoading() {
 	mv.messages = nil
+	mv.lastSig = 0
 	loadingTitle := widget.NewLabel("Loading conversation...")
 	loadingTitle.TextStyle = fyne.TextStyle{Bold: true}
 	loadingHint := widget.NewLabel("Fetching latest messages from BlueBubbles server.")
@@ -302,10 +321,11 @@ func (mv *MessageView) rebuildVBox() {
 	defer perfStart("MessageView.rebuildVBox")()
 	mv.extendAutoScrollWindow(2 * time.Second)
 	mv.vbox.Objects = nil
+	displayMessages := foldReactionMessages(mv.messages)
 
-	for i, msg := range mv.messages {
-		showSender := !msg.IsFromMe && isLastInSenderGroup(mv.messages, i)
-		mv.vbox.Add(buildMessageRow(msg, mv.onReply, nil, showSender, mv.maybeScrollAfterAsyncResize))
+	for i, msg := range displayMessages {
+		showSender := !msg.IsFromMe && isLastInSenderGroup(displayMessages, i)
+		mv.vbox.Add(buildMessageRow(msg, mv.onReply, mv.onReact, showSender, mv.maybeScrollAfterAsyncResize))
 	}
 	if mv.bottomPad > 0 {
 		spacer := canvas.NewRectangle(color.Transparent)
@@ -314,6 +334,26 @@ func (mv *MessageView) rebuildVBox() {
 	}
 	mv.vbox.Refresh()
 	mv.ScrollToBottom()
+	mv.lastSig = messageListSignature(mv.messages)
+}
+
+func messageListSignature(msgs []models.Message) uint64 {
+	h := fnv.New64a()
+	for _, m := range msgs {
+		_, _ = h.Write([]byte(m.GUID))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(strconv.FormatInt(m.DateCreated, 10)))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(m.Text))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(strconv.Itoa(len(m.Attachments))))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(m.AssociatedMessageGUID))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(m.AssociatedMessageType))
+		_, _ = h.Write([]byte{0})
+	}
+	return h.Sum64()
 }
 
 func messageSenderName(msg models.Message) string {
@@ -329,7 +369,7 @@ func messageSenderName(msg models.Message) string {
 	return "Unknown"
 }
 
-func buildMessageRow(msg models.Message, onReply func(models.Message), _ func(), showSender bool, onAsyncResize func()) fyne.CanvasObject {
+func buildMessageRow(msg models.Message, onReply func(models.Message), onReact func(models.Message, string), showSender bool, onAsyncResize func()) fyne.CanvasObject {
 	var objs []fyne.CanvasObject
 
 	// Sender name: always visible for the last message in each incoming group.
@@ -355,18 +395,145 @@ func buildMessageRow(msg models.Message, onReply func(models.Message), _ func(),
 			objs = append(objs, alignOutgoingRow(a, msg.IsFromMe))
 		}
 	}
+	if reactionRow := buildReactionRow(msg); reactionRow != nil {
+		objs = append(objs, alignOutgoingRow(reactionRow, msg.IsFromMe))
+	}
 	content := container.NewVBox(objs...)
 
-	var replyBtn fyne.CanvasObject
+	var actions []fyne.CanvasObject
 	if onReply != nil && !msg.IsFromMe {
 		replyGlyph := newGlyphAction("↩", func() { onReply(msg) })
 		replyGlyph.SetFixedColor(theme.Color(theme.ColorNamePrimary))
-		replyGlyph.Hide()
-		replyBtn = replyGlyph
+		actions = append(actions, replyGlyph)
+	}
+	if onReact != nil {
+		actions = append(actions, reactionAction(msg, "❤", "love", onReact))
+		actions = append(actions, reactionAction(msg, "👍", "like", onReact))
+		actions = append(actions, reactionAction(msg, "👎", "dislike", onReact))
+		actions = append(actions, reactionAction(msg, "😂", "laugh", onReact))
+		actions = append(actions, reactionAction(msg, "‼", "emphasize", onReact))
+		actions = append(actions, reactionAction(msg, "?", "question", onReact))
 	}
 
-	row := newHoverMessageRow(content, replyBtn)
+	var actionBox fyne.CanvasObject
+	if len(actions) > 0 {
+		actionBox = container.NewHBox(actions...)
+		actionBox.Hide()
+	}
+
+	row := newHoverMessageRow(content, actionBox)
 	return applyMessageSideIndent(row, msg.IsFromMe)
+}
+
+func reactionAction(msg models.Message, glyph string, reactionType string, onReact func(models.Message, string)) fyne.CanvasObject {
+	btn := newGlyphAction(glyph, func() { onReact(msg, reactionType) })
+	btn.SetFixedColor(theme.Color(theme.ColorNamePrimary))
+	btn.SetTextSize(glyphTextSize() - 1)
+	return btn
+}
+
+func reactionEmoji(reactionType string) string {
+	switch reactionType {
+	case "love":
+		return "❤"
+	case "like":
+		return "👍"
+	case "dislike":
+		return "👎"
+	case "laugh":
+		return "😂"
+	case "emphasize":
+		return "‼"
+	case "question":
+		return "?"
+	default:
+		return ""
+	}
+}
+
+func buildReactionRow(msg models.Message) fyne.CanvasObject {
+	if len(msg.ReactionCounts) == 0 {
+		return nil
+	}
+	order := []string{"love", "like", "dislike", "laugh", "emphasize", "question"}
+	chips := make([]fyne.CanvasObject, 0, len(order))
+	for _, key := range order {
+		count := msg.ReactionCounts[key]
+		if count <= 0 {
+			continue
+		}
+		emoji := reactionEmoji(key)
+		if emoji == "" {
+			continue
+		}
+		label := widget.NewLabel(fmt.Sprintf("%s %d", emoji, count))
+		label.Importance = widget.MediumImportance
+		chips = append(chips, label)
+	}
+	if len(chips) == 0 {
+		return nil
+	}
+	return container.NewHBox(chips...)
+}
+
+func isReactionType(t string) bool {
+	switch strings.TrimSpace(t) {
+	case "love", "like", "dislike", "laugh", "emphasize", "question", "-love", "-like", "-dislike", "-laugh", "-emphasize", "-question":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeAssociatedMessageGUID(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "p:") {
+		if slash := strings.Index(raw, "/"); slash >= 0 && slash+1 < len(raw) {
+			return raw[slash+1:]
+		}
+	}
+	if strings.HasPrefix(raw, "bp:") {
+		return strings.TrimPrefix(raw, "bp:")
+	}
+	return raw
+}
+
+func foldReactionMessages(messages []models.Message) []models.Message {
+	display := make([]models.Message, 0, len(messages))
+	indexByGUID := make(map[string]int)
+
+	for _, msg := range messages {
+		reactionType := strings.TrimSpace(msg.AssociatedMessageType)
+		targetGUID := normalizeAssociatedMessageGUID(msg.AssociatedMessageGUID)
+		if isReactionType(reactionType) && targetGUID != "" {
+			if idx, ok := indexByGUID[targetGUID]; ok {
+				baseType := strings.TrimPrefix(reactionType, "-")
+				if display[idx].ReactionCounts == nil {
+					display[idx].ReactionCounts = make(map[string]int)
+				}
+				if strings.HasPrefix(reactionType, "-") {
+					display[idx].ReactionCounts[baseType]--
+					if display[idx].ReactionCounts[baseType] <= 0 {
+						delete(display[idx].ReactionCounts, baseType)
+					}
+				} else {
+					display[idx].ReactionCounts[baseType]++
+				}
+				continue
+			}
+		}
+
+		msg.ReactionCounts = nil
+		display = append(display, msg)
+		if msg.GUID != "" {
+			indexByGUID[msg.GUID] = len(display) - 1
+		}
+	}
+
+	return display
 }
 
 // isLastInSenderGroup reports whether message at idx is the last consecutive
@@ -527,21 +694,19 @@ func buildAttachmentRows(attachments []models.Attachment, onAsyncResize func()) 
 
 func buildAttachmentRow(att models.Attachment, onAsyncResize func()) fyne.CanvasObject {
 	name := attachmentName(att)
-	isImage := strings.HasPrefix(strings.ToLower(att.MimeType), "image/")
+	isImage := isLikelyImageAttachment(att)
 
-	log.Printf("[attachment] guid=%q name=%q mime=%q url=%q path=%q pathOnDisk=%q",
-		att.GUID, name, att.MimeType, att.URL, att.Path, att.PathOnDisk)
+	if isImage && att.GUID != "" {
+		if res := getCachedAttachmentResource(att.GUID); res != nil {
+			return newInlineImageFromResource(res)
+		}
+	}
 
 	// Try reading from the local filesystem first.
 	if uri := attachmentURI(att); uri != nil {
-		log.Printf("[attachment] trying local URI: %s", uri.String())
 		if img := buildInlineImage(uri); img != nil {
-			log.Printf("[attachment] local image OK: %s", uri.String())
-			return newCollapsibleCard("Image: "+name, img, nil)
+			return img
 		}
-		log.Printf("[attachment] local image failed (not an image or unreadable): %s", uri.String())
-	} else {
-		log.Printf("[attachment] no usable local URI")
 	}
 
 	// Fall back to downloading via the BlueBubbles API.
@@ -550,10 +715,8 @@ func buildAttachmentRow(att models.Attachment, onAsyncResize func()) fyne.Canvas
 		fn := attachmentFetcher.fn
 		attachmentFetcher.RUnlock()
 		if fn != nil {
-			log.Printf("[attachment] queuing async API download for guid=%q", att.GUID)
 			return buildAsyncAttachmentImage(att.GUID, name, fn, onAsyncResize)
 		}
-		log.Printf("[attachment] no API fetcher registered, showing label")
 	}
 
 	prefix := "Attachment"
@@ -566,39 +729,48 @@ func buildAttachmentRow(att models.Attachment, onAsyncResize func()) fyne.Canvas
 	return label
 }
 
-// buildAsyncAttachmentImage shows a collapsed card and reveals the image when loaded.
+// buildAsyncAttachmentImage shows a loading label initially, then displays the image inline when loaded.
 func buildAsyncAttachmentImage(guid, name string, fetch func(string) ([]byte, string, error), onAsyncResize func()) fyne.CanvasObject {
+	if res := getCachedAttachmentResource(guid); res != nil {
+		return newInlineImageFromResource(res)
+	}
+
 	content := container.NewVBox()
-	collapsed := newCollapsibleCard("Image: "+name, content, onAsyncResize)
+	loadingLabel := widget.NewLabel("Loading image...")
+	loadingLabel.Importance = widget.LowImportance
+	content.Objects = []fyne.CanvasObject{loadingLabel}
 
 	go func() {
 		data, mimeType, err := fetch(guid)
 		if err != nil {
 			log.Printf("[attachment] API download error guid=%q: %v", guid, err)
-			fyne.Do(func() { collapsed.SetSummary("Image: " + name + " (failed)") })
+			fyne.Do(func() {
+				loadingLabel.SetText("Failed to load image")
+			})
 			return
 		}
-		log.Printf("[attachment] API download OK guid=%q bytes=%d mime=%q", guid, len(data), mimeType)
 		if _, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil {
 			log.Printf("[attachment] image decode failed guid=%q: %v", guid, err)
-			fyne.Do(func() { collapsed.SetSummary("Image: " + name + " (decode failed)") })
+			fyne.Do(func() {
+				loadingLabel.SetText("Image decode failed")
+			})
 			return
 		}
-		res := fyne.NewStaticResource(guid, data)
-		img := canvas.NewImageFromResource(res)
-		img.FillMode = canvas.ImageFillContain
-		img.SetMinSize(fyne.NewSize(220, 140))
+		resName := attachmentResourceName(guid, name, mimeType)
+		res := fyne.NewStaticResource(resName, data)
+		setCachedAttachmentResource(guid, res)
+		img := newInlineImageFromResource(res)
 		fyne.Do(func() {
 			content.Objects = []fyne.CanvasObject{img}
 			content.Refresh()
-			// Only trigger resize if the card is already open.
-			if collapsed.expanded && onAsyncResize != nil {
+			img.Refresh()
+			if onAsyncResize != nil {
 				onAsyncResize()
 			}
 		})
 	}()
 
-	return collapsed
+	return content
 }
 
 func buildLinkPreviewRows(body string, _ bool, onAsyncResize func()) []fyne.CanvasObject {
@@ -1035,9 +1207,6 @@ func buildInlineImage(uri fyne.URI) fyne.CanvasObject {
 	if uri == nil {
 		return nil
 	}
-	if !isImageURI(uri) {
-		return nil
-	}
 
 	readCloser, err := storage.Reader(uri)
 	if err != nil {
@@ -1049,6 +1218,7 @@ func buildInlineImage(uri fyne.URI) fyne.CanvasObject {
 	if _, err := buf.ReadFrom(readCloser); err != nil {
 		return nil
 	}
+
 	if _, _, err := image.DecodeConfig(bytes.NewReader(buf.Bytes())); err != nil {
 		return nil
 	}
@@ -1058,16 +1228,6 @@ func buildInlineImage(uri fyne.URI) fyne.CanvasObject {
 	img.FillMode = canvas.ImageFillContain
 	img.SetMinSize(fyne.NewSize(220, 140))
 	return img
-}
-
-func isImageURI(uri fyne.URI) bool {
-	ext := strings.ToLower(uri.Extension())
-	switch ext {
-	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp":
-		return true
-	default:
-		return false
-	}
 }
 
 func attachmentURI(att models.Attachment) fyne.URI {
@@ -1092,6 +1252,22 @@ func attachmentURI(att models.Attachment) fyne.URI {
 	return nil
 }
 
+func isLikelyImageAttachment(att models.Attachment) bool {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(att.MimeType)), "image/") {
+		return true
+	}
+	for _, v := range []string{att.FileName, att.PathOnDisk, att.Path, att.URL} {
+		s := strings.ToLower(strings.TrimSpace(v))
+		if s == "" {
+			continue
+		}
+		if strings.Contains(s, ".png") || strings.Contains(s, ".jpg") || strings.Contains(s, ".jpeg") || strings.Contains(s, ".gif") || strings.Contains(s, ".webp") || strings.Contains(s, ".bmp") || strings.Contains(s, ".heic") {
+			return true
+		}
+	}
+	return false
+}
+
 func attachmentName(att models.Attachment) string {
 	if strings.TrimSpace(att.FileName) != "" {
 		return att.FileName
@@ -1111,4 +1287,50 @@ func attachmentName(att models.Attachment) string {
 		return att.GUID
 	}
 	return "file"
+}
+
+func attachmentResourceName(guid, fileName, mimeType string) string {
+	name := strings.TrimSpace(fileName)
+	if name != "" && strings.Contains(name, ".") {
+		return name
+	}
+	ext := ""
+	if mt := strings.TrimSpace(mimeType); mt != "" {
+		if exts, err := mime.ExtensionsByType(mt); err == nil && len(exts) > 0 {
+			ext = exts[0]
+		}
+	}
+	if ext == "" {
+		ext = ".img"
+	}
+	id := strings.TrimSpace(guid)
+	if id == "" {
+		id = "attachment"
+	}
+	if strings.HasSuffix(strings.ToLower(id), strings.ToLower(ext)) {
+		return id
+	}
+	return id + ext
+}
+
+func newInlineImageFromResource(res fyne.Resource) *canvas.Image {
+	img := canvas.NewImageFromResource(res)
+	img.FillMode = canvas.ImageFillContain
+	img.SetMinSize(fyne.NewSize(220, 140))
+	return img
+}
+
+func getCachedAttachmentResource(guid string) fyne.Resource {
+	attachmentImageCache.RLock()
+	defer attachmentImageCache.RUnlock()
+	return attachmentImageCache.data[guid]
+}
+
+func setCachedAttachmentResource(guid string, res fyne.Resource) {
+	if strings.TrimSpace(guid) == "" || res == nil {
+		return
+	}
+	attachmentImageCache.Lock()
+	attachmentImageCache.data[guid] = res
+	attachmentImageCache.Unlock()
 }

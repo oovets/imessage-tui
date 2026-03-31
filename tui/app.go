@@ -21,6 +21,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+const initialMessageFetchLimit = 50
+
 type focusRegion int
 
 const (
@@ -505,7 +507,7 @@ func loadChatsCmd(client *api.Client) tea.Cmd {
 
 func loadMessagesCmd(client *api.Client, chatGUID string, windowID WindowID) tea.Cmd {
 	return func() tea.Msg {
-		messages, err := client.GetMessages(chatGUID, 50)
+		messages, err := client.GetMessages(chatGUID, initialMessageFetchLimit)
 		if err != nil {
 			return errMsg{err: fmt.Errorf("failed to load messages: %v", err)}
 		}
