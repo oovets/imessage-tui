@@ -15,6 +15,8 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/bluebubbles-tui/api"
 	"github.com/bluebubbles-tui/config"
@@ -130,7 +132,6 @@ func (a *App) Run() {
 
 	a.win = a.fyneApp.NewWindow("BlueBubbles")
 	a.win.Resize(fyne.NewSize(a.windowWidth, a.windowHeight))
-	a.win.SetMainMenu(a.buildMainMenu())
 
 	setLinkPreviewEnabled(a.linkPreviewsEnabled)
 	setMaxLinkPreviewsPerMessage(a.maxLinkPreviews)
@@ -306,8 +307,8 @@ func (a *App) mainContent() fyne.CanvasObject {
 	if a.showChatList {
 		base = container.NewBorder(nil, nil, a.chatListPane, nil, base)
 	}
-	// Discreet unread indicator remains visible even when chat list is hidden.
-	return container.NewBorder(nil, nil, nil, a.unreadBadgeBox, base)
+	topRight := container.NewPadded(container.NewHBox(layout.NewSpacer(), a.newOverflowMenuButton()))
+	return container.NewStack(base, container.NewBorder(topRight, nil, nil, nil, nil))
 }
 
 func (a *App) refreshChatListWidth() {
@@ -437,7 +438,6 @@ func (a *App) setLinkPreviewsEnabled(enabled bool) {
 	setLinkPreviewEnabled(enabled)
 	a.fyneApp.Preferences().SetBool(prefEnableLinkPreviews, enabled)
 	a.refreshAllMessageViews()
-	a.win.SetMainMenu(a.buildMainMenu())
 }
 
 func (a *App) setMaxLinkPreviews(max int) {
@@ -448,7 +448,6 @@ func (a *App) setMaxLinkPreviews(max int) {
 	setMaxLinkPreviewsPerMessage(max)
 	a.fyneApp.Preferences().SetInt(prefMaxLinkPreviews, max)
 	a.refreshAllMessageViews()
-	a.win.SetMainMenu(a.buildMainMenu())
 }
 
 func (a *App) setDarkMode(enabled bool) {
@@ -461,7 +460,6 @@ func (a *App) setDarkMode(enabled bool) {
 	// Refresh custom-painted pane elements (e.g. floating input background)
 	// that do not automatically pick up theme changes.
 	a.refreshAllMessageViews()
-	a.win.SetMainMenu(a.buildMainMenu())
 }
 
 func (a *App) setCompactMode(enabled bool) {
@@ -472,7 +470,6 @@ func (a *App) setCompactMode(enabled bool) {
 	a.fyneApp.Preferences().SetBool(prefCompactMode, enabled)
 	a.fyneApp.Settings().SetTheme(a.appTheme)
 	a.refreshAllMessageViews()
-	a.win.SetMainMenu(a.buildMainMenu())
 }
 
 func (a *App) togglePaneSeparators() {
@@ -481,7 +478,6 @@ func (a *App) togglePaneSeparators() {
 		a.paneManager.SetShowSeparators(a.showPaneSeparators)
 	}
 	a.fyneApp.Preferences().SetBool(prefPaneSeparators, a.showPaneSeparators)
-	a.win.SetMainMenu(a.buildMainMenu())
 }
 
 // refreshPaneNameForChat updates the header of any open pane showing chatGUID
@@ -525,11 +521,11 @@ func (a *App) loadUIState() {
 
 	a.appTheme.dark = prefs.BoolWithFallback(prefDarkMode, a.appTheme.dark)
 	fontSize := prefs.IntWithFallback(prefFontSize, int(a.appTheme.fontSize))
-	if fontSize < 8 {
-		fontSize = 8
+	if fontSize < minUIFontSize {
+		fontSize = minUIFontSize
 	}
-	if fontSize > 20 {
-		fontSize = 20
+	if fontSize > maxUIFontSize {
+		fontSize = maxUIFontSize
 	}
 	a.appTheme.fontSize = float32(fontSize)
 	a.appTheme.boldAll = prefs.BoolWithFallback(prefBoldAll, a.appTheme.boldAll)
@@ -551,7 +547,7 @@ func (a *App) loadUIState() {
 	}
 }
 
-func (a *App) buildMainMenu() *fyne.MainMenu {
+func (a *App) buildOverflowMenu() *fyne.Menu {
 	previewLabel := "Disable Previews"
 	if !a.linkPreviewsEnabled {
 		previewLabel = "Enable Previews"
@@ -580,24 +576,21 @@ func (a *App) buildMainMenu() *fyne.MainMenu {
 		}
 		fontItems = append(fontItems, fyne.NewMenuItem(label, func() {
 			a.setFont(n)
-			a.win.SetMainMenu(a.buildMainMenu())
 		}))
 	}
 	fontItem := fyne.NewMenuItem("Font", nil)
 	fontItem.ChildMenu = fyne.NewMenu("", fontItems...)
 
-	windowMenu := fyne.NewMenu("Window",
+	return fyne.NewMenu("",
 		fyne.NewMenuItem("New Window", func() {
 			a.openNewWindow()
 		}),
 		fyne.NewMenuItem("Move Focused Pane to New Window", func() {
 			a.moveFocusedPaneToNewWindow()
 		}),
-	)
-
-	viewMenu := fyne.NewMenu("View",
+		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("A+ Larger", func() {
-			if a.appTheme.fontSize < 20 {
+			if a.appTheme.fontSize < maxUIFontSize {
 				a.appTheme.fontSize++
 				a.fyneApp.Preferences().SetInt(prefFontSize, int(a.appTheme.fontSize))
 				a.fyneApp.Settings().SetTheme(a.appTheme)
@@ -606,7 +599,7 @@ func (a *App) buildMainMenu() *fyne.MainMenu {
 			}
 		}),
 		fyne.NewMenuItem("A- Smaller", func() {
-			if a.appTheme.fontSize > 8 {
+			if a.appTheme.fontSize > minUIFontSize {
 				a.appTheme.fontSize--
 				a.fyneApp.Preferences().SetInt(prefFontSize, int(a.appTheme.fontSize))
 				a.fyneApp.Settings().SetTheme(a.appTheme)
@@ -640,8 +633,24 @@ func (a *App) buildMainMenu() *fyne.MainMenu {
 			a.setMaxLinkPreviews(2)
 		}),
 	)
+}
 
-	return fyne.NewMainMenu(windowMenu, viewMenu)
+func (a *App) newOverflowMenuButton() fyne.CanvasObject {
+	btn := widget.NewButtonWithIcon("", theme.MenuDropDownIcon(), nil)
+	btn.Importance = widget.LowImportance
+	btn.OnTapped = func() {
+		c := fyne.CurrentApp().Driver().CanvasForObject(btn)
+		if c == nil {
+			return
+		}
+		widget.ShowPopUpMenuAtRelativePosition(
+			a.buildOverflowMenu(),
+			c,
+			fyne.NewPos(0, btn.Size().Height),
+			btn,
+		)
+	}
+	return btn
 }
 
 func (a *App) handleInputShortcut(shortcut fyne.Shortcut) bool {

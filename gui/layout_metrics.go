@@ -62,16 +62,16 @@ func hoverSenderTextSize() float32 {
 	} else {
 		size -= 1
 	}
-	if size < 8 {
-		size = 8
+	if size < minUIFontSize {
+		size = minUIFontSize
 	}
 	return size
 }
 
 func hoverTimestampTextSize() float32 {
 	size := hoverSenderTextSize() - 1
-	if size < 8 {
-		size = 8
+	if size < minUIFontSize {
+		size = minUIFontSize
 	}
 	return size
 }
@@ -83,8 +83,8 @@ func glyphTextSize() float32 {
 	} else {
 		size -= 1
 	}
-	if size < 8 {
-		size = 8
+	if size < minUIFontSize {
+		size = minUIFontSize
 	}
 	return size
 }

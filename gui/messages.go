@@ -133,27 +133,18 @@ var senderNamePalette = []color.NRGBA{
 	{R: 115, G: 218, B: 202, A: 255},
 }
 
-// tsColor is the fully-opaque colour used for the hover timestamp.
-var tsColor = color.NRGBA{R: 100, G: 106, B: 130, A: 180}
-
 type hoverMessageRow struct {
 	widget.BaseWidget
 	host     *fyne.Container
 	content  *fyne.Container
-	tsLabel  *canvas.Text
-	tsAnim   *fyne.Animation
 	replyBtn fyne.CanvasObject
-	hovered  bool
 }
 
-func newHoverMessageRow(content *fyne.Container, tsLabel *canvas.Text, replyBtn fyne.CanvasObject) *hoverMessageRow {
-	tsLabel.Hide() // hidden initially — takes no layout space until hovered
-	inner := container.NewBorder(nil, nil, tsLabel, nil, content)
-	host := container.NewVBox(inner)
+func newHoverMessageRow(content *fyne.Container, replyBtn fyne.CanvasObject) *hoverMessageRow {
+	host := container.NewVBox(container.NewBorder(nil, nil, nil, nil, content))
 	r := &hoverMessageRow{
 		host:     host,
 		content:  content,
-		tsLabel:  tsLabel,
 		replyBtn: replyBtn,
 	}
 	r.ExtendBaseWidget(r)
@@ -165,72 +156,22 @@ func (r *hoverMessageRow) CreateRenderer() fyne.WidgetRenderer {
 }
 
 func (r *hoverMessageRow) MouseIn(_ *desktop.MouseEvent) {
-	r.hovered = true
-	r.animateTs(true)
 	if r.replyBtn != nil {
 		r.replyBtn.Show()
-		if g, ok := r.replyBtn.(*glyphAction); ok {
-			g.SetEmphasis(true)
-		}
-		r.host.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, r.tsLabel, r.replyBtn, r.content)}
+		r.host.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, nil, r.replyBtn, r.content)}
 		r.host.Refresh()
 	}
 }
 
 func (r *hoverMessageRow) MouseOut() {
-	r.hovered = false
-	r.animateTs(false)
 	if r.replyBtn != nil {
-		if g, ok := r.replyBtn.(*glyphAction); ok {
-			g.SetEmphasis(false)
-		}
 		r.replyBtn.Hide()
-		r.host.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, r.tsLabel, nil, r.content)}
+		r.host.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, nil, nil, r.content)}
 		r.host.Refresh()
 	}
 }
 
 func (r *hoverMessageRow) MouseMoved(_ *desktop.MouseEvent) {}
-
-func (r *hoverMessageRow) animateTs(visible bool) {
-	if r.tsAnim != nil {
-		r.tsAnim.Stop()
-	}
-	col := tsColor
-	if visible {
-		// Show first so the layout reflows and reserves space, then fade in.
-		r.tsLabel.Color = color.NRGBA{R: col.R, G: col.G, B: col.B, A: 0}
-		r.tsLabel.Show()
-		r.host.Refresh()
-		r.tsAnim = fyne.NewAnimation(120*time.Millisecond, func(f float32) {
-			r.tsLabel.Color = color.NRGBA{R: col.R, G: col.G, B: col.B, A: uint8(f * 255)}
-			canvas.Refresh(r.tsLabel)
-		})
-		r.tsAnim.Curve = fyne.AnimationEaseOut
-		r.tsAnim.Start()
-	} else {
-		startA := uint8(255)
-		if c, ok := r.tsLabel.Color.(color.NRGBA); ok {
-			startA = c.A
-		}
-		const dur = 110 * time.Millisecond
-		r.tsAnim = fyne.NewAnimation(dur, func(f float32) {
-			r.tsLabel.Color = color.NRGBA{R: col.R, G: col.G, B: col.B, A: uint8(float32(startA) * (1 - f))}
-			canvas.Refresh(r.tsLabel)
-		})
-		r.tsAnim.Curve = fyne.AnimationEaseIn
-		r.tsAnim.Start()
-		// After fade-out, hide to release layout space.
-		time.AfterFunc(dur, func() {
-			fyne.Do(func() {
-				if !r.hovered {
-					r.tsLabel.Hide()
-					r.host.Refresh()
-				}
-			})
-		})
-	}
-}
 
 // MessageView renders the message history for the selected chat.
 // All methods must be called from the Fyne main goroutine.
@@ -356,10 +297,6 @@ func messageSenderName(msg models.Message) string {
 }
 
 func buildMessageRow(msg models.Message, onReply func(models.Message), _ func(), showSender bool, onAsyncResize func()) fyne.CanvasObject {
-	// Timestamp: always in layout (reserves space), alpha animated on hover.
-	tsLabel := canvas.NewText(formatHoverTimestamp(msg.ParsedTime())+" ", color.NRGBA{R: tsColor.R, G: tsColor.G, B: tsColor.B, A: 0})
-	tsLabel.TextSize = hoverTimestampTextSize()
-
 	var objs []fyne.CanvasObject
 
 	// Sender name: always visible for the last message in each incoming group.
@@ -390,12 +327,12 @@ func buildMessageRow(msg models.Message, onReply func(models.Message), _ func(),
 	var replyBtn fyne.CanvasObject
 	if onReply != nil && !msg.IsFromMe {
 		replyGlyph := newGlyphAction("↩", func() { onReply(msg) })
-		replyGlyph.SetEmphasis(false)
+		replyGlyph.SetFixedColor(color.Black)
 		replyGlyph.Hide()
 		replyBtn = replyGlyph
 	}
 
-	row := newHoverMessageRow(content, tsLabel, replyBtn)
+	row := newHoverMessageRow(content, replyBtn)
 	return applyMessageSideIndent(row, msg.IsFromMe)
 }
 

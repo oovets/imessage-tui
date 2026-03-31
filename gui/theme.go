@@ -301,6 +301,11 @@ type compactTheme struct {
 	curFamily   string
 }
 
+const (
+	minUIFontSize = 6
+	maxUIFontSize = 20
+)
+
 func newCompactTheme() *compactTheme {
 	t := &compactTheme{
 		dark:     true,
@@ -474,14 +479,14 @@ func (t *compactTheme) Size(name fyne.ThemeSizeName) float32 {
 	case theme.SizeNameCaptionText:
 		if t.compactMode {
 			sz := t.fontSize - 2
-			if sz < 8 {
-				return 8
+			if sz < minUIFontSize {
+				return minUIFontSize
 			}
 			return sz
 		}
 		sz := t.fontSize - 1
-		if sz < 8 {
-			return 8
+		if sz < minUIFontSize {
+			return minUIFontSize
 		}
 		return sz
 	default:

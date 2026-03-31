@@ -1,6 +1,8 @@
 package gui
 
 import (
+	"image/color"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/theme"
@@ -14,6 +16,7 @@ type glyphAction struct {
 	onTap       func()
 	emphasized  bool
 	currentText string
+	fixedColor  color.Color
 }
 
 func newGlyphAction(text string, onTap func()) *glyphAction {
@@ -44,20 +47,20 @@ func (g *glyphAction) SetText(text string) {
 }
 
 func (g *glyphAction) SetTextSize(size float32) {
-	if size < 8 {
-		size = 8
+	if size < minUIFontSize {
+		size = minUIFontSize
 	}
 	g.textObj.TextSize = size
 	g.Refresh()
 }
 
+func (g *glyphAction) SetFixedColor(c color.Color) {
+	g.fixedColor = c
+	g.Refresh()
+}
+
 func (g *glyphAction) SetEmphasis(on bool) {
 	g.emphasized = on
-	if g.emphasized {
-		g.textObj.Color = theme.Color(theme.ColorNameForeground)
-	} else {
-		g.textObj.Color = theme.Color(theme.ColorNameDisabled)
-	}
 	g.Refresh()
 }
 
@@ -73,7 +76,9 @@ func (g *glyphAction) Refresh() {
 	if g.textObj == nil {
 		return
 	}
-	if g.emphasized {
+	if g.fixedColor != nil {
+		g.textObj.Color = g.fixedColor
+	} else if g.emphasized {
 		g.textObj.Color = theme.Color(theme.ColorNameForeground)
 	} else {
 		g.textObj.Color = theme.Color(theme.ColorNameDisabled)

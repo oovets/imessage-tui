@@ -7,14 +7,13 @@ A real-time iMessage client for BlueBubbles with two frontends: a terminal UI (T
 ## Features
 
 - Browse and read iMessage conversations with contact names
-- Send messages (press Enter)
 - Real-time delivery via WebSocket (Socket.IO) with auto-reconnect
 - Unread indicators — chats with new messages are highlighted and moved to the top
 - Split-window layout — view multiple conversations side by side or stacked
 - Toggle chat list visibility
 - Clickable links in messages (`http(s)`, `www.`, `mailto`, email addresses)
 - Basic attachment/media rendering (inline image preview when URI is available)
-- Link previews with title/metadata (toggleable in GUI View menu)
+- Link previews with title/metadata (toggleable in the GUI overflow menu)
 
 ---
 
@@ -88,7 +87,6 @@ PREVIEW_PROXY_ADDR=127.0.0.1:8091 ./scripts/install.sh
 ```bash
 go build -o bluebubbles-tui .            # terminal UI
 go build -o bluebubbles-gui ./cmd/gui/  # windowed GUI
-go build -o slack-gui ./cmd/slack-gui/  # Slack GUI client
 go build -o bluebubbles-preview-proxy ./cmd/preview-proxy/ # local preview proxy
 ```
 
@@ -176,71 +174,13 @@ Up to 4 windows can be open at once.
 
 ---
 
-## GUI
-
-A windowed Fyne v2 app with a dark, compact theme. Designed to feel like the TUI but in a proper desktop window.
-
 ### Usage
 
 ```bash
 ./bluebubbles-gui
 ```
 
-Or launch from Walker / any app launcher (see [Desktop Launcher](#desktop-launcher)).
-
 Logs to `~/.bluebubbles-gui.log`.
-
----
-
-## Slack GUI (new)
-
-A Slack desktop client with the same compact/dark visual style as `bluebubbles-gui`.
-
-### Configuration
-
-Use environment variables, or reuse `slack_rust` `slack_config.json` credentials format (`workspaces` + `active_workspace`).
-
-Token resolution order:
-
-1. `SLACK_BOT_TOKEN`
-2. `SLACK_TOKEN`
-3. `slack_config.json` (auto-discovered, or explicitly via `SLACK_CONFIG_PATH`)
-
-```bash
-export SLACK_BOT_TOKEN="xoxb-..."
-# Optional alternate token env:
-export SLACK_TOKEN="xoxp-..."
-# Optional (for proxy/testing):
-export SLACK_API_BASE_URL="https://slack.com/api"
-# Optional explicit config file path:
-export SLACK_CONFIG_PATH="/path/to/slack_config.json"
-```
-
-### Build + Run
-
-```bash
-go build -o slack-gui ./cmd/slack-gui/
-./slack-gui
-```
-
-Logs to `~/.slack-gui.log`.
-
-### Slack GUI Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Ctrl+H` | Split focused pane side by side |
-| `Ctrl+J` | Split focused pane top/bottom |
-| `Ctrl+W` | Close focused pane |
-| `Ctrl+S` | Toggle channel list |
-| `Ctrl+N` | New window |
-
-### Threads, replies, media
-
-- Reply to a message with the `↩` action.
-- Open a thread in-place with `🧵`.
-- Image/file attachments are rendered as media/link rows, and image previews can be opened in a separate window.
-- Window size, compact mode, channel-list visibility and split pane layout (including pane channel/thread assignment) persist across restart.
 
 ### Keyboard Shortcuts
 
@@ -250,34 +190,12 @@ Logs to `~/.slack-gui.log`.
 | `Ctrl+J` | Split focused pane top/bottom |
 | `Ctrl+W` | Close focused pane |
 | `Ctrl+S` | Toggle chat list visibility |
+| `Ctrl+N` | New window |
+| `Ctrl+O` | Move focused pane to a new window |
 
 Up to 8 panes can be open at once. Click in a pane's input field to focus it, then select a chat from the list to load it into that pane.
 
 Reply to a specific message by clicking the `↩` button on that message. A reply preview appears above the input; send to post a native iMessage reply (threaded), or click `X` on the preview to cancel.
-
-### Desktop Launcher
-
-`scripts/install.sh` creates this automatically. For manual setup, create `~/.local/share/applications/bluebubbles-gui.desktop`:
-
-```ini
-[Desktop Entry]
-Type=Application
-Name=BlueBubbles
-GenericName=iMessage Client
-Comment=iMessage via BlueBubbles relay
-Exec=env FYNE_SCALE=1.3 BB_PREVIEW_PROXY_URL=http://127.0.0.1:8090/preview /home/stefan/Code/bluebubbles-tui/bluebubbles-gui
-Icon=internet-chat
-Terminal=false
-Categories=Network;Chat;InstantMessaging;
-Keywords=imessage;messages;chat;bluebubbles;
-StartupWMClass=BlueBubbles
-```
-
-Then refresh the launcher index:
-
-```bash
-update-desktop-database ~/.local/share/applications
-```
 
 `FYNE_SCALE=1.3` renders at 130% internal resolution. This is the recommended workaround for Fyne's grayscale font anti-aliasing on 1440p displays — it makes glyphs noticeably smoother without changing the perceived window size much.
 
@@ -305,16 +223,20 @@ yay -S otf-geist
 fc-cache -f
 ```
 
-### View Menu
+### GUI Menu
 
-All appearance settings live under **View** in the menu bar:
+Appearance and window actions live under the small overflow button in the top-right corner:
 
 | Item | Action |
 |------|--------|
+| New Window | Open another GUI window |
+| Move Focused Pane to New Window | Detach the focused pane into its own window |
 | A+ Larger | Increase font size (max 20) |
-| A- Smaller | Decrease font size (min 8) |
-| Bold: Off/On | Toggle bold weight for all text |
+| A- Smaller | Decrease font size (min 6) |
+| Toggle Bold | Toggle bold weight for all text |
 | Font → | Submenu listing installed font families |
+| Hide/Show Pane Separators | Toggle split-pane dividers |
+| Enable/Disable Compact Mode | Toggle compact spacing |
 | Switch to Light/Dark Mode | Toggle between dark and light theme |
 | Disable/Enable Previews | Toggle URL preview fetching |
 | Max Previews: 1 / 2 | Limit preview cards per message for performance |
@@ -325,7 +247,7 @@ Changes apply instantly without restarting.
 
 ```
 cmd/gui/main.go      — Entry point (config → ping → wsClient → gui.NewApp().Run())
-gui/app.go           — App struct, layout wiring, menu, WebSocket event loop
+gui/app.go           — App struct, layout wiring, overflow menu, WebSocket event loop
 gui/chatlist.go      — Left-side chat list (widget.List)
 gui/messages.go      — Message thread (VScroll + VBox of labels)
 gui/input.go         — Input area (Entry + Send button)
@@ -352,11 +274,12 @@ Rather than embedding a base theme, `compactTheme` implements all four methods e
 
 ```go
 type compactTheme struct {
-    dark      bool
-    fontSize  float32
-    boldAll   bool
-    fonts     map[string]fontSet
-    curFamily string
+    dark        bool
+    fontSize    float32
+    boldAll     bool
+    compactMode bool
+    fonts       map[string]fontSet
+    curFamily   string
 }
 
 func (t *compactTheme) base() fyne.Theme {
