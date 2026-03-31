@@ -4,11 +4,11 @@ import (
 	"log"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/bluebubbles-tui/api"
 	"github.com/bluebubbles-tui/config"
 	"github.com/bluebubbles-tui/tui"
 	"github.com/bluebubbles-tui/ws"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func init() {
@@ -28,7 +28,7 @@ func init() {
 }
 
 func main() {
-	cfg, err := config.Load()
+	cfg, err := config.LoadRequired()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}

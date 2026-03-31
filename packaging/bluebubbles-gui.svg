@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="BlueBubbles icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3d5da8"/>
+      <stop offset="100%" stop-color="#1f2a44"/>
+    </linearGradient>
+    <linearGradient id="bubble" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.98"/>
+      <stop offset="100%" stop-color="#dbe5ff" stop-opacity="0.98"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="url(#bg)"/>
+  <path d="M62 72h132c16 0 30 13 30 29v46c0 16-14 29-30 29H123l-36 26c-3 2-7-1-6-5l8-21H62c-16 0-30-13-30-29v-46c0-16 14-29 30-29z" fill="url(#bubble)"/>
+  <circle cx="98" cy="124" r="10" fill="#2e3f70"/>
+  <circle cx="128" cy="124" r="10" fill="#2e3f70"/>
+  <circle cx="158" cy="124" r="10" fill="#2e3f70"/>
+</svg>

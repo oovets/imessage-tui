@@ -1,11 +1,15 @@
 package gui
 
 import (
+	"image/color"
+	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/bluebubbles-tui/models"
 )
@@ -96,6 +100,7 @@ func (cl *ChatList) ClearNewMessage(chatGUID string) {
 
 // rebuildVBox rebuilds the VBox content from cl.chats.
 func (cl *ChatList) rebuildVBox() {
+	defer perfStart("ChatList.rebuildVBox")()
 	cl.vbox.Objects = nil
 
 	var directIdxs, groupIdxs []int
@@ -124,10 +129,10 @@ func (cl *ChatList) rebuildVBox() {
 }
 
 func newSectionHeader(title string) fyne.CanvasObject {
-	l := widget.NewLabel(title)
+	l := widget.NewLabel(strings.ToUpper(title))
 	l.TextStyle = fyne.TextStyle{Bold: true}
 	l.Importance = widget.LowImportance
-	return l
+	return container.NewPadded(l)
 }
 
 // showRenameDialog opens an input dialog to set/clear the alias for a chat.
@@ -167,30 +172,107 @@ type chatItemWidget struct {
 	chat     models.Chat // snapshot at creation time; GUID used for lookups
 	chatList *ChatList
 
-	dot  *widget.Label
-	name *widget.Label
-	host *fyne.Container
+	badge   *widget.Label
+	badgeBg *canvas.Rectangle
+	bg      *canvas.Rectangle
+	accent  *canvas.Rectangle
+	name    *widget.Label
+	preview *widget.Label
+	nameCol *fyne.Container
+	host    *fyne.Container
 }
 
 func newChatItemWidget(chat models.Chat, cl *ChatList, selected bool) *chatItemWidget {
 	item := &chatItemWidget{chat: chat, chatList: cl}
+	hasUnread := chat.HasNewMessage || chat.UnreadCount > 0
+	rowBg, accentColor, badgeBg := chatItemColors(selected, hasUnread)
 
-	item.dot = widget.NewLabel("●")
-	item.dot.Importance = widget.DangerImportance
-	if !chat.HasNewMessage && chat.UnreadCount == 0 {
-		item.dot.Hide()
+	item.badge = widget.NewLabelWithStyle("", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+	item.badgeBg = canvas.NewRectangle(badgeBg)
+	item.badgeBg.CornerRadius = 8
+	if chat.UnreadCount > 0 {
+		item.badge.SetText(strconv.Itoa(chat.UnreadCount))
+	} else if chat.HasNewMessage {
+		item.badge.SetText("●")
+	}
+	if item.badge.Text == "" {
+		item.badge.Hide()
+		item.badgeBg.Hide()
+	}
+	item.badge.Importance = widget.HighImportance
+	badgeObj := container.NewStack(item.badgeBg, container.NewPadded(item.badge))
+	if item.badge.Text == "" {
+		badgeObj.Hide()
 	}
 
 	item.name = widget.NewLabel(truncateString(chatDisplayName(chat), 28))
 	item.name.Truncation = fyne.TextTruncateEllipsis
+	item.preview = widget.NewLabel(truncateString(chatPreviewText(chat), 36))
+	item.preview.Truncation = fyne.TextTruncateEllipsis
+	item.preview.Importance = widget.MediumImportance
+	item.preview.TextStyle = fyne.TextStyle{Italic: !selected}
+	item.nameCol = container.NewVBox(item.name, item.preview)
 	if selected {
 		item.name.TextStyle = fyne.TextStyle{Bold: true}
 		item.name.Importance = widget.HighImportance
+		item.preview.Importance = widget.HighImportance
+	}
+	item.bg = canvas.NewRectangle(rowBg)
+	item.bg.CornerRadius = 0
+	item.accent = canvas.NewRectangle(accentColor)
+	item.accent.SetMinSize(fyne.NewSize(3, 1))
+	accentSpacer := container.NewVBox(item.accent)
+	rowContent := container.NewBorder(nil, nil, accentSpacer, badgeObj, item.nameCol)
+	if !selected && !(chat.HasNewMessage || chat.UnreadCount > 0) {
+		item.accent.Hide()
 	}
 
-	item.host = container.NewBorder(nil, nil, item.dot, nil, item.name)
+	item.host = container.NewPadded(container.NewStack(item.bg, container.NewPadded(rowContent)))
 	item.ExtendBaseWidget(item)
 	return item
+}
+
+func chatItemColors(selected bool, unread bool) (color.Color, color.Color, color.Color) {
+	primary := colorToNRGBA(theme.Color(theme.ColorNamePrimary))
+	inputBg := colorToNRGBA(theme.Color(theme.ColorNameInputBackground))
+	bg := colorToNRGBA(theme.Color(theme.ColorNameBackground))
+
+	base := color.NRGBA{R: inputBg.R, G: inputBg.G, B: inputBg.B, A: 0}
+	if unread {
+		base = color.NRGBA{R: primary.R, G: primary.G, B: primary.B, A: 52}
+	}
+	if selected {
+		base = color.NRGBA{R: primary.R, G: primary.G, B: primary.B, A: 46}
+	}
+	accent := color.NRGBA{R: primary.R, G: primary.G, B: primary.B, A: 220}
+	badgeBg := color.NRGBA{R: primary.R, G: primary.G, B: primary.B, A: 220}
+	if !selected && unread {
+		badgeBg = color.NRGBA{R: primary.R, G: primary.G, B: primary.B, A: 185}
+	}
+	if !selected && !unread {
+		accent = color.NRGBA{R: bg.R, G: bg.G, B: bg.B, A: 0}
+	}
+	return base, accent, badgeBg
+}
+
+func chatPreviewText(chat models.Chat) string {
+	if text := strings.TrimSpace(chat.LastMessageText); text != "" {
+		return stripEmojis(text)
+	}
+	if chat.LastMessage != nil {
+		text := strings.TrimSpace(chat.LastMessage.Text)
+		if text == "" {
+			if len(chat.LastMessage.Attachments) > 0 {
+				return "Attachment"
+			}
+			return "No messages"
+		}
+		if chat.LastMessage.IsFromMe {
+			return "You: " + stripEmojis(text)
+		}
+		return stripEmojis(text)
+	}
+	return "No messages"
 }
 
 func (item *chatItemWidget) CreateRenderer() fyne.WidgetRenderer {

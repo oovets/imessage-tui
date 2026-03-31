@@ -381,24 +381,17 @@ func (t *compactTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant
 	if t.dark {
 		switch name {
 		case theme.ColorNameBackground:
-			// Match Alacritty theme background (Tokyo Night): #1a1b26.
-			return color.NRGBA{R: 26, G: 27, B: 38, A: 255}
+			return color.NRGBA{R: 23, G: 24, B: 33, A: 255}
 		case theme.ColorNameInputBackground:
-			// Input should blend into the main background.
-			return color.NRGBA{R: 26, G: 27, B: 38, A: 255}
+			return color.NRGBA{R: 31, G: 33, B: 45, A: 255}
 		case theme.ColorNameInputBorder:
-			// Transparent border — the stroke is invisible but SizeNameInputBorder
-			// must be non-zero so Fyne can draw the cursor with a real width.
-			return color.NRGBA{R: 0, G: 0, B: 0, A: 0}
+			return color.NRGBA{R: 84, G: 93, B: 122, A: 160}
 		case theme.ColorNameForeground:
-			// Match Alacritty theme foreground (Tokyo Night): #a9b1d6.
-			return color.NRGBA{R: 169, G: 177, B: 214, A: 255}
+			return color.NRGBA{R: 186, G: 192, B: 222, A: 255}
 		case theme.ColorNameSuccess:
-			// Keep "from me" messages distinct, but less saturated than default green.
-			return color.NRGBA{R: 148, G: 166, B: 150, A: 255}
+			return color.NRGBA{R: 150, G: 154, B: 168, A: 255}
 		case theme.ColorNamePrimary:
-			// Grey block cursor.
-			return color.NRGBA{R: 100, G: 106, B: 130, A: 200}
+			return color.NRGBA{R: 109, G: 133, B: 214, A: 220}
 		case theme.ColorNameSeparator:
 			return color.NRGBA{A: 0}
 		case theme.ColorNameShadow:
@@ -408,15 +401,17 @@ func (t *compactTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant
 	if !t.dark {
 		switch name {
 		case theme.ColorNameBackground:
-			return color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+			return color.NRGBA{R: 248, G: 249, B: 252, A: 255}
 		case theme.ColorNameInputBackground:
 			return color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 		case theme.ColorNameInputBorder:
-			return color.NRGBA{A: 0}
+			return color.NRGBA{R: 189, G: 196, B: 214, A: 220}
 		case theme.ColorNameForeground:
-			return color.NRGBA{R: 15, G: 15, B: 15, A: 255}
+			return color.NRGBA{R: 22, G: 25, B: 33, A: 255}
 		case theme.ColorNameSuccess:
-			return color.NRGBA{R: 100, G: 100, B: 100, A: 255}
+			return color.NRGBA{R: 108, G: 114, B: 126, A: 255}
+		case theme.ColorNamePrimary:
+			return color.NRGBA{R: 67, G: 96, B: 165, A: 255}
 		case theme.ColorNameSeparator:
 			return color.NRGBA{A: 0}
 		case theme.ColorNameShadow:
@@ -460,18 +455,21 @@ func (t *compactTheme) Size(name fyne.ThemeSizeName) float32 {
 	switch name {
 	case theme.SizeNamePadding:
 		if t.compactMode {
-			return 1
+			return 2
 		}
-		return 2
+		return 6
 	case theme.SizeNameInnerPadding:
 		if t.compactMode {
 			return 1
 		}
-		return 2
+		return 4
 	case theme.SizeNameInputRadius:
-		return 0
+		if t.compactMode {
+			return 4
+		}
+		return 8
 	case theme.SizeNameInputBorder:
-		return 2 // cursor width — layout and cursor share this value in Fyne
+		return 1
 	case theme.SizeNameScrollBar, theme.SizeNameScrollBarSmall:
 		return 0
 	case theme.SizeNameText, theme.SizeNameSubHeadingText:

@@ -29,6 +29,8 @@ SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 SERVICE_NAME="bluebubbles-preview-proxy.service"
 DESKTOP_DIR="$HOME/.local/share/applications"
 DESKTOP_FILE="$DESKTOP_DIR/bluebubbles-gui.desktop"
+ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
+ICON_FILE="$ICON_DIR/bluebubbles-gui.svg"
 
 step() { echo; echo "── $* ──────────────────────────────────────────────"; }
 
@@ -86,22 +88,18 @@ fi
 # ── 4. Desktop launcher ───────────────────────────────────────────────────────
 step "4/5  Creating desktop launcher"
 mkdir -p "$DESKTOP_DIR"
+mkdir -p "$ICON_DIR"
 
-cat > "$DESKTOP_FILE" <<EOF
-[Desktop Entry]
-Type=Application
-Name=BlueBubbles
-GenericName=iMessage Client
-Comment=iMessage via BlueBubbles relay
-Exec=env FYNE_SCALE=${FYNE_SCALE} BB_PREVIEW_PROXY_URL=${PROXY_URL} ${ROOT_DIR}/bluebubbles-gui
-Icon=internet-chat
-Terminal=false
-Categories=Network;Chat;InstantMessaging;
-Keywords=imessage;messages;chat;bluebubbles;
-StartupWMClass=BlueBubbles
-EOF
+cp "$ROOT_DIR/packaging/bluebubbles-gui.svg" "$ICON_FILE"
+
+sed \
+  -e "s|^Exec=.*$|Exec=env FYNE_SCALE=${FYNE_SCALE} BB_PREVIEW_PROXY_URL=${PROXY_URL} ${ROOT_DIR}/bluebubbles-gui|" \
+  -e "s|^Icon=.*$|Icon=bluebubbles-gui|" \
+  "$ROOT_DIR/packaging/bluebubbles-gui.desktop" \
+  > "$DESKTOP_FILE"
 
 echo "  ✓ Desktop file written to $DESKTOP_FILE"
+echo "  ✓ Icon written to $ICON_FILE"
 
 # ── 5. Refresh app launcher index ─────────────────────────────────────────────
 step "5/5  Refreshing desktop database"

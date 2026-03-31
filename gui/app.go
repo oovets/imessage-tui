@@ -14,6 +14,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
@@ -47,12 +48,16 @@ type App struct {
 	maxLinkPreviews     int
 	windowWidth         float32
 	windowHeight        float32
-	showPaneSeparators  bool
 	launchChatGUID      string
 	detachedPaneMode    bool
+	serverURL           string
 
 	mu       sync.Mutex
 	msgCache map[string][]models.Message
+
+	wsMarkMu          sync.Mutex
+	wsPendingChatGUID map[string]struct{}
+	wsMarkTimer       *time.Timer
 }
 
 const fixedChatListWidth = float32(105)
@@ -70,7 +75,6 @@ const (
 	prefWindowWidth        = "ui.window_width"
 	prefWindowHeight       = "ui.window_height"
 	prefPaneLayoutState    = "ui.pane_layout_state"
-	prefPaneSeparators     = "ui.pane_separators"
 )
 
 type fixedWidthWrap struct {
@@ -102,9 +106,11 @@ func (w *fixedWidthWrap) SetWidth(width float32) {
 func NewApp(apiClient *api.Client, wsClient *ws.Client, cfg *config.Config, launchChatGUID string, detachedPaneMode bool) *App {
 	enablePreviews := true
 	maxPreviews := 2
+	serverURL := ""
 	if cfg != nil {
 		enablePreviews = cfg.EnableLinkPreviews
 		maxPreviews = cfg.MaxPreviewsPerMessage
+		serverURL = strings.TrimSpace(cfg.ServerURL)
 	}
 	if maxPreviews < 0 {
 		maxPreviews = 0
@@ -114,10 +120,12 @@ func NewApp(apiClient *api.Client, wsClient *ws.Client, cfg *config.Config, laun
 		apiClient:           apiClient,
 		wsClient:            wsClient,
 		msgCache:            make(map[string][]models.Message),
+		wsPendingChatGUID:   make(map[string]struct{}),
 		linkPreviewsEnabled: enablePreviews,
 		maxLinkPreviews:     maxPreviews,
 		launchChatGUID:      strings.TrimSpace(launchChatGUID),
 		detachedPaneMode:    detachedPaneMode,
+		serverURL:           serverURL,
 	}
 }
 
@@ -156,6 +164,7 @@ func (a *App) Run() {
 			if pane == nil || a.win == nil {
 				return
 			}
+			a.syncChatListSelectionWithPane(pane)
 			if a.paneManager == nil || a.paneManager.FocusedPane() != pane {
 				return
 			}
@@ -166,7 +175,6 @@ func (a *App) Run() {
 		},
 		a.handleInputShortcut,
 	)
-	a.paneManager.SetShowSeparators(a.showPaneSeparators)
 	if a.detachedPaneMode {
 		a.showChatList = false
 	} else {
@@ -241,6 +249,13 @@ func (a *App) Run() {
 	})
 
 	a.win.ShowAndRun()
+}
+
+func (a *App) syncChatListSelectionWithPane(pane *ChatPane) {
+	if a == nil || a.chatListComp == nil || pane == nil {
+		return
+	}
+	a.chatListComp.SetSelected(strings.TrimSpace(pane.ChatGUID))
 }
 
 func (a *App) splitFocusedHorizontal() {
@@ -472,14 +487,6 @@ func (a *App) setCompactMode(enabled bool) {
 	a.refreshAllMessageViews()
 }
 
-func (a *App) togglePaneSeparators() {
-	a.showPaneSeparators = !a.showPaneSeparators
-	if a.paneManager != nil {
-		a.paneManager.SetShowSeparators(a.showPaneSeparators)
-	}
-	a.fyneApp.Preferences().SetBool(prefPaneSeparators, a.showPaneSeparators)
-}
-
 // refreshPaneNameForChat updates the header of any open pane showing chatGUID
 // after an alias change.
 func (a *App) refreshPaneNameForChat(guid string) {
@@ -530,7 +537,6 @@ func (a *App) loadUIState() {
 	a.appTheme.fontSize = float32(fontSize)
 	a.appTheme.boldAll = prefs.BoolWithFallback(prefBoldAll, a.appTheme.boldAll)
 	a.appTheme.compactMode = prefs.BoolWithFallback(prefCompactMode, a.appTheme.compactMode)
-	a.showPaneSeparators = prefs.BoolWithFallback(prefPaneSeparators, true)
 	a.windowWidth = float32(prefs.FloatWithFallback(prefWindowWidth, 960))
 	a.windowHeight = float32(prefs.FloatWithFallback(prefWindowHeight, 640))
 	if a.windowWidth < 640 {
@@ -561,11 +567,6 @@ func (a *App) buildOverflowMenu() *fyne.Menu {
 	if a.appTheme.compactMode {
 		compactLabel = "Disable Compact Mode"
 	}
-	separatorLabel := "Hide Pane Separators"
-	if !a.showPaneSeparators {
-		separatorLabel = "Show Pane Separators"
-	}
-
 	// Build font submenu from installed families.
 	fontItems := make([]*fyne.MenuItem, 0)
 	for _, name := range a.appTheme.availableFamilies() {
@@ -582,6 +583,10 @@ func (a *App) buildOverflowMenu() *fyne.Menu {
 	fontItem.ChildMenu = fyne.NewMenu("", fontItems...)
 
 	return fyne.NewMenu("",
+		fyne.NewMenuItem("Settings...", func() {
+			a.openSettingsDialog()
+		}),
+		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("New Window", func() {
 			a.openNewWindow()
 		}),
@@ -613,9 +618,6 @@ func (a *App) buildOverflowMenu() *fyne.Menu {
 			a.fyneApp.Settings().SetTheme(a.appTheme)
 		}),
 		fontItem,
-		fyne.NewMenuItem(separatorLabel, func() {
-			a.togglePaneSeparators()
-		}),
 		fyne.NewMenuItem(compactLabel, func() {
 			a.setCompactMode(!a.appTheme.compactMode)
 		}),
@@ -633,6 +635,164 @@ func (a *App) buildOverflowMenu() *fyne.Menu {
 			a.setMaxLinkPreviews(2)
 		}),
 	)
+}
+
+func (a *App) openSettingsDialog() {
+	if a.win == nil || a.fyneApp == nil || a.appTheme == nil {
+		return
+	}
+
+	appearance := a.buildAppearanceSettingsPane()
+	behavior := a.buildBehaviorSettingsPane()
+	previews := a.buildPreviewSettingsPane()
+	connection := a.buildConnectionSettingsPane()
+
+	tabs := container.NewAppTabs(
+		container.NewTabItem("Appearance", appearance),
+		container.NewTabItem("Behavior", behavior),
+		container.NewTabItem("Previews", previews),
+		container.NewTabItem("Connection", connection),
+	)
+	tabs.SetTabLocation(container.TabLocationTop)
+
+	d := dialog.NewCustom("Settings", "Close", container.NewPadded(tabs), a.win)
+	d.Resize(fyne.NewSize(620, 420))
+	d.Show()
+}
+
+func (a *App) buildAppearanceSettingsPane() fyne.CanvasObject {
+	mode := widget.NewRadioGroup([]string{"Dark", "Light"}, func(v string) {
+		a.setDarkMode(v == "Dark")
+	})
+	if a.appTheme.dark {
+		mode.SetSelected("Dark")
+	} else {
+		mode.SetSelected("Light")
+	}
+
+	compact := widget.NewCheck("Compact layout", func(v bool) {
+		a.setCompactMode(v)
+	})
+	compact.SetChecked(a.appTheme.compactMode)
+
+	bold := widget.NewCheck("Bold text", func(v bool) {
+		a.appTheme.boldAll = v
+		a.fyneApp.Preferences().SetBool(prefBoldAll, a.appTheme.boldAll)
+		a.fyneApp.Settings().SetTheme(a.appTheme)
+		a.refreshAllMessageViews()
+	})
+	bold.SetChecked(a.appTheme.boldAll)
+
+	fontSizeLabel := widget.NewLabel("Font size")
+	fontSizeValue := widget.NewLabel(strconv.Itoa(int(a.appTheme.fontSize)))
+	fontSize := widget.NewSlider(float64(minUIFontSize), float64(maxUIFontSize))
+	fontSize.Step = 1
+	fontSize.SetValue(float64(a.appTheme.fontSize))
+	fontSize.OnChanged = func(v float64) {
+		size := int(v)
+		fontSizeValue.SetText(strconv.Itoa(size))
+		a.appTheme.fontSize = float32(size)
+		a.fyneApp.Preferences().SetInt(prefFontSize, size)
+		a.fyneApp.Settings().SetTheme(a.appTheme)
+		a.refreshChatListWidth()
+		a.refreshAllMessageViews()
+	}
+
+	families := a.appTheme.availableFamilies()
+	fontSelect := widget.NewSelect(families, func(v string) {
+		if v != "" {
+			a.setFont(v)
+		}
+	})
+	fontSelect.SetSelected(a.appTheme.curFamily)
+
+	form := widget.NewForm(
+		widget.NewFormItem("Color mode", mode),
+		widget.NewFormItem("Font family", fontSelect),
+		widget.NewFormItem("", compact),
+		widget.NewFormItem("", bold),
+		widget.NewFormItem("", container.NewBorder(nil, nil, fontSizeLabel, fontSizeValue, fontSize)),
+	)
+
+	return container.NewPadded(form)
+}
+
+func (a *App) buildBehaviorSettingsPane() fyne.CanvasObject {
+	chatListToggle := widget.NewCheck("Show chat list", func(v bool) {
+		if a.detachedPaneMode {
+			return
+		}
+		if v != a.showChatList {
+			a.toggleChatListVisibility()
+		}
+	})
+	chatListToggle.SetChecked(a.showChatList)
+	if a.detachedPaneMode {
+		chatListToggle.Disable()
+	}
+
+	newWindowBtn := widget.NewButton("Open New Window", func() {
+		a.openNewWindow()
+	})
+	detachBtn := widget.NewButton("Move Focused Pane To New Window", func() {
+		a.moveFocusedPaneToNewWindow()
+	})
+
+	return container.NewPadded(container.NewVBox(
+		chatListToggle,
+		widget.NewSeparator(),
+		newWindowBtn,
+		detachBtn,
+	))
+}
+
+func (a *App) buildPreviewSettingsPane() fyne.CanvasObject {
+	enabled := widget.NewCheck("Enable link previews", func(v bool) {
+		a.setLinkPreviewsEnabled(v)
+	})
+	enabled.SetChecked(a.linkPreviewsEnabled)
+
+	maxLabel := widget.NewLabel("Max previews per message")
+	maxSelect := widget.NewRadioGroup([]string{"0", "1", "2"}, func(v string) {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return
+		}
+		a.setMaxLinkPreviews(n)
+	})
+	maxSelect.Horizontal = true
+	maxSelect.SetSelected(strconv.Itoa(a.maxLinkPreviews))
+
+	return container.NewPadded(container.NewVBox(
+		enabled,
+		maxLabel,
+		maxSelect,
+	))
+}
+
+func (a *App) buildConnectionSettingsPane() fyne.CanvasObject {
+	server := strings.TrimSpace(a.serverURL)
+	if server == "" {
+		server = "Unknown"
+	}
+
+	serverLabel := widget.NewLabel("Server")
+	serverValue := widget.NewLabel(server)
+	serverValue.Wrapping = fyne.TextWrapWord
+
+	clearBtn := widget.NewButton("Clear saved password", func() {
+		if err := config.ClearStoredPassword(); err != nil {
+			dialog.ShowError(err, a.win)
+			return
+		}
+		dialog.ShowInformation("Password cleared", "Saved password removed. Restart GUI to run first-time setup again.", a.win)
+	})
+
+	return container.NewPadded(container.NewVBox(
+		container.NewBorder(nil, nil, nil, nil, container.NewVBox(serverLabel, serverValue)),
+		widget.NewSeparator(),
+		clearBtn,
+	))
 }
 
 func (a *App) newOverflowMenuButton() fyne.CanvasObject {
@@ -769,7 +929,7 @@ func (a *App) selectChat(chat *models.Chat) {
 	a.refreshUnreadBadge()
 	a.chatListComp.SetSelected(chatGUID)
 	pane.msgView.SetChatName(chatDisplayName(*chat))
-	pane.msgView.SetMessages(nil)
+	pane.msgView.SetLoading()
 	pane.FocusInput(a.win.Canvas())
 
 	go a.loadMessagesForPane(pane, chatGUID)
@@ -777,6 +937,7 @@ func (a *App) selectChat(chat *models.Chat) {
 
 // loadMessagesForPane fetches messages and updates the given pane.
 func (a *App) loadMessagesForPane(pane *ChatPane, chatGUID string) {
+	defer perfStart("loadMessagesForPane")()
 	msgs, err := a.apiClient.GetMessages(chatGUID, 50)
 	if err != nil {
 		log.Printf("[GUI] GetMessages error: %v", err)
@@ -823,6 +984,7 @@ func (a *App) loadMessagesForPane(pane *ChatPane, chatGUID string) {
 // background. When the real message arrives via WebSocket the pending copy is
 // swapped out transparently.
 func (a *App) sendMessageFromPane(pane *ChatPane, text string, replyTo *models.Message) {
+	defer perfStart("sendMessageFromPane")()
 	chatGUID := pane.ChatGUID
 	if chatGUID == "" {
 		return
@@ -851,6 +1013,7 @@ func (a *App) sendMessageFromPane(pane *ChatPane, text string, replyTo *models.M
 	fyne.Do(func() {
 		if pane.ChatGUID == chatGUID {
 			pane.msgView.SetMessages(snapshot)
+			pane.inputArea.SetTransientStatus("Message queued")
 		}
 	})
 
@@ -866,6 +1029,7 @@ func (a *App) sendMessageFromPane(pane *ChatPane, text string, replyTo *models.M
 			fyne.Do(func() {
 				if pane.ChatGUID == chatGUID {
 					pane.msgView.SetMessages(snapshot)
+					pane.inputArea.SetTransientStatus("Send failed")
 				}
 			})
 		}
@@ -897,6 +1061,7 @@ func (a *App) removePending(chatGUID, guid string) {
 
 // loadChats fetches the chat list and pre-selects the first entry.
 func (a *App) loadChats() {
+	defer perfStart("loadChats")()
 	chats, err := a.apiClient.GetChats(50)
 	if err != nil {
 		log.Printf("[GUI] GetChats error: %v", err)
@@ -962,6 +1127,7 @@ func (a *App) scrollAllPanes() {
 
 // handleWSEvent processes a single WebSocket event. Called from the WS goroutine.
 func (a *App) handleWSEvent(event models.WSEvent) {
+	defer perfStart("handleWSEvent")()
 	switch event.Type {
 	case "new-message":
 		var wsMsg struct {
@@ -1012,12 +1178,58 @@ func (a *App) handleWSEvent(event models.WSEvent) {
 			panesShowing := a.paneManager.PanesShowingChat(msg.ChatGUID)
 			if len(panesShowing) > 0 {
 				for _, p := range panesShowing {
-					p.msgView.SetMessages(snapshot)
+					if msg.IsFromMe {
+						// Own messages may replace optimistic placeholders; keep exact snapshot.
+						p.msgView.SetMessages(snapshot)
+						continue
+					}
+					// Incoming messages can be appended without rebuilding full history.
+					p.msgView.AppendMessage(msg)
 				}
 			} else {
-				a.chatListComp.MarkNewMessage(msg.ChatGUID)
-				a.refreshUnreadBadge()
+				a.queueUnreadMark(msg.ChatGUID)
 			}
 		})
 	}
+}
+
+func (a *App) queueUnreadMark(chatGUID string) {
+	chatGUID = strings.TrimSpace(chatGUID)
+	if chatGUID == "" || a.chatListComp == nil {
+		return
+	}
+
+	a.wsMarkMu.Lock()
+	a.wsPendingChatGUID[chatGUID] = struct{}{}
+	if a.wsMarkTimer != nil {
+		a.wsMarkMu.Unlock()
+		return
+	}
+	a.wsMarkTimer = time.AfterFunc(90*time.Millisecond, a.flushUnreadMarks)
+	a.wsMarkMu.Unlock()
+}
+
+func (a *App) flushUnreadMarks() {
+	a.wsMarkMu.Lock()
+	pending := make([]string, 0, len(a.wsPendingChatGUID))
+	for guid := range a.wsPendingChatGUID {
+		pending = append(pending, guid)
+	}
+	a.wsPendingChatGUID = make(map[string]struct{})
+	a.wsMarkTimer = nil
+	a.wsMarkMu.Unlock()
+
+	if len(pending) == 0 {
+		return
+	}
+
+	fyne.Do(func() {
+		if a.chatListComp == nil {
+			return
+		}
+		for _, guid := range pending {
+			a.chatListComp.MarkNewMessage(guid)
+		}
+		a.refreshUnreadBadge()
+	})
 }

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=BlueBubbles
+GenericName=iMessage Client
+Comment=iMessage via BlueBubbles relay
+Exec=bluebubbles-gui
+Icon=bluebubbles-gui
+Terminal=false
+Categories=Network;Chat;InstantMessaging;
+Keywords=imessage;messages;chat;bluebubbles;
+StartupWMClass=BlueBubbles

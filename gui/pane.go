@@ -1,12 +1,11 @@
 package gui
 
 import (
-	"image/color"
-
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/bluebubbles-tui/models"
 )
@@ -54,8 +53,6 @@ type ChatPane struct {
 	ChatGUID  string
 	widget    fyne.CanvasObject
 	surface   *paneSurface
-	inputCard *fyne.Container
-	inputGap  fyne.CanvasObject
 }
 
 type paneSurface struct {
@@ -143,15 +140,16 @@ func newChatPane(onSend func(*ChatPane, string, *models.Message), onFocused func
 		func() { onFocused(p) },
 		onInputShortcut,
 	)
+	p.inputArea.SetOnLayoutChanged(func() {
+		p.refreshBottomInset()
+		if p.surface != nil {
+			p.surface.Refresh()
+		}
+	})
 
-	// Input card: reply holder + entry row + bottom gap.
-	gap := canvas.NewRectangle(color.Transparent)
-	gap.SetMinSize(fyne.NewSize(1, 0))
-	p.inputGap = gap
-	p.inputCard = container.NewVBox(p.inputArea.Widget(), p.inputGap)
-
-	// Border layout: message scroll on top, input card anchored at bottom.
-	p.widget = container.NewBorder(nil, p.inputCard, nil, nil, p.msgView.Widget())
+	// Floating layout: message view fills the pane and the input box sits above it.
+	p.widget = container.New(&floatingBottomLayout{hPad: 16, bPad: 12}, p.msgView.Widget(), p.inputArea.Widget())
+	p.refreshBottomInset()
 
 	p.surface = newPaneSurface(p.widget, func() { onFocused(p) }, func() { p.msgView.ScrollToBottom() })
 	return p
@@ -187,4 +185,13 @@ func (p *ChatPane) SetInputVisible(_ bool) {}
 // RefreshLayout updates theme-sensitive colours and sizes.
 func (p *ChatPane) RefreshLayout() {
 	p.inputArea.RefreshLayout()
+	p.refreshBottomInset()
+}
+
+func (p *ChatPane) refreshBottomInset() {
+	if p == nil || p.msgView == nil || p.inputArea == nil {
+		return
+	}
+	pad := p.inputArea.Widget().MinSize().Height + float32(theme.TextSize()) + 12
+	p.msgView.SetBottomPad(pad)
 }

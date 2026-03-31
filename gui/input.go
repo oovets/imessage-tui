@@ -3,6 +3,8 @@ package gui
 import (
 	"image/color"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -29,7 +31,7 @@ func newFocusEntry(placeholder string, onFocused func(), onShortcut func(fyne.Sh
 	e.Entry.PlaceHolder = placeholder
 	e.Entry.MultiLine = true
 	e.Entry.Wrapping = fyne.TextWrapWord
-	e.Entry.SetMinRowsVisible(2)
+	e.Entry.SetMinRowsVisible(1)
 	e.ExtendBaseWidget(e)
 	return e
 }
@@ -135,14 +137,20 @@ func (e *focusEntry) TypedKey(key *fyne.KeyEvent) {
 // InputArea holds the multiline message entry and reply banner.
 // All methods must be called from the Fyne main goroutine.
 type InputArea struct {
-	entry       *focusEntry
-	panel       fyne.CanvasObject
-	replyHolder *fyne.Container
-	replyLabel  *canvas.Text
-	cancelBtn   *glyphAction
-	inputBg     *canvas.Rectangle
-	onSend      func(string, *models.Message)
-	replyTarget *models.Message
+	entry           *focusEntry
+	panel           fyne.CanvasObject
+	replyHolder     *fyne.Container
+	replyLabel      *canvas.Text
+	cancelBtn       *glyphAction
+	sendBtn         *glyphAction
+	statusLabel     *widget.Label
+	inputBg         *canvas.Rectangle
+	inputBorder     *canvas.Rectangle
+	inputShadow     *canvas.Rectangle
+	onSend          func(string, *models.Message)
+	replyTarget     *models.Message
+	onLayoutChanged func()
+	statusSeq       atomic.Uint64
 }
 
 func NewInputArea(onSend func(string, *models.Message), onFocused func()) *InputArea {
@@ -159,18 +167,43 @@ func newInputArea(onSend func(string, *models.Message), onFocused func(), onShor
 	ia.entry = newFocusEntry("", onFocused, onShortcut, func(text string) {
 		ia.submit(text)
 	})
+	ia.entry.OnChanged = func(text string) {
+		ia.adjustEntryRows(text)
+		ia.notifyLayoutChanged()
+	}
+	ia.entry.SetMinRowsVisible(1)
 	ia.replyLabel = canvas.NewText("", theme.Color(theme.ColorNameDisabled))
 	ia.replyHolder = container.NewMax()
 	ia.cancelBtn = newGlyphAction("×", func() { ia.ClearReplyTarget() })
+	ia.sendBtn = newGlyphAction("↑", func() { ia.submit(ia.entry.Text) })
+	ia.statusLabel = widget.NewLabel("")
+	ia.statusLabel.Hide()
 
-	inputHPad := float32(8)
+	inputHPad := float32(10)
+	ia.inputShadow = canvas.NewRectangle(color.NRGBA{R: 0, G: 0, B: 0, A: 24})
+	ia.inputBorder = canvas.NewRectangle(theme.Color(theme.ColorNameInputBorder))
 	ia.inputBg = canvas.NewRectangle(theme.Color(theme.ColorNameInputBackground))
-	entryRow := container.NewMax(
-		ia.inputBg,
-		container.NewBorder(nil, nil, fixedWidthSpacer(inputHPad), fixedWidthSpacer(inputHPad), ia.entry),
+	entryRow := container.NewBorder(
+		nil,
+		nil,
+		nil,
+		container.NewPadded(ia.sendBtn),
+		ia.entry,
 	)
+	cardContent := container.NewPadded(container.NewVBox(
+		ia.replyHolder,
+		container.NewBorder(nil, nil, fixedWidthSpacer(inputHPad), fixedWidthSpacer(inputHPad), entryRow),
+		ia.statusLabel,
+	))
 	ia.replyHolder.Hide()
-	ia.panel = container.NewVBox(ia.replyHolder, entryRow)
+	rawPanel := container.NewPadded(container.NewStack(
+		container.NewPadded(ia.inputShadow),
+		ia.inputBorder,
+		ia.inputBg,
+		cardContent,
+	))
+	ia.panel = rawPanel
+	ia.adjustEntryRows("")
 	ia.RefreshLayout()
 	return ia
 }
@@ -184,6 +217,8 @@ func (ia *InputArea) IsEntryFocused() bool { return ia.entry.IsFocused() }
 // SetOnBlurred registers a callback fired when the text entry loses keyboard focus.
 func (ia *InputArea) SetOnBlurred(fn func()) { ia.entry.onBlurred = fn }
 
+func (ia *InputArea) SetOnLayoutChanged(fn func()) { ia.onLayoutChanged = fn }
+
 // FocusEntry requests keyboard focus for the input entry.
 func (ia *InputArea) FocusEntry(c fyne.Canvas) {
 	if c != nil {
@@ -195,11 +230,21 @@ func (ia *InputArea) FocusEntry(c fyne.Canvas) {
 func (ia *InputArea) SetReplyTarget(msg models.Message) {
 	reply := msg
 	ia.replyTarget = &reply
-	ia.replyLabel.Text = "Replying to: " + truncateString(stripEmojis(msg.Text), 80)
+	preview := truncateString(stripEmojis(msg.Text), 72)
+	if preview == "" {
+		preview = "Attachment"
+	}
+	ia.replyLabel.Text = "Replying to " + messageSenderName(msg) + ": " + preview
 	ia.replyLabel.Refresh()
-	ia.replyHolder.Objects = []fyne.CanvasObject{container.NewBorder(nil, nil, nil, ia.cancelBtn, ia.replyLabel)}
+	chipBg := canvas.NewRectangle(theme.Color(theme.ColorNameInputBackground))
+	chip := container.NewStack(
+		chipBg,
+		container.NewPadded(container.NewBorder(nil, nil, nil, ia.cancelBtn, ia.replyLabel)),
+	)
+	ia.replyHolder.Objects = []fyne.CanvasObject{chip}
 	ia.replyHolder.Show()
 	ia.replyHolder.Refresh()
+	ia.notifyLayoutChanged()
 }
 
 // ClearReplyTarget exits reply mode.
@@ -208,6 +253,7 @@ func (ia *InputArea) ClearReplyTarget() {
 	ia.replyHolder.Objects = nil
 	ia.replyHolder.Hide()
 	ia.replyHolder.Refresh()
+	ia.notifyLayoutChanged()
 }
 
 func (ia *InputArea) submit(text string) {
@@ -216,24 +262,116 @@ func (ia *InputArea) submit(text string) {
 	}
 	reply := ia.replyTarget
 	ia.entry.SetText("")
+	ia.adjustEntryRows("")
 	ia.ClearReplyTarget()
 	if ia.onSend != nil {
 		ia.onSend(text, reply)
 	}
 }
 
+func (ia *InputArea) adjustEntryRows(text string) {
+	if ia == nil || ia.entry == nil {
+		return
+	}
+
+	entryWidth := ia.entry.Size().Width
+	if entryWidth <= 0 {
+		entryWidth = 320
+	}
+
+	charWidth := fyne.MeasureText("M", float32(theme.TextSize()), fyne.TextStyle{}).Width
+	if charWidth <= 0 {
+		charWidth = 8
+	}
+	cols := int(entryWidth / charWidth)
+	if cols < 8 {
+		cols = 8
+	}
+
+	rows := 1
+	if strings.TrimSpace(text) != "" {
+		rows = 0
+		for _, line := range strings.Split(text, "\n") {
+			r := len([]rune(line))
+			if r == 0 {
+				rows++
+				continue
+			}
+			rows += (r + cols - 1) / cols
+		}
+	}
+
+	if rows < 1 {
+		rows = 1
+	}
+	if rows > 6 {
+		rows = 6
+	}
+	ia.entry.SetMinRowsVisible(rows)
+}
+
+func (ia *InputArea) SetTransientStatus(text string) {
+	seq := ia.statusSeq.Add(1)
+	ia.statusLabel.SetText(text)
+	ia.statusLabel.Show()
+	ia.statusLabel.Refresh()
+	ia.notifyLayoutChanged()
+	time.AfterFunc(1800*time.Millisecond, func() {
+		fyne.Do(func() {
+			if ia.statusSeq.Load() != seq {
+				return
+			}
+			ia.statusLabel.Hide()
+			ia.statusLabel.SetText("")
+			ia.statusLabel.Refresh()
+			ia.notifyLayoutChanged()
+		})
+	})
+}
+
 func (ia *InputArea) RefreshLayout() {
+	baseBg := colorToNRGBA(theme.Color(theme.ColorNameInputBackground))
+	baseBorder := colorToNRGBA(theme.Color(theme.ColorNameInputBorder))
 	if ia.inputBg != nil {
-		ia.inputBg.FillColor = theme.Color(theme.ColorNameInputBackground)
+		ia.inputBg.FillColor = color.NRGBA{R: baseBg.R, G: baseBg.G, B: baseBg.B, A: 245}
 		ia.inputBg.Refresh()
+	}
+	if ia.inputBorder != nil {
+		ia.inputBorder.FillColor = color.NRGBA{R: baseBorder.R, G: baseBorder.G, B: baseBorder.B, A: 90}
+		ia.inputBorder.Refresh()
+	}
+	if ia.inputShadow != nil {
+		ia.inputShadow.FillColor = color.NRGBA{R: 0, G: 0, B: 0, A: 20}
+		ia.inputShadow.Refresh()
 	}
 	if ia.replyLabel != nil {
 		ia.replyLabel.TextSize = hoverTimestampTextSize()
-		ia.replyLabel.Color = theme.Color(theme.ColorNameDisabled)
+		ia.replyLabel.Color = theme.Color(theme.ColorNameForeground)
 		ia.replyLabel.Refresh()
 	}
 	if ia.cancelBtn != nil {
 		ia.cancelBtn.SetTextSize(glyphTextSize())
+		ia.cancelBtn.SetEmphasis(true)
+	}
+	if ia.sendBtn != nil {
+		ia.sendBtn.SetTextSize(glyphTextSize() + 1)
+		ia.sendBtn.SetFixedColor(theme.Color(theme.ColorNamePrimary))
+	}
+	if ia.statusLabel != nil {
+		ia.statusLabel.Importance = widget.MediumImportance
+	}
+	ia.notifyLayoutChanged()
+	if ia.entry != nil {
+		ia.entry.Refresh()
+	}
+}
+
+func (ia *InputArea) notifyLayoutChanged() {
+	if ia.panel != nil {
+		ia.panel.Refresh()
+	}
+	if ia.onLayoutChanged != nil {
+		ia.onLayoutChanged()
 	}
 }
 

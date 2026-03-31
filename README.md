@@ -29,6 +29,8 @@ A real-time iMessage client for BlueBubbles with two frontends: a terminal UI (T
 
 Set environment variables or create a config file.
 
+GUI note: if credentials are missing, bluebubbles-gui now opens a first-run setup wizard where you can enter server URL and password once.
+
 ### Environment Variables
 
 ```bash
@@ -61,6 +63,12 @@ export BB_PREVIEW_PROXY_URL=""
 export BB_OEMBED_ENDPOINT="https://noembed.com/embed"
 ```
 
+### Credential Storage
+
+- Preferred: password is stored in OS keyring (Linux Secret Service via D-Bus).
+- Fallback: if keyring is unavailable, password is stored in `~/.config/bluebubbles-tui/bluebubbles.yaml`.
+- `BB_SERVER_URL` and `BB_PASSWORD` env vars still override config/keyring.
+
 ---
 
 ## Quick Install (recommended)
@@ -72,6 +80,8 @@ Run the install script once to build everything, install the preview proxy as a 
 ```
 
 Re-run any time after `git pull` to rebuild and update. Safe to run multiple times.
+
+On first launch, if credentials are missing, the GUI shows a setup wizard to configure server URL and password once.
 
 Optional env overrides:
 
@@ -111,6 +121,26 @@ export PREVIEW_OEMBED_ENDPOINT="https://noembed.com/embed"
 export PREVIEW_TIMEOUT_SEC=8
 export PREVIEW_CACHE_TTL_SEC=21600
 ```
+
+### AppImage Packaging (optional)
+
+For a portable GUI package:
+
+```bash
+chmod +x scripts/build-appimage.sh
+./scripts/build-appimage.sh
+```
+
+Output file:
+
+```bash
+dist/BlueBubbles-x86_64.AppImage
+```
+
+Requirements:
+
+- `appimagetool` available in `PATH`
+- Linux x86_64 build host
 
 ### Autostart With systemd (user)
 

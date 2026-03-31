@@ -28,6 +28,7 @@ import (
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/storage"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/bluebubbles-tui/api"
 	"github.com/bluebubbles-tui/models"
@@ -184,6 +185,7 @@ type MessageView struct {
 	bottomPad float32
 
 	autoScrollUntil atomic.Int64
+	scrollSeq       atomic.Int64
 }
 
 func NewMessageView(onReply func(models.Message), _ func()) *MessageView {
@@ -215,9 +217,17 @@ func (mv *MessageView) SetChatName(_ string) {}
 // Passing nil or an empty slice clears the view and resets scroll to the top
 // so a freshly selected chat doesn't inherit the previous scroll position.
 func (mv *MessageView) SetMessages(msgs []models.Message) {
+	defer perfStart("MessageView.SetMessages")()
 	mv.messages = msgs
 	if len(msgs) == 0 {
-		mv.vbox.Objects = nil
+		emptyTitle := widget.NewLabel("No conversation selected")
+		emptyTitle.TextStyle = fyne.TextStyle{Bold: true}
+		emptyHint := widget.NewLabel("Pick a chat from the list to start reading and replying.")
+		emptyHint.Wrapping = fyne.TextWrapWord
+		emptyHint.Importance = widget.MediumImportance
+		mv.vbox.Objects = []fyne.CanvasObject{
+			container.NewPadded(container.NewVBox(emptyTitle, emptyHint)),
+		}
 		mv.vbox.Refresh()
 		mv.scroll.ScrollToTop()
 		return
@@ -225,9 +235,24 @@ func (mv *MessageView) SetMessages(msgs []models.Message) {
 	mv.rebuildVBox()
 }
 
+func (mv *MessageView) SetLoading() {
+	mv.messages = nil
+	loadingTitle := widget.NewLabel("Loading conversation...")
+	loadingTitle.TextStyle = fyne.TextStyle{Bold: true}
+	loadingHint := widget.NewLabel("Fetching latest messages from BlueBubbles server.")
+	loadingHint.Wrapping = fyne.TextWrapWord
+	loadingHint.Importance = widget.MediumImportance
+	mv.vbox.Objects = []fyne.CanvasObject{
+		container.NewPadded(container.NewVBox(loadingTitle, loadingHint)),
+	}
+	mv.vbox.Refresh()
+	mv.scroll.ScrollToTop()
+}
+
 // AppendMessage adds a single message, deduplicating by GUID.
 // Ported from tui/messages.go AppendMessage.
 func (mv *MessageView) AppendMessage(msg models.Message) {
+	defer perfStart("MessageView.AppendMessage")()
 	for _, existing := range mv.messages {
 		if existing.GUID == msg.GUID {
 			return
@@ -244,15 +269,22 @@ func (mv *MessageView) AppendMessage(msg models.Message) {
 // in each sender group regardless of pane focus state.
 func (mv *MessageView) SetFocused(_ bool) {}
 
-// ScrollToBottom attempts to scroll to the bottom at several increasing delays
-// so it works whether Fyne lays out quickly or slowly.
+// ScrollToBottom keeps the view pinned with one immediate and one delayed pass.
+// This is much cheaper than spawning multiple delayed goroutines per update.
 func (mv *MessageView) ScrollToBottom() {
-	for _, d := range []time.Duration{60, 200, 500} {
-		go func(delay time.Duration) {
-			time.Sleep(delay)
-			fyne.Do(func() { mv.scroll.ScrollToBottom() })
-		}(d)
-	}
+	seq := mv.scrollSeq.Add(1)
+	fyne.Do(func() {
+		mv.scroll.ScrollToBottom()
+	})
+	go func(local int64) {
+		time.Sleep(120 * time.Millisecond)
+		fyne.Do(func() {
+			if mv.scrollSeq.Load() != local {
+				return
+			}
+			mv.scroll.ScrollToBottom()
+		})
+	}(seq)
 }
 
 func (mv *MessageView) extendAutoScrollWindow(d time.Duration) {
@@ -267,6 +299,7 @@ func (mv *MessageView) maybeScrollAfterAsyncResize() {
 }
 
 func (mv *MessageView) rebuildVBox() {
+	defer perfStart("MessageView.rebuildVBox")()
 	mv.extendAutoScrollWindow(2 * time.Second)
 	mv.vbox.Objects = nil
 
@@ -327,7 +360,7 @@ func buildMessageRow(msg models.Message, onReply func(models.Message), _ func(),
 	var replyBtn fyne.CanvasObject
 	if onReply != nil && !msg.IsFromMe {
 		replyGlyph := newGlyphAction("↩", func() { onReply(msg) })
-		replyGlyph.SetFixedColor(color.Black)
+		replyGlyph.SetFixedColor(theme.Color(theme.ColorNamePrimary))
 		replyGlyph.Hide()
 		replyBtn = replyGlyph
 	}
@@ -371,7 +404,6 @@ func buildMessageContent(body string, msg models.Message) fyne.CanvasObject {
 	if !urlPattern.MatchString(body) {
 		label := widget.NewLabel(body)
 		label.Wrapping = fyne.TextWrapWord
-
 		if msg.IsFromMe {
 			label.Alignment = fyne.TextAlignTrailing
 			if strings.HasPrefix(strings.TrimSpace(msg.Text), "> ") {
@@ -379,6 +411,9 @@ func buildMessageContent(body string, msg models.Message) fyne.CanvasObject {
 			} else {
 				label.Importance = widget.SuccessImportance
 			}
+		}
+		if strings.HasPrefix(strings.TrimSpace(msg.Text), "> ") {
+			label.Importance = widget.MediumImportance
 		}
 		return label
 	}
