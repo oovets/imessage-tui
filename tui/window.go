@@ -69,6 +69,19 @@ func (w *ChatWindow) SetChat(chat *models.Chat) {
 	}
 }
 
+// syncMessagesSizeToInput resizes the message viewport when the input grows or
+// shrinks. SetBounds only runs on layout passes, so without this the viewport
+// keeps a stale height and stick-to-bottom / AtBottom() can be wrong.
+func (w *ChatWindow) syncMessagesSizeToInput() {
+	contentWidth := max(1, w.width-2)
+	inputHeight := w.Input.Height()
+	messagesHeight := w.height - inputHeight
+	if messagesHeight < 1 {
+		messagesHeight = 1
+	}
+	w.Messages.SetSize(contentWidth, messagesHeight)
+}
+
 // Update handles messages for this window
 func (w *ChatWindow) Update(msg tea.Msg) tea.Cmd {
 	var cmds []tea.Cmd
@@ -80,9 +93,20 @@ func (w *ChatWindow) Update(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 
-		w.Messages, cmd = w.Messages.Update(msg)
-		if cmd != nil {
-			cmds = append(cmds, cmd)
+		w.syncMessagesSizeToInput()
+
+		// Do not forward KeyMsg to the message viewport: its default keymap uses
+		// j/k, space, h/l, etc., which conflicts with typing and clears
+		// stick-to-bottom via AtBottom() after spurious scrolls.
+		switch msg.(type) {
+		case tea.KeyMsg:
+			// keyboard handled by Input only
+		default:
+			var cmd2 tea.Cmd
+			w.Messages, cmd2 = w.Messages.Update(msg)
+			if cmd2 != nil {
+				cmds = append(cmds, cmd2)
+			}
 		}
 	}
 

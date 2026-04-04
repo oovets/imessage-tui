@@ -71,6 +71,9 @@ func (m *MessagesModel) SetChatName(name string) {
 }
 
 func (m *MessagesModel) SetSize(width, height int) {
+	if m.width == width && m.height == height {
+		return
+	}
 	m.width = width
 	m.height = height
 	m.viewport.Width = width
