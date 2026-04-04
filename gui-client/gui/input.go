@@ -12,7 +12,7 @@ import (
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-	"github.com/bluebubbles-tui/models"
+	"github.com/oovets/bluebubbles-gui/models"
 )
 
 // focusEntry is a single-line widget.Entry that fires onFocused / onBlurred

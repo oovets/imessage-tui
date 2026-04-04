@@ -19,10 +19,10 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-	"github.com/bluebubbles-tui/api"
-	"github.com/bluebubbles-tui/config"
-	"github.com/bluebubbles-tui/models"
-	"github.com/bluebubbles-tui/ws"
+	"github.com/oovets/bluebubbles-gui/api"
+	"github.com/oovets/bluebubbles-gui/config"
+	"github.com/oovets/bluebubbles-gui/models"
+	"github.com/oovets/bluebubbles-gui/ws"
 	"github.com/google/uuid"
 )
 

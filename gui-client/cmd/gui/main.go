@@ -14,10 +14,10 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
-	"github.com/bluebubbles-tui/api"
-	"github.com/bluebubbles-tui/config"
-	"github.com/bluebubbles-tui/gui"
-	"github.com/bluebubbles-tui/ws"
+	"github.com/oovets/bluebubbles-gui/gui"
+	"github.com/oovets/bluebubbles-gui/api"
+	"github.com/oovets/bluebubbles-gui/config"
+	"github.com/oovets/bluebubbles-gui/ws"
 )
 
 func init() {

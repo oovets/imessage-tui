@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/bluebubbles-tui/models"
+	"github.com/oovets/bluebubbles-gui/models"
 )
 
 type aliasStore struct {

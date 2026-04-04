@@ -11,7 +11,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-	"github.com/bluebubbles-tui/models"
+	"github.com/oovets/bluebubbles-gui/models"
 )
 
 type splitDir int

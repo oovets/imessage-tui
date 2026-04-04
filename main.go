@@ -4,10 +4,10 @@ import (
 	"log"
 	"os"
 
-	"github.com/bluebubbles-tui/api"
-	"github.com/bluebubbles-tui/config"
-	"github.com/bluebubbles-tui/tui"
-	"github.com/bluebubbles-tui/ws"
+	"github.com/oovets/bluebubbles-tui/api"
+	"github.com/oovets/bluebubbles-tui/config"
+	"github.com/oovets/bluebubbles-tui/tui"
+	"github.com/oovets/bluebubbles-tui/ws"
 	tea "github.com/charmbracelet/bubbletea"
 )
 

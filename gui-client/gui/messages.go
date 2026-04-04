@@ -32,8 +32,8 @@ import (
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-	"github.com/bluebubbles-tui/api"
-	"github.com/bluebubbles-tui/models"
+	"github.com/oovets/bluebubbles-gui/api"
+	"github.com/oovets/bluebubbles-gui/models"
 )
 
 var urlPattern = regexp.MustCompile(`https?://[^\s]+|www\.[^\s]+|mailto:[^\s]+|[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)

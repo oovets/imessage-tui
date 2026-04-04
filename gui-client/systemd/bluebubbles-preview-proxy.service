@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/Code/bluebubbles-tui
-ExecStart=%h/Code/bluebubbles-tui/bluebubbles-preview-proxy
+WorkingDirectory=%h/Code/bluebubbles-gui
+ExecStart=%h/Code/bluebubbles-gui/bluebubbles-preview-proxy
 Restart=on-failure
 RestartSec=3
 Environment=PREVIEW_PROXY_ADDR=127.0.0.1:8090

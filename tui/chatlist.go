@@ -2,7 +2,7 @@ package tui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/bluebubbles-tui/models"
+	"github.com/oovets/bluebubbles-tui/models"
 )
 
 type ChatListModel struct {

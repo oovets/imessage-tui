@@ -2,7 +2,7 @@
 # install.sh — full setup for BlueBubbles GUI
 #
 # What this script does:
-#   1. Builds all three binaries (tui, gui, preview-proxy)
+#   1. Builds the GUI and preview-proxy binaries
 #   2. Installs the preview-proxy systemd user service
 #   3. Enables + starts the proxy service
 #   4. Creates/updates the .desktop launcher file
@@ -36,13 +36,11 @@ step() { echo; echo "── $* ────────────────�
 
 # ── 1. Build ──────────────────────────────────────────────────────────────────
 step "1/5  Building binaries"
-echo "  → bluebubbles-tui"
-go build -o "$ROOT_DIR/bluebubbles-tui" .
 echo "  → bluebubbles-gui"
 go build -o "$ROOT_DIR/bluebubbles-gui" ./cmd/gui/
 echo "  → bluebubbles-preview-proxy"
 go build -o "$ROOT_DIR/bluebubbles-preview-proxy" ./cmd/preview-proxy/
-echo "  ✓ All binaries built"
+echo "  ✓ GUI binaries built"
 
 # ── 2. Systemd service ────────────────────────────────────────────────────────
 step "2/5  Installing systemd user service"
@@ -50,7 +48,7 @@ mkdir -p "$SYSTEMD_USER_DIR"
 
 # Rewrite the service file with the current repo path (handles moved repos)
 sed \
-  -e "s|%h/Code/bluebubbles-tui|$ROOT_DIR|g" \
+  -e "s|%h/Code/bluebubbles-gui|$ROOT_DIR|g" \
   "$ROOT_DIR/systemd/$SERVICE_NAME" \
   > "$SYSTEMD_USER_DIR/$SERVICE_NAME"
 

@@ -13,7 +13,7 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-	"github.com/bluebubbles-tui/models"
+	"github.com/oovets/bluebubbles-gui/models"
 )
 
 // ChatList renders the left-side conversation list split into Chats / Groups sections.

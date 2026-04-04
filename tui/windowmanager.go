@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	"github.com/bluebubbles-tui/models"
+	"github.com/oovets/bluebubbles-tui/models"
 	"github.com/charmbracelet/lipgloss"
 )
 

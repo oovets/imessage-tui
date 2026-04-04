@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oovets/bluebubbles-tui/models"
 	"github.com/google/uuid"
+	"github.com/oovets/bluebubbles-gui/models"
 	"github.com/tidwall/gjson"
 )
 
