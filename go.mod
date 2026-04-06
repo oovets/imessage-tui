@@ -1,4 +1,4 @@
-module github.com/oovets/bluebubbles-tui
+module github.com/oovets/imessage-tui
 
 go 1.24.2
 

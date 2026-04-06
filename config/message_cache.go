@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/oovets/bluebubbles-tui/models"
+	"github.com/oovets/imessage-tui/models"
 )
 
 type CachedChatMessages struct {
@@ -18,6 +18,14 @@ type MessageCacheState struct {
 }
 
 func messageCachePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "imessage-tui", "message_cache.json"), nil
+}
+
+func legacyMessageCachePath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -36,7 +44,15 @@ func LoadMessageCache() MessageCacheState {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return defaults
+		legacyPath, legacyPathErr := legacyMessageCachePath()
+		if legacyPathErr != nil {
+			return defaults
+		}
+		legacyData, legacyErr := os.ReadFile(legacyPath)
+		if legacyErr != nil {
+			return defaults
+		}
+		data = legacyData
 	}
 
 	state := defaults

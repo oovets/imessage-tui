@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oovets/bluebubbles-tui/api"
-	"github.com/oovets/bluebubbles-tui/config"
-	"github.com/oovets/bluebubbles-tui/models"
-	"github.com/oovets/bluebubbles-tui/ws"
+	"github.com/oovets/imessage-tui/api"
+	"github.com/oovets/imessage-tui/config"
+	"github.com/oovets/imessage-tui/models"
+	"github.com/oovets/imessage-tui/ws"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )

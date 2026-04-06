@@ -1,18 +1,18 @@
-# BlueBubbles TUI
+# iMessage TUI
 
-BlueBubbles TUI is a terminal iMessage client for the BlueBubbles server.
+iMessage TUI is a terminal iMessage client for a BlueBubbles-compatible server.
 
 Module path:
 
 ```text
-github.com/oovets/bluebubbles-tui
+github.com/oovets/imessage-tui
 ```
 
 This repository is standalone. It contains its own API client, config loading, models, and WebSocket code.
 
 ## What The App Does
 
-The TUI connects to your BlueBubbles server, loads chats and messages over HTTP, and stays updated through a live WebSocket connection.
+The TUI connects to your server, loads chats and messages over HTTP, and stays updated through a live WebSocket connection.
 
 It is optimized for keyboard-driven messaging:
 
@@ -34,8 +34,8 @@ It is optimized for keyboard-driven messaging:
 ## Prerequisites
 
 - Go 1.24+
-- A running BlueBubbles server on macOS
-- Network access to the BlueBubbles server
+- A running compatible server on macOS
+- Network access to the server
 
 ## Configuration
 
@@ -51,7 +51,7 @@ export BB_PASSWORD="your-api-password"
 ### Config File
 
 ```text
-~/.config/bluebubbles-tui/bluebubbles.yaml
+~/.config/imessage-tui/imessage.yaml
 ```
 
 Example:
@@ -72,16 +72,16 @@ chat_limit: 50
 ## Build
 
 ```bash
-go build -o bluebubbles-tui .
+go build -o imessage-tui .
 ```
 
 ## Run
 
 ```bash
-./bluebubbles-tui
+./imessage-tui
 ```
 
-Logs are written to `~/.bluebubbles-tui.log`.
+Logs are written to `~/.imessage-tui.log`.
 
 ## Keyboard Shortcuts
 
@@ -116,7 +116,7 @@ Up to 4 windows can be open at once.
 | `Ctrl+S` | Toggle chat list visibility |
 | `Ctrl+T` | Toggle message timestamps |
 | `Ctrl+N` | Toggle message line numbers |
-| `Ctrl+B` | Toggle sender names (show `IN`/`OUT` only) |
+| `Ctrl+B` | Toggle sender names (show text only when off) |
 | `Alt+M` | Toggle sender names (alternative binding) |
 | `q` / `Ctrl+C` | Quit |
 
@@ -124,7 +124,7 @@ Up to 4 windows can be open at once.
 
 ```text
 main.go             entry point
-api/                BlueBubbles REST client
+api/                REST client
 config/             config loading and credential storage
 models/             chat and message data structures
 ws/                 WebSocket client for real-time updates
@@ -135,16 +135,16 @@ tui/                Bubble Tea UI
 
 ### Connection fails with "certificate signed by unknown authority"
 
-BlueBubbles often uses self-signed HTTPS certificates. This client is designed to work in that environment.
+Some server setups use self-signed HTTPS certificates. This client is designed to work in that environment.
 
 ### Contact names are missing
 
-Make sure contacts are available in the BlueBubbles server itself.
+Make sure contacts are available in the server itself.
 
 ### No chats appear
 
-Verify that the BlueBubbles server has synced your iMessages and that your credentials are correct.
+Verify that the server has synced your iMessages and that your credentials are correct.
 
 ### Messages do not update in real time
 
-Check WebSocket connectivity and firewall rules between the client and the BlueBubbles server.
+Check WebSocket connectivity and firewall rules between the client and the server.

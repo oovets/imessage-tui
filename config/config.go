@@ -20,12 +20,30 @@ type Config struct {
 	OEmbedEndpoint        string
 }
 
+const (
+	appConfigDirName       = "imessage-tui"
+	legacyConfigDirName    = "bluebubbles-tui"
+	appConfigFileName      = "imessage.yaml"
+	appConfigBaseName      = "imessage"
+	legacyConfigBaseName   = "bluebubbles"
+)
+
 func Load() (*Config, error) {
 	v := newViper()
 	if err := v.ReadInConfig(); err != nil {
 		_, notFound := err.(viper.ConfigFileNotFoundError)
 		if !notFound {
 			return nil, err
+		}
+		// Backward compatibility for previous project/config naming.
+		legacy := newLegacyViper()
+		if legacyErr := legacy.ReadInConfig(); legacyErr == nil {
+			v = legacy
+		} else {
+			_, legacyNotFound := legacyErr.(viper.ConfigFileNotFoundError)
+			if !legacyNotFound {
+				return nil, legacyErr
+			}
 		}
 	}
 
@@ -66,7 +84,7 @@ func ConfigDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "bluebubbles-tui"), nil
+	return filepath.Join(home, ".config", appConfigDirName), nil
 }
 
 func ConfigPath() (string, error) {
@@ -74,7 +92,7 @@ func ConfigPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "bluebubbles.yaml"), nil
+	return filepath.Join(dir, appConfigFileName), nil
 }
 
 func SaveServerURL(serverURL string) error {
@@ -141,10 +159,40 @@ func ClearStoredPassword() error {
 
 func newViper() *viper.Viper {
 	v := viper.New()
-	v.SetConfigName("bluebubbles")
+	v.SetConfigName(appConfigBaseName)
 	v.SetConfigType("yaml")
 	if home, err := os.UserHomeDir(); err == nil {
-		v.AddConfigPath(filepath.Join(home, ".config", "bluebubbles-tui"))
+		v.AddConfigPath(filepath.Join(home, ".config", appConfigDirName))
+	}
+	v.AddConfigPath(".")
+
+	v.SetEnvPrefix("BB")
+	v.AutomaticEnv()
+	v.BindEnv("server_url", "BB_SERVER_URL")
+	v.BindEnv("password", "BB_PASSWORD")
+	v.BindEnv("enable_link_previews", "BB_ENABLE_LINK_PREVIEWS")
+	v.BindEnv("max_previews_per_message", "BB_MAX_PREVIEWS_PER_MESSAGE")
+	v.BindEnv("preview_proxy_url", "BB_PREVIEW_PROXY_URL")
+	v.BindEnv("oembed_endpoint", "BB_OEMBED_ENDPOINT")
+
+	v.SetDefault("poll_interval_sec", 10)
+	v.SetDefault("message_limit", 50)
+	v.SetDefault("chat_limit", 50)
+	v.SetDefault("enable_link_previews", true)
+	v.SetDefault("max_previews_per_message", 2)
+	v.SetDefault("preview_proxy_url", "")
+	v.SetDefault("oembed_endpoint", "https://noembed.com/embed")
+
+	return v
+}
+
+func newLegacyViper() *viper.Viper {
+	v := viper.New()
+	v.SetConfigName(legacyConfigBaseName)
+	v.SetConfigType("yaml")
+	if home, err := os.UserHomeDir(); err == nil {
+		v.AddConfigPath(filepath.Join(home, ".config", legacyConfigDirName))
+		v.AddConfigPath(filepath.Join(home, ".config", appConfigDirName))
 	}
 	v.AddConfigPath(".")
 

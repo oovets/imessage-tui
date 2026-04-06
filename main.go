@@ -4,10 +4,10 @@ import (
 	"log"
 	"os"
 
-	"github.com/oovets/bluebubbles-tui/api"
-	"github.com/oovets/bluebubbles-tui/config"
-	"github.com/oovets/bluebubbles-tui/tui"
-	"github.com/oovets/bluebubbles-tui/ws"
+	"github.com/oovets/imessage-tui/api"
+	"github.com/oovets/imessage-tui/config"
+	"github.com/oovets/imessage-tui/tui"
+	"github.com/oovets/imessage-tui/ws"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -17,13 +17,13 @@ func init() {
 	if err != nil {
 		homeDir = "/tmp"
 	}
-	logFile := homeDir + "/.bluebubbles-tui.log"
+	logFile := homeDir + "/.imessage-tui.log"
 
 	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err == nil {
 		log.SetOutput(f)
 		log.SetFlags(log.LstdFlags | log.Lshortfile)
-		log.Println("========== BlueBubbles TUI Started ==========")
+		log.Println("========== iMessage TUI Started ==========")
 	}
 }
 
@@ -38,10 +38,10 @@ func main() {
 	// Test API connectivity
 	apiClient := api.NewClient(cfg.ServerURL, cfg.Password)
 	if err := apiClient.Ping(); err != nil {
-		log.Fatalf("Failed to connect to BlueBubbles server: %v", err)
+		log.Fatalf("Failed to connect to server: %v", err)
 	}
 
-	log.Println("✓ Connected to BlueBubbles server")
+	log.Println("✓ Connected to server")
 
 	// Create WebSocket client (will try to connect during TUI init)
 	wsClient := ws.NewClient(cfg.ServerURL, cfg.Password)

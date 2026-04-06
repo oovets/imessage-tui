@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"github.com/oovets/bluebubbles-tui/models"
+	"github.com/oovets/imessage-tui/models"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )

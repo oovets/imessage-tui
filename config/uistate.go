@@ -18,6 +18,14 @@ func uiStatePath() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return filepath.Join(home, ".config", "imessage-tui", "ui_state.json"), nil
+}
+
+func legacyUIStatePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
 	return filepath.Join(home, ".config", "bluebubbles-tui", "ui_state.json"), nil
 }
 
@@ -34,7 +42,15 @@ func LoadUIState() UIState {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return defaults
+		legacyPath, legacyPathErr := legacyUIStatePath()
+		if legacyPathErr != nil {
+			return defaults
+		}
+		legacyData, legacyErr := os.ReadFile(legacyPath)
+		if legacyErr != nil {
+			return defaults
+		}
+		data = legacyData
 	}
 	// Start from defaults so newly added fields keep sane values
 	// when older ui_state files don't contain them.

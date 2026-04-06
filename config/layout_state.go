@@ -24,6 +24,14 @@ func layoutStatePath() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return filepath.Join(home, ".config", "imessage-tui", "layout_state.json"), nil
+}
+
+func legacyLayoutStatePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
 	return filepath.Join(home, ".config", "bluebubbles-tui", "layout_state.json"), nil
 }
 
@@ -34,7 +42,15 @@ func LoadLayoutState() (LayoutState, bool) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return LayoutState{}, false
+		legacyPath, legacyPathErr := legacyLayoutStatePath()
+		if legacyPathErr != nil {
+			return LayoutState{}, false
+		}
+		legacyData, legacyErr := os.ReadFile(legacyPath)
+		if legacyErr != nil {
+			return LayoutState{}, false
+		}
+		data = legacyData
 	}
 	var state LayoutState
 	if err := json.Unmarshal(data, &state); err != nil {

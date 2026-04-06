@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/oovets/bluebubbles-tui/models"
+	"github.com/oovets/imessage-tui/models"
 )
 
 type Client struct {
