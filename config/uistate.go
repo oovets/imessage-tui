@@ -10,6 +10,7 @@ type UIState struct {
 	ShowTimestamps  bool `json:"show_timestamps"`
 	ShowLineNumbers bool `json:"show_line_numbers"`
 	ShowChatList    bool `json:"show_chat_list"`
+	ShowSenderNames bool `json:"show_sender_names"`
 }
 
 func uiStatePath() (string, error) {
@@ -25,6 +26,7 @@ func LoadUIState() UIState {
 		ShowTimestamps:  true,
 		ShowLineNumbers: true,
 		ShowChatList:    true,
+		ShowSenderNames: true,
 	}
 	path, err := uiStatePath()
 	if err != nil {
@@ -34,7 +36,9 @@ func LoadUIState() UIState {
 	if err != nil {
 		return defaults
 	}
-	var s UIState
+	// Start from defaults so newly added fields keep sane values
+	// when older ui_state files don't contain them.
+	s := defaults
 	if err := json.Unmarshal(data, &s); err != nil {
 		return defaults
 	}

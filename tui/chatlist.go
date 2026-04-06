@@ -51,6 +51,11 @@ func (m *ChatListModel) ClearNewMessage(chatGUID string) {
 	m.list.ClearNewMessage(chatGUID)
 }
 
+// SelectChatByGUID moves chat list selection to a specific chat if present.
+func (m *ChatListModel) SelectChatByGUID(chatGUID string) bool {
+	return m.list.SelectByGUID(chatGUID)
+}
+
 func (m ChatListModel) Update(msg tea.Msg) (ChatListModel, tea.Cmd) {
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)

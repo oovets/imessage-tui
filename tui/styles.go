@@ -13,12 +13,32 @@ const (
 	DividerHorizontal = "─"
 )
 
-// Color scheme
+// Shared palette values.
 const (
-	ColorPrimary   = lipgloss.Color("212")  // pink
-	ColorSecondary = lipgloss.Color("86")   // green
-	ColorAccent    = lipgloss.Color("242")  // gray
-	ColorBorder    = lipgloss.Color("240")  // dark gray
+	PaletteBlack      = lipgloss.Color("0")
+	PalettePink       = lipgloss.Color("212")
+	PaletteGray       = lipgloss.Color("242")
+	PaletteDarkGray   = lipgloss.Color("240")
+	PaletteRed        = lipgloss.Color("196")
+	PaletteStatusFG   = lipgloss.Color("241")
+	PaletteStatusBG   = lipgloss.Color("235")
+)
+
+// Semantic colors by UI area.
+const (
+	ColorChatListSelectedForeground = PaletteBlack
+	ColorChatListSelectedBackground = PalettePink
+	ColorChatListNewMessage         = PaletteRed
+	ColorWindowPlaceholder          = PaletteGray
+	ColorWindowDivider              = PaletteDarkGray
+	ColorStatusBarForeground        = PaletteStatusFG
+	ColorStatusBarBackground        = PaletteStatusBG
+	ColorMyMessageDark              = "86"
+	ColorMyMessageLight             = "22"
+	ColorTheirMessageDark           = "252"
+	ColorTheirMessageLight          = "232"
+	ColorTimestampDark              = "242"
+	ColorTimestampLight             = "240"
 )
 
 var (
@@ -35,27 +55,27 @@ var (
 		Margin(0)
 
 	ChatListItemSelectedStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("0")).
-		Background(ColorPrimary).
+		Foreground(ColorChatListSelectedForeground).
+		Background(ColorChatListSelectedBackground).
 		Padding(0).
 		Margin(0)
 
 	// Message styles
 	MyMessageStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.AdaptiveColor{Dark: "86", Light: "22"})
+		Foreground(lipgloss.AdaptiveColor{Dark: ColorMyMessageDark, Light: ColorMyMessageLight})
 
 	TheirMessageStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.AdaptiveColor{Dark: "252", Light: "232"}).
+		Foreground(lipgloss.AdaptiveColor{Dark: ColorTheirMessageDark, Light: ColorTheirMessageLight}).
 		Align(lipgloss.Left)
 
 	TimestampStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.AdaptiveColor{Dark: "242", Light: "240"}).
+		Foreground(lipgloss.AdaptiveColor{Dark: ColorTimestampDark, Light: ColorTimestampLight}).
 		PaddingRight(1)
 
 	// Status bar
 	StatusBarStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
-		Background(lipgloss.Color("235")).
+		Foreground(ColorStatusBarForeground).
+		Background(ColorStatusBarBackground).
 		Padding(0, 1)
 
 	// Input styles (no border)

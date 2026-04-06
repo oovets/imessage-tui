@@ -26,6 +26,7 @@ type WindowManager struct {
 	maxWindows      int
 	showTimestamps  bool
 	showLineNumbers bool
+	showSenderNames bool
 
 	// Message cache per chat GUID
 	messageCache     map[string][]models.Message
@@ -45,12 +46,14 @@ func NewWindowManager() *WindowManager {
 		messageCacheGUID: make(map[string]map[string]struct{}),
 		showTimestamps:   true,
 		showLineNumbers:  true,
+		showSenderNames:  true,
 	}
 
 	// Create initial window
 	window := NewChatWindow(0)
 	window.Messages.SetShowTimestamps(wm.showTimestamps)
 	window.Messages.SetShowLineNumbers(wm.showLineNumbers)
+	window.Messages.SetShowSenderNames(wm.showSenderNames)
 	window.Focused = true
 	wm.windows[0] = window
 	wm.focusedWindow = 0
@@ -90,6 +93,7 @@ func (wm *WindowManager) SetFocus(id WindowID) {
 	wm.focusedWindow = id
 	if window, ok := wm.windows[id]; ok {
 		window.Focused = true
+		window.Messages.ClearIncomingUnseen()
 	}
 }
 
@@ -142,6 +146,7 @@ func (wm *WindowManager) SplitWindow(direction SplitDirection) bool {
 	newWindow := NewChatWindow(wm.nextID)
 	newWindow.Messages.SetShowTimestamps(wm.showTimestamps)
 	newWindow.Messages.SetShowLineNumbers(wm.showLineNumbers)
+	newWindow.Messages.SetShowSenderNames(wm.showSenderNames)
 	wm.windows[wm.nextID] = newWindow
 	wm.nextID++
 
@@ -303,6 +308,17 @@ func (wm *WindowManager) SetCachedMessages(chatGUID string, messages []models.Me
 	wm.messageCacheGUID[chatGUID] = idx
 }
 
+// CachedMessagesSnapshot returns a shallow copy of the cached messages map.
+func (wm *WindowManager) CachedMessagesSnapshot() map[string][]models.Message {
+	out := make(map[string][]models.Message, len(wm.messageCache))
+	for chatGUID, msgs := range wm.messageCache {
+		copied := make([]models.Message, len(msgs))
+		copy(copied, msgs)
+		out[chatGUID] = copied
+	}
+	return out
+}
+
 // WindowsShowingChat returns all windows displaying a specific chat
 func (wm *WindowManager) WindowsShowingChat(chatGUID string) []*ChatWindow {
 	var result []*ChatWindow
@@ -350,6 +366,17 @@ func (wm *WindowManager) SetShowLineNumbers(show bool) {
 	}
 }
 
+// SetShowSenderNames toggles sender names for all windows.
+func (wm *WindowManager) SetShowSenderNames(show bool) {
+	if wm.showSenderNames == show {
+		return
+	}
+	wm.showSenderNames = show
+	for _, w := range wm.windows {
+		w.Messages.SetShowSenderNames(show)
+	}
+}
+
 // Render renders all windows
 func (wm *WindowManager) Render() string {
 	if wm.root == nil || wm.width == 0 || wm.height == 0 {
@@ -381,7 +408,7 @@ func (wm *WindowManager) renderNode(node *LayoutNode) string {
 		dividerHeight := max(1, node.height)
 		divider := strings.Repeat(DividerVertical+"\n", dividerHeight-1) + DividerVertical
 		dividerStyled := lipgloss.NewStyle().
-			Foreground(ColorBorder).
+			Foreground(ColorWindowDivider).
 			Render(divider)
 
 		return lipgloss.JoinHorizontal(lipgloss.Top, leftView, dividerStyled, rightView)
@@ -396,7 +423,7 @@ func (wm *WindowManager) renderNode(node *LayoutNode) string {
 	dividerWidth := max(1, node.width)
 	divider := strings.Repeat(DividerHorizontal, dividerWidth)
 	dividerStyled := lipgloss.NewStyle().
-		Foreground(ColorBorder).
+		Foreground(ColorWindowDivider).
 		Render(divider)
 
 	return lipgloss.JoinVertical(lipgloss.Left, leftView, dividerStyled, rightView)

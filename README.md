@@ -115,6 +115,9 @@ Up to 4 windows can be open at once.
 |-----|--------|
 | `Ctrl+S` | Toggle chat list visibility |
 | `Ctrl+T` | Toggle message timestamps |
+| `Ctrl+N` | Toggle message line numbers |
+| `Ctrl+B` | Toggle sender names (show `IN`/`OUT` only) |
+| `Alt+M` | Toggle sender names (alternative binding) |
 | `q` / `Ctrl+C` | Quit |
 
 ## Architecture

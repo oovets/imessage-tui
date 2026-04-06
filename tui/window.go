@@ -137,7 +137,7 @@ func (w *ChatWindow) View() string {
 	// Handle empty window
 	if w.Chat == nil {
 		placeholder := lipgloss.NewStyle().
-			Foreground(ColorAccent).
+			Foreground(ColorWindowPlaceholder).
 			Align(lipgloss.Center).
 			Width(contentWidth).
 			Height(contentHeight).

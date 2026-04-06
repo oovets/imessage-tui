@@ -47,11 +47,11 @@ func NewSimpleListModel() SimpleListModel {
 		cursor: 0,
 		offset: 0,
 		selectedStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("0")).
-			Background(lipgloss.Color("212")),
+			Foreground(ColorChatListSelectedForeground).
+			Background(ColorChatListSelectedBackground),
 		normalStyle: lipgloss.NewStyle(),
 		newMessageStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")), // Red
+			Foreground(ColorChatListNewMessage),
 	}
 }
 
@@ -71,6 +71,29 @@ func (m *SimpleListModel) SelectedItem() *models.Chat {
 		return &m.items[m.cursor]
 	}
 	return nil
+}
+
+// SelectByGUID moves the list cursor to the chat with the given GUID.
+// Returns true if found.
+func (m *SimpleListModel) SelectByGUID(chatGUID string) bool {
+	for i, chat := range m.items {
+		if chat.GUID != chatGUID {
+			continue
+		}
+		m.cursor = i
+		visibleItems := m.height - 1 // -1 for title
+		if visibleItems < 1 {
+			visibleItems = 1
+		}
+		if m.cursor < m.offset {
+			m.offset = m.cursor
+		}
+		if m.cursor >= m.offset+visibleItems {
+			m.offset = m.cursor - visibleItems + 1
+		}
+		return true
+	}
+	return false
 }
 
 // MarkNewMessage marks a chat as having a new message and moves it to the top

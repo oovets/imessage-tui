@@ -15,11 +15,13 @@ type MessagesModel struct {
 	viewport        viewport.Model
 	messages        []models.Message
 	messageGUIDs    map[string]struct{}
+	unseenGUIDs     map[string]struct{}
 	chatName        string
 	width           int
 	height          int
 	showTimestamps  bool
 	showLineNumbers bool
+	showSenderNames bool
 	stickToBottom   bool
 }
 
@@ -30,15 +32,27 @@ func NewMessagesModel() MessagesModel {
 	return MessagesModel{
 		viewport:        vp,
 		messageGUIDs:    make(map[string]struct{}),
+		unseenGUIDs:     make(map[string]struct{}),
 		showTimestamps:  true,
 		showLineNumbers: true,
+		showSenderNames: true,
 		stickToBottom:   true,
 	}
 }
 
 func (m *MessagesModel) SetMessages(messages []models.Message) {
+	prevUnseen := m.unseenGUIDs
 	m.messages = messages
 	m.rebuildGUIDIndex()
+	m.unseenGUIDs = make(map[string]struct{})
+	for _, msg := range messages {
+		if msg.GUID == "" {
+			continue
+		}
+		if _, ok := prevUnseen[msg.GUID]; ok {
+			m.unseenGUIDs[msg.GUID] = struct{}{}
+		}
+	}
 	m.renderContent()
 }
 
@@ -64,6 +78,23 @@ func (m *MessagesModel) AppendMessage(msg models.Message) {
 		m.messages[pos] = msg
 	}
 	m.renderContent()
+}
+
+// RemoveMessageByGUID removes a message if present.
+func (m *MessagesModel) RemoveMessageByGUID(guid string) bool {
+	if strings.TrimSpace(guid) == "" {
+		return false
+	}
+	for i, msg := range m.messages {
+		if msg.GUID != guid {
+			continue
+		}
+		m.messages = append(m.messages[:i], m.messages[i+1:]...)
+		m.rebuildGUIDIndex()
+		m.renderContent()
+		return true
+	}
+	return false
 }
 
 func (m *MessagesModel) SetChatName(name string) {
@@ -95,6 +126,34 @@ func (m *MessagesModel) SetShowLineNumbers(show bool) {
 		return
 	}
 	m.showLineNumbers = show
+	m.renderContent()
+}
+
+func (m *MessagesModel) SetShowSenderNames(show bool) {
+	if m.showSenderNames == show {
+		return
+	}
+	m.showSenderNames = show
+	m.renderContent()
+}
+
+func (m *MessagesModel) MarkIncomingUnseen(guid string) {
+	guid = strings.TrimSpace(guid)
+	if guid == "" {
+		return
+	}
+	if _, exists := m.unseenGUIDs[guid]; exists {
+		return
+	}
+	m.unseenGUIDs[guid] = struct{}{}
+	m.renderContent()
+}
+
+func (m *MessagesModel) ClearIncomingUnseen() {
+	if len(m.unseenGUIDs) == 0 {
+		return
+	}
+	m.unseenGUIDs = make(map[string]struct{})
 	m.renderContent()
 }
 
@@ -153,13 +212,27 @@ func (m *MessagesModel) renderContent() {
 				body += " [IMG]"
 			}
 		}
+		// Local optimistic sends use "local-*" GUID until server/WS confirmation.
+		// Show a subtle marker so the user sees in-flight state instantly.
+		if msg.IsFromMe && strings.HasPrefix(msg.GUID, "local-") {
+			if body == "" {
+				body = "(sending...)"
+			} else {
+				body += " (sending...)"
+			}
+		}
 		lineNum := ""
 		if m.showLineNumbers {
 			lineNum = fmt.Sprintf("#%d ", i+1)
 		}
-		fullText := fmt.Sprintf("%s%s%s:", prefix, lineNum, sender)
-		if body != "" {
-			fullText += " " + body
+		fullText := ""
+		if m.showSenderNames {
+			fullText = fmt.Sprintf("%s%s%s:", prefix, lineNum, sender)
+			if body != "" {
+				fullText += " " + body
+			}
+		} else {
+			fullText = prefix + lineNum + body
 		}
 
 		if msg.IsFromMe {
@@ -179,7 +252,11 @@ func (m *MessagesModel) renderContent() {
 			}
 			sb.WriteString("\n")
 		} else {
-			sb.WriteString(TheirMessageStyle.Width(wrapWidth).Render(fullText))
+			style := TheirMessageStyle
+			if _, unseen := m.unseenGUIDs[msg.GUID]; unseen {
+				style = style.Reverse(true)
+			}
+			sb.WriteString(style.Width(wrapWidth).Render(fullText))
 			sb.WriteString("\n")
 		}
 	}
