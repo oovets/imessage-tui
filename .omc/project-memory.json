@@ -1,0 +1,230 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1775343926513,
+  "projectRoot": "/home/stefan/Code/bluebubbles-tui",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Go",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "go.mod"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "go",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "api": {
+      "path": "api",
+      "purpose": "API routes",
+      "fileCount": 2,
+      "lastAccessed": 1775343926483,
+      "keyFiles": [
+        "client.go",
+        "link_preview.go"
+      ]
+    },
+    "cmd": {
+      "path": "cmd",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1775343926495,
+      "keyFiles": []
+    },
+    "config": {
+      "path": "config",
+      "purpose": "Configuration files",
+      "fileCount": 3,
+      "lastAccessed": 1775343926498,
+      "keyFiles": [
+        "config.go",
+        "credentials.go",
+        "uistate.go"
+      ]
+    },
+    "macos": {
+      "path": "macos",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1775343926500,
+      "keyFiles": [
+        "optimize_bluebubbles_monterey.sh"
+      ]
+    },
+    "models": {
+      "path": "models",
+      "purpose": "Data models",
+      "fileCount": 1,
+      "lastAccessed": 1775343926500,
+      "keyFiles": [
+        "types.go"
+      ]
+    },
+    "tui": {
+      "path": "tui",
+      "purpose": null,
+      "fileCount": 9,
+      "lastAccessed": 1775343926501,
+      "keyFiles": [
+        "app.go",
+        "chatlist.go",
+        "input.go",
+        "layout.go",
+        "messages.go"
+      ]
+    },
+    "ws": {
+      "path": "ws",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1775343926508,
+      "keyFiles": [
+        "client.go"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "tui/app.go",
+      "accessCount": 13,
+      "lastAccessed": 1774801112813,
+      "type": "file"
+    },
+    {
+      "path": "tui/messages.go",
+      "accessCount": 13,
+      "lastAccessed": 1774810907996,
+      "type": "file"
+    },
+    {
+      "path": "gui/messages.go",
+      "accessCount": 9,
+      "lastAccessed": 1774793056337,
+      "type": "file"
+    },
+    {
+      "path": "tui/windowmanager.go",
+      "accessCount": 8,
+      "lastAccessed": 1774800799183,
+      "type": "file"
+    },
+    {
+      "path": "tui",
+      "accessCount": 7,
+      "lastAccessed": 1774810846695,
+      "type": "directory"
+    },
+    {
+      "path": "gui",
+      "accessCount": 6,
+      "lastAccessed": 1774793024594,
+      "type": "directory"
+    },
+    {
+      "path": "gui/theme.go",
+      "accessCount": 5,
+      "lastAccessed": 1774793094673,
+      "type": "file"
+    },
+    {
+      "path": "tui/styles.go",
+      "accessCount": 4,
+      "lastAccessed": 1774800719053,
+      "type": "file"
+    },
+    {
+      "path": "gui/app.go",
+      "accessCount": 3,
+      "lastAccessed": 1774793035885,
+      "type": "file"
+    },
+    {
+      "path": "tui/input.go",
+      "accessCount": 3,
+      "lastAccessed": 1774800986974,
+      "type": "file"
+    },
+    {
+      "path": "tui/simplelist.go",
+      "accessCount": 2,
+      "lastAccessed": 1774793521187,
+      "type": "file"
+    },
+    {
+      "path": "gui/layout_metrics.go",
+      "accessCount": 1,
+      "lastAccessed": 1774792951068,
+      "type": "file"
+    },
+    {
+      "path": "gui/panemanager.go",
+      "accessCount": 1,
+      "lastAccessed": 1774792954762,
+      "type": "file"
+    },
+    {
+      "path": "tui/chatlist.go",
+      "accessCount": 1,
+      "lastAccessed": 1774793518726,
+      "type": "file"
+    },
+    {
+      "path": "tui/window.go",
+      "accessCount": 1,
+      "lastAccessed": 1774793518785,
+      "type": "file"
+    },
+    {
+      "path": "tui/layout.go",
+      "accessCount": 1,
+      "lastAccessed": 1774793525209,
+      "type": "file"
+    },
+    {
+      "path": "config/config.go",
+      "accessCount": 1,
+      "lastAccessed": 1774801046655,
+      "type": "file"
+    },
+    {
+      "path": "main.go",
+      "accessCount": 1,
+      "lastAccessed": 1774801051113,
+      "type": "file"
+    },
+    {
+      "path": "config/uistate.go",
+      "accessCount": 1,
+      "lastAccessed": 1774801064833,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

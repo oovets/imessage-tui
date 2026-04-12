@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oovets/imessage-tui/models"
 	"github.com/google/uuid"
+	"github.com/oovets/imessage-tui/models"
 	"github.com/tidwall/gjson"
 )
 
@@ -405,6 +405,35 @@ func (c *Client) SendReaction(chatGUID, selectedMessageGUID, reaction string, pa
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return fmt.Errorf("reaction API error: %s (status %d)", string(respBody), resp.StatusCode)
+	}
+
+	return nil
+}
+
+// MarkChatRead marks a chat as read by GUID.
+func (c *Client) MarkChatRead(chatGUID string) error {
+	u, err := url.Parse(fmt.Sprintf("%s/api/v1/chat/%s/read", c.baseURL, url.PathEscape(chatGUID)))
+	if err != nil {
+		return err
+	}
+
+	q := u.Query()
+	q.Set("guid", c.password)
+	u.RawQuery = q.Encode()
+
+	resp, err := c.httpClient.Post(u.String(), "application/json", bytes.NewReader([]byte("{}")))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("mark chat read API error: %s (status %d)", string(respBody), resp.StatusCode)
 	}
 
 	return nil
