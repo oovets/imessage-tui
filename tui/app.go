@@ -226,11 +226,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case sendSuccessMsg:
-		// Clear input for the window that sent
-		if window := m.windowManager.windows[msg.windowID]; window != nil {
-			window.Input.Clear()
-		}
-		// Keep optimistic message in place; WS delivery replaces it with server GUID.
+		// Input was already cleared synchronously on Enter. Do not clear here:
+		// the user may have started typing the next message while the send was
+		// in flight.
 		return m, nil
 
 	case sendErrMsg:

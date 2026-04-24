@@ -212,15 +212,6 @@ func (m *MessagesModel) renderContent() {
 				body += " [IMG]"
 			}
 		}
-		// Local optimistic sends use "local-*" GUID until server/WS confirmation.
-		// Show a subtle marker so the user sees in-flight state instantly.
-		if msg.IsFromMe && strings.HasPrefix(msg.GUID, "local-") {
-			if body == "" {
-				body = "(sending...)"
-			} else {
-				body += " (sending...)"
-			}
-		}
 		lineNum := ""
 		if m.showLineNumbers {
 			lineNum = fmt.Sprintf("#%d ", i+1)
