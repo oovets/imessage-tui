@@ -16,6 +16,12 @@ type InputModel struct {
 	minHeight     int
 	maxHeight     int
 	maxPaneHeight int
+
+	// Cache of inputs to estimateHeight so we can skip the string scan on
+	// every keystroke when nothing that affects wrapping changed.
+	lastValue  string
+	lastWidth  int
+	lastHeight int
 }
 
 func NewInputModel() InputModel {
@@ -70,6 +76,9 @@ func (m *InputModel) GetText() string {
 
 func (m *InputModel) Clear() {
 	m.textarea.Reset()
+	// Force reflow - the cached lastValue from before Reset must not win.
+	m.lastValue = ""
+	m.lastHeight = 0
 	m.reflowHeight()
 }
 
@@ -101,6 +110,15 @@ func (m InputModel) Height() int {
 }
 
 func (m *InputModel) reflowHeight() {
+	// Fast path: if neither the value nor the width changed since the last
+	// call, the wrap calculation will produce the same answer. Skipping it
+	// keeps Update() cheap per keystroke so the Bubble Tea event loop never
+	// falls behind the terminal's input buffer.
+	value := m.textarea.Value()
+	if value == m.lastValue && m.width == m.lastWidth && m.lastHeight != 0 {
+		return
+	}
+
 	desired := m.estimateHeight()
 	limit := m.maxHeight
 	if m.maxPaneHeight < limit {
@@ -115,6 +133,10 @@ func (m *InputModel) reflowHeight() {
 	if desired < 1 {
 		desired = 1
 	}
+
+	m.lastValue = value
+	m.lastWidth = m.width
+	m.lastHeight = desired
 
 	if desired != m.height {
 		m.height = desired

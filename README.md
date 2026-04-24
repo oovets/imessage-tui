@@ -72,8 +72,11 @@ chat_limit: 50
 ## Build
 
 ```bash
+go version
 go build -o imessage-tui .
 ```
+
+If `go version` reports an older distro-provided toolchain such as Go 1.13, the build will fail with errors like `cannot load io/fs`. Install Go 1.24+ and ensure that newer binary is first on your `PATH`.
 
 ## Run
 
@@ -148,3 +151,17 @@ Verify that the server has synced your iMessages and that your credentials are c
 ### Messages do not update in real time
 
 Check WebSocket connectivity and firewall rules between the client and the server.
+
+### Build fails with `cannot load io/fs`
+
+This project depends on modern Go standard library packages and language features. That error usually means your shell is picking up an old Go toolchain.
+
+Verify the active binary:
+
+```bash
+which go
+go version
+go env GOROOT
+```
+
+If those point to an older install such as `/usr/lib/go-1.13`, install Go 1.24+ and update your `PATH` so the newer binary is used for builds.

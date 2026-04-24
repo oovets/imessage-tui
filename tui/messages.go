@@ -5,10 +5,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/oovets/imessage-tui/models"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/oovets/imessage-tui/models"
 )
 
 type MessagesModel struct {
@@ -42,6 +42,12 @@ func NewMessagesModel() MessagesModel {
 
 func (m *MessagesModel) SetMessages(messages []models.Message) {
 	prevUnseen := m.unseenGUIDs
+	// Always keep the list chronological so the newest message is last and
+	// stick-to-bottom points at the most recent entry, regardless of how
+	// callers assembled the slice (API, cache, merged sources, ...).
+	sort.SliceStable(messages, func(i, j int) bool {
+		return messages[i].DateCreated < messages[j].DateCreated
+	})
 	m.messages = messages
 	m.rebuildGUIDIndex()
 	m.unseenGUIDs = make(map[string]struct{})
@@ -314,7 +320,12 @@ func (m *MessagesModel) ScrollDown() {
 func (m MessagesModel) Update(msg tea.Msg) (MessagesModel, tea.Cmd) {
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
-	m.stickToBottom = m.viewport.AtBottom()
+	// Only let real user scroll input flip stick-to-bottom. Resize passes,
+	// ticks and other messages must not clobber the flag, otherwise the
+	// viewport can drift off the bottom and hide the newest message.
+	if _, ok := msg.(tea.MouseMsg); ok {
+		m.stickToBottom = m.viewport.AtBottom()
+	}
 	return m, cmd
 }
 

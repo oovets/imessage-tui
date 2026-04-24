@@ -25,6 +25,11 @@ const initialMessageFetchLimit = 50
 const messageCacheRefreshTTL = 20 * time.Second
 const initialPrefetchChatCount = 5
 
+// pendingOutgoingTimeout is how long we keep a local optimistic echo before
+// assuming the server never delivered it back via WS. When it expires we drop
+// the optimistic row and refetch the chat so the truth from the server wins.
+const pendingOutgoingTimeout = 30 * time.Second
+
 type focusRegion int
 
 const (
@@ -55,10 +60,16 @@ type (
 	wsEventMsg          models.WSEvent
 	wsConnectSuccessMsg struct{}
 	wsConnectFailMsg    struct{ err error }
+	wsReconnectedMsg    struct{}
+	wsOverflowMsg       struct{}
 	markReadSuccessMsg  struct{ chatGUID string }
 	markReadErrMsg      struct {
 		chatGUID string
 		err      error
+	}
+	pendingTimeoutMsg struct {
+		chatGUID    string
+		pendingGUID string
 	}
 	errMsg struct{ err error }
 )
@@ -100,6 +111,11 @@ type AppModel struct {
 	disableReadSync      bool
 	savedLayoutState     *config.LayoutState
 	didRestoreLayout     bool
+
+	// All disk writes go through this so the Update loop never blocks on
+	// fsync/marshal. Blocking Update for even 50ms causes dropped
+	// keystrokes during fast typing.
+	persist *persister
 }
 
 func NewAppModel(client *api.Client, wsClient *ws.Client) AppModel {
@@ -124,6 +140,7 @@ func NewAppModel(client *api.Client, wsClient *ws.Client) AppModel {
 		messageFetchedAt:     make(map[string]time.Time),
 		pendingOutgoing:      make(map[string][]models.Message),
 		readMarkInFlight:     make(map[string]bool),
+		persist:              newPersister(),
 	}
 	if layoutState, ok := config.LoadLayoutState(); ok {
 		app.savedLayoutState = &layoutState
@@ -236,9 +253,46 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		return m, nil
 
+	case pendingTimeoutMsg:
+		// Only act if the pending entry is still there (otherwise the WS
+		// echo already resolved it). When it times out we refetch the chat
+		// so the server's view replaces our optimistic guess.
+		if !m.hasPendingOutgoing(msg.chatGUID, msg.pendingGUID) {
+			return m, nil
+		}
+		m.removePendingOutgoingByGUID(msg.chatGUID, msg.pendingGUID)
+		if m.messageFetchInFlight[msg.chatGUID] {
+			return m, nil
+		}
+		m.messageFetchInFlight[msg.chatGUID] = true
+		return m, prefetchMessagesCmd(m.apiClient, msg.chatGUID)
+
 	case wsConnectSuccessMsg:
 		m.wsConnected = true
-		return m, waitForWSEventCmd(m.wsClient)
+		return m, tea.Batch(
+			waitForWSEventCmd(m.wsClient),
+			waitForWSReconnectCmd(m.wsClient),
+			waitForWSOverflowCmd(m.wsClient),
+		)
+
+	case wsOverflowMsg:
+		// Events buffer overflowed - at least one event was dropped.
+		// Resync every known chat so the missed message surfaces.
+		cmds := []tea.Cmd{waitForWSOverflowCmd(m.wsClient)}
+		if cmd := m.resyncAllChatsCmd(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
+
+	case wsReconnectedMsg:
+		// Socket came back after a drop; any events that arrived while we
+		// were offline are lost. Refetch all chats we know about so the
+		// user never misses incoming messages silently.
+		cmds := []tea.Cmd{waitForWSReconnectCmd(m.wsClient)}
+		if cmd := m.resyncAllChatsCmd(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
 
 	case wsConnectFailMsg:
 		m.err = msg.err
@@ -310,6 +364,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			m.saveMessageCache()
 			m.saveLayoutState()
+			// Block briefly to make sure debounced writes hit disk before
+			// we exit. This is the only intentional sync-to-disk point.
+			m.persist.flushAll()
 			return m, tea.Quit
 
 		// Split operations
@@ -518,7 +575,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						// network confirmation.
 						window.Input.Clear()
 						pending := m.addPendingOutgoing(window.Chat.GUID, text)
-						return m, sendMessageCmd(m.apiClient, window.Chat.GUID, text, window.ID, pending.GUID)
+						return m, tea.Batch(
+							sendMessageCmd(m.apiClient, window.Chat.GUID, text, window.ID, pending.GUID),
+							pendingTimeoutCmd(window.Chat.GUID, pending.GUID),
+						)
 					}
 				}
 				return m, nil
@@ -542,14 +602,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *AppModel) saveUIState() {
-	if err := config.SaveUIState(config.UIState{
+	m.persist.saveUI(config.UIState{
 		ShowTimestamps:  m.showTimestamps,
 		ShowLineNumbers: m.showLineNumbers,
 		ShowChatList:    m.showChatList,
 		ShowSenderNames: m.showSenderNames,
-	}); err != nil {
-		log.Printf("failed to save ui state: %v", err)
-	}
+	})
 }
 
 func (m *AppModel) updateLayout() {
@@ -733,9 +791,7 @@ func (m *AppModel) saveMessageCache() {
 		}
 	}
 
-	if err := config.SaveMessageCache(state); err != nil {
-		log.Printf("failed to save message cache: %v", err)
-	}
+	m.persist.saveMessages(state)
 }
 
 func (m *AppModel) restoreLayoutFromState(chats []models.Chat) bool {
@@ -887,9 +943,7 @@ func (m *AppModel) saveLayoutState() {
 		LeafChatGUIDs:    leafChatGUIDs,
 		FocusedLeafIndex: focusedLeafIndex,
 	}
-	if err := config.SaveLayoutState(state); err != nil {
-		log.Printf("failed to save layout state: %v", err)
-	}
+	m.persist.saveLayout(state)
 }
 
 func (m *AppModel) clearFocusedWindowNewMessageIndicator() tea.Cmd {
@@ -981,6 +1035,24 @@ func (m *AppModel) addPendingOutgoing(chatGUID, text string) models.Message {
 	return pending
 }
 
+// pendingTimeoutCmd fires after pendingOutgoingTimeout. If the optimistic
+// message is still in the pending map by then, we assume the server echo
+// was lost and drop it before refetching the chat.
+func pendingTimeoutCmd(chatGUID, pendingGUID string) tea.Cmd {
+	return tea.Tick(pendingOutgoingTimeout, func(time.Time) tea.Msg {
+		return pendingTimeoutMsg{chatGUID: chatGUID, pendingGUID: pendingGUID}
+	})
+}
+
+func (m *AppModel) hasPendingOutgoing(chatGUID, guid string) bool {
+	for _, p := range m.pendingOutgoing[chatGUID] {
+		if p.GUID == guid {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *AppModel) removePendingOutgoingByGUID(chatGUID, guid string) bool {
 	if strings.TrimSpace(chatGUID) == "" || strings.TrimSpace(guid) == "" {
 		return false
@@ -1014,6 +1086,7 @@ func (m *AppModel) matchAndRemovePendingOutgoing(msg models.Message) {
 
 	body := strings.TrimSpace(msg.Text)
 	matchIdx := -1
+	var matchTime int64
 	for i, p := range pending {
 		if strings.TrimSpace(p.Text) != body {
 			continue
@@ -1023,9 +1096,15 @@ func (m *AppModel) matchAndRemovePendingOutgoing(msg models.Message) {
 		if diff < 0 {
 			diff = -diff
 		}
-		if diff <= 2*60*1000 {
+		if diff > 2*60*1000 {
+			continue
+		}
+		// Prefer the OLDEST matching pending entry so that sending the same
+		// text twice in a row pairs the first server echo with the first
+		// local entry instead of collapsing them.
+		if matchIdx < 0 || p.DateCreated < matchTime {
 			matchIdx = i
-			break
+			matchTime = p.DateCreated
 		}
 	}
 	if matchIdx < 0 {
@@ -1185,6 +1264,65 @@ func waitForWSEventCmd(wsClient *ws.Client) tea.Cmd {
 	}
 }
 
+func waitForWSReconnectCmd(wsClient *ws.Client) tea.Cmd {
+	return func() tea.Msg {
+		_, ok := <-wsClient.Reconnect
+		if !ok {
+			return nil
+		}
+		return wsReconnectedMsg{}
+	}
+}
+
+func waitForWSOverflowCmd(wsClient *ws.Client) tea.Cmd {
+	return func() tea.Msg {
+		_, ok := <-wsClient.Overflow
+		if !ok {
+			return nil
+		}
+		return wsOverflowMsg{}
+	}
+}
+
+// resyncAllChatsCmd forces a fresh API fetch for every chat we already know
+// about (open in a pane or cached). Used after WS reconnect and after an
+// events-buffer overflow so that missed messages surface automatically.
+func (m *AppModel) resyncAllChatsCmd() tea.Cmd {
+	seen := make(map[string]struct{})
+	var cmds []tea.Cmd
+
+	add := func(chatGUID string) {
+		chatGUID = strings.TrimSpace(chatGUID)
+		if chatGUID == "" {
+			return
+		}
+		if _, ok := seen[chatGUID]; ok {
+			return
+		}
+		seen[chatGUID] = struct{}{}
+		if m.messageFetchInFlight[chatGUID] {
+			return
+		}
+		// Force through the TTL gate - this is a resync, not a cache read.
+		m.messageFetchInFlight[chatGUID] = true
+		cmds = append(cmds, prefetchMessagesCmd(m.apiClient, chatGUID))
+	}
+
+	for _, window := range m.windowManager.AllWindows() {
+		if window.Chat != nil {
+			add(window.Chat.GUID)
+		}
+	}
+	for chatGUID := range m.windowManager.CachedMessagesSnapshot() {
+		add(chatGUID)
+	}
+
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
+}
+
 // handleWSEvent processes incoming WebSocket events
 func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 	switch event.Type {
@@ -1216,7 +1354,10 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 			if !m.windowManager.CacheMessage(msg.ChatGUID, msg) {
 				return m, waitForWSEventCmd(m.wsClient)
 			}
-			m.messageFetchedAt[msg.ChatGUID] = time.Now()
+			// Intentionally do NOT refresh messageFetchedAt here. Only real
+			// API fetches bump it so the TTL in shouldRefreshMessages can
+			// still trigger a reconciling refetch and heal any hole that
+			// WS may have left behind.
 			m.saveMessageCache()
 
 			// Update ALL windows showing this chat

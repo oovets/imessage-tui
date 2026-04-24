@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/oovets/imessage-tui/models"
@@ -276,6 +277,8 @@ func (wm *WindowManager) FocusDirection(dir Direction) {
 
 // CacheMessage adds a message to the cache for a chat.
 // Returns true if the message was added, false if it was a duplicate.
+// The message is inserted in chronological order so the cache never goes
+// out of order, even if WS events arrive late or out of sequence.
 func (wm *WindowManager) CacheMessage(chatGUID string, msg models.Message) bool {
 	if msg.GUID != "" {
 		if _, ok := wm.messageCacheGUID[chatGUID]; !ok {
@@ -287,7 +290,18 @@ func (wm *WindowManager) CacheMessage(chatGUID string, msg models.Message) bool 
 		wm.messageCacheGUID[chatGUID][msg.GUID] = struct{}{}
 	}
 
-	wm.messageCache[chatGUID] = append(wm.messageCache[chatGUID], msg)
+	existing := wm.messageCache[chatGUID]
+	if len(existing) == 0 || existing[len(existing)-1].DateCreated <= msg.DateCreated {
+		wm.messageCache[chatGUID] = append(existing, msg)
+		return true
+	}
+	pos := sort.Search(len(existing), func(i int) bool {
+		return existing[i].DateCreated > msg.DateCreated
+	})
+	existing = append(existing, models.Message{})
+	copy(existing[pos+1:], existing[pos:])
+	existing[pos] = msg
+	wm.messageCache[chatGUID] = existing
 	return true
 }
 
@@ -296,8 +310,13 @@ func (wm *WindowManager) GetCachedMessages(chatGUID string) []models.Message {
 	return wm.messageCache[chatGUID]
 }
 
-// SetCachedMessages sets the cached messages for a chat
+// SetCachedMessages sets the cached messages for a chat. The slice is
+// sorted chronologically so downstream readers never have to worry about
+// ordering.
 func (wm *WindowManager) SetCachedMessages(chatGUID string, messages []models.Message) {
+	sort.SliceStable(messages, func(i, j int) bool {
+		return messages[i].DateCreated < messages[j].DateCreated
+	})
 	wm.messageCache[chatGUID] = messages
 	idx := make(map[string]struct{}, len(messages))
 	for _, msg := range messages {

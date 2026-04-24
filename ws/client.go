@@ -16,20 +16,24 @@ import (
 )
 
 type Client struct {
-	baseURL  string
-	password string
-	conn     *websocket.Conn
-	Events   chan models.WSEvent
-	done     chan struct{}
-	mu       sync.Mutex
+	baseURL   string
+	password  string
+	conn      *websocket.Conn
+	Events    chan models.WSEvent
+	Reconnect chan struct{}
+	Overflow  chan struct{}
+	done      chan struct{}
+	mu        sync.Mutex
 }
 
 func NewClient(baseURL, password string) *Client {
 	return &Client{
-		baseURL:  strings.TrimRight(baseURL, "/"),
-		password: password,
-		Events:   make(chan models.WSEvent, 50),
-		done:     make(chan struct{}),
+		baseURL:   strings.TrimRight(baseURL, "/"),
+		password:  password,
+		Events:    make(chan models.WSEvent, 500),
+		Reconnect: make(chan struct{}, 4),
+		Overflow:  make(chan struct{}, 4),
+		done:      make(chan struct{}),
 	}
 }
 
@@ -138,6 +142,12 @@ func (c *Client) readLoop() {
 				c.conn = newConn
 				c.mu.Unlock()
 				log.Printf("[WS] Reconnected successfully")
+				// Notify consumers so they can resync any missed messages
+				// while the socket was down. Non-blocking.
+				select {
+				case c.Reconnect <- struct{}{}:
+				default:
+				}
 				break
 			}
 			continue
@@ -201,8 +211,13 @@ func (c *Client) readLoop() {
 			case <-c.done:
 				return
 			default:
-				// Channel full, drop event
-				log.Printf("[WS] Events channel full, dropping event: %s", eventType)
+				// Channel full - we dropped an event. Signal the consumer
+				// so it can trigger a full resync and self-heal.
+				log.Printf("[WS] Events channel full, dropping event: %s (will request resync)", eventType)
+				select {
+				case c.Overflow <- struct{}{}:
+				default:
+				}
 			}
 
 		default:
