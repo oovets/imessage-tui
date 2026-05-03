@@ -6,6 +6,7 @@ A keyboard-first terminal client for iMessage, powered by a BlueBubbles-compatib
 - Multi-pane conversation layout
 - Fast, low-friction keyboard workflow
 - Local UI and message cache persistence
+- Lightweight footprint: ~18 MB RAM at runtime
 
 Module path:
 
