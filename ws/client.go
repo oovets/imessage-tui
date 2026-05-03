@@ -37,7 +37,6 @@ func NewClient(baseURL, password string) *Client {
 	}
 }
 
-// Connect dials the WebSocket endpoint
 func (c *Client) Connect() error {
 	conn, err := c.dial()
 	if err != nil {
@@ -48,19 +47,16 @@ func (c *Client) Connect() error {
 	c.conn = conn
 	c.mu.Unlock()
 
-	// Start read loop in goroutine
 	go c.readLoop()
 
 	return nil
 }
 
 func (c *Client) dial() (*websocket.Conn, error) {
-	// Convert https to wss, http to ws
 	wsURL := c.baseURL
 	wsURL = strings.ReplaceAll(wsURL, "https://", "wss://")
 	wsURL = strings.ReplaceAll(wsURL, "http://", "ws://")
 
-	// Append Socket.IO endpoint with EIO=4 for raw WebSocket transport
 	u, err := url.Parse(fmt.Sprintf("%s/socket.io/?EIO=4&transport=websocket&guid=%s", wsURL, url.QueryEscape(c.password)))
 	if err != nil {
 		return nil, err
@@ -77,13 +73,11 @@ func (c *Client) dial() (*websocket.Conn, error) {
 		},
 	}
 
-	log.Printf("[WS] Connecting to %s", u.String())
 	conn, _, err := dialer.Dial(u.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("websocket dial failed: %v", err)
 	}
 
-	log.Printf("[WS] Connected successfully")
 	return conn, nil
 }
 
@@ -95,7 +89,6 @@ func (c *Client) sendPong() {
 	}
 }
 
-// readLoop handles incoming WebSocket messages with auto-reconnect
 func (c *Client) readLoop() {
 	for {
 		c.mu.Lock()
@@ -110,14 +103,12 @@ func (c *Client) readLoop() {
 		if err != nil {
 			log.Printf("[WS] Read error: %v, attempting reconnect...", err)
 
-			// Check if we should stop
 			select {
 			case <-c.done:
 				return
 			default:
 			}
 
-			// Try to reconnect with backoff
 			for attempt := 1; attempt <= 10; attempt++ {
 				select {
 				case <-c.done:
@@ -129,7 +120,6 @@ func (c *Client) readLoop() {
 				if wait > 30*time.Second {
 					wait = 30 * time.Second
 				}
-				log.Printf("[WS] Reconnect attempt %d in %v...", attempt, wait)
 				time.Sleep(wait)
 
 				newConn, err := c.dial()
@@ -141,9 +131,6 @@ func (c *Client) readLoop() {
 				c.mu.Lock()
 				c.conn = newConn
 				c.mu.Unlock()
-				log.Printf("[WS] Reconnected successfully")
-				// Notify consumers so they can resync any missed messages
-				// while the socket was down. Non-blocking.
 				select {
 				case c.Reconnect <- struct{}{}:
 				default:
@@ -157,31 +144,22 @@ func (c *Client) readLoop() {
 
 		switch {
 		case strings.HasPrefix(msg, "0"):
-			// Socket.IO open frame - contains pingInterval/pingTimeout
-			// We must respond with "40" to connect to the default namespace
-			log.Printf("[WS] Received handshake frame, sending namespace connect")
 			c.mu.Lock()
 			c.conn.WriteMessage(websocket.TextMessage, []byte("40"))
 			c.mu.Unlock()
 			continue
 
 		case strings.HasPrefix(msg, "40"):
-			// Socket.IO connect confirmation for namespace
-			log.Printf("[WS] Socket.IO namespace connected")
 			continue
 
 		case msg == "2":
-			// Socket.IO ping - respond with pong
-			log.Printf("[WS] Ping received, sending pong")
 			c.sendPong()
 			continue
 
 		case msg == "3":
-			// Socket.IO pong response, ignore
 			continue
 
 		case strings.HasPrefix(msg, "42"):
-			// Socket.IO event frame: 42[eventName, eventData]
 			payload := msg[2:]
 
 			var arr []json.RawMessage
@@ -204,15 +182,11 @@ func (c *Client) readLoop() {
 				eventData = arr[1]
 			}
 
-			log.Printf("[WS] Event received: %s", eventType)
-
 			select {
 			case c.Events <- models.WSEvent{Type: eventType, Data: eventData}:
 			case <-c.done:
 				return
 			default:
-				// Channel full - we dropped an event. Signal the consumer
-				// so it can trigger a full resync and self-heal.
 				log.Printf("[WS] Events channel full, dropping event: %s (will request resync)", eventType)
 				select {
 				case c.Overflow <- struct{}{}:
@@ -221,13 +195,11 @@ func (c *Client) readLoop() {
 			}
 
 		default:
-			log.Printf("[WS] Unknown frame: %.50s", msg)
 			continue
 		}
 	}
 }
 
-// Close closes the WebSocket connection
 func (c *Client) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

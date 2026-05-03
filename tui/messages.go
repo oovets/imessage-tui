@@ -14,7 +14,7 @@ import (
 type MessagesModel struct {
 	viewport        viewport.Model
 	messages        []models.Message
-	messageGUIDs    map[string]struct{}
+	messageKeys     map[string]struct{}
 	unseenGUIDs     map[string]struct{}
 	chatName        string
 	width           int
@@ -31,7 +31,7 @@ func NewMessagesModel() MessagesModel {
 
 	return MessagesModel{
 		viewport:        vp,
-		messageGUIDs:    make(map[string]struct{}),
+		messageKeys:     make(map[string]struct{}),
 		unseenGUIDs:     make(map[string]struct{}),
 		showTimestamps:  true,
 		showLineNumbers: true,
@@ -42,6 +42,7 @@ func NewMessagesModel() MessagesModel {
 
 func (m *MessagesModel) SetMessages(messages []models.Message) {
 	prevUnseen := m.unseenGUIDs
+	messages = dedupeMessages(messages)
 	// Always keep the list chronological so the newest message is last and
 	// stick-to-bottom points at the most recent entry, regardless of how
 	// callers assembled the slice (API, cache, merged sources, ...).
@@ -49,7 +50,7 @@ func (m *MessagesModel) SetMessages(messages []models.Message) {
 		return messages[i].DateCreated < messages[j].DateCreated
 	})
 	m.messages = messages
-	m.rebuildGUIDIndex()
+	m.rebuildMessageIndex()
 	m.unseenGUIDs = make(map[string]struct{})
 	for _, msg := range messages {
 		if msg.GUID == "" {
@@ -62,13 +63,16 @@ func (m *MessagesModel) SetMessages(messages []models.Message) {
 	m.renderContent()
 }
 
-// AppendMessage adds a single message to the list, deduplicating by GUID and keeping chronological order.
+// AppendMessage adds a single message to the list, deduplicating by message identity and keeping chronological order.
 func (m *MessagesModel) AppendMessage(msg models.Message) {
-	if msg.GUID != "" {
-		if _, exists := m.messageGUIDs[msg.GUID]; exists {
+	keys := messageDedupeKeys(msg)
+	for _, key := range keys {
+		if _, exists := m.messageKeys[key]; exists {
 			return
 		}
-		m.messageGUIDs[msg.GUID] = struct{}{}
+	}
+	for _, key := range keys {
+		m.messageKeys[key] = struct{}{}
 	}
 
 	if len(m.messages) == 0 || m.messages[len(m.messages)-1].DateCreated <= msg.DateCreated {
@@ -96,7 +100,7 @@ func (m *MessagesModel) RemoveMessageByGUID(guid string) bool {
 			continue
 		}
 		m.messages = append(m.messages[:i], m.messages[i+1:]...)
-		m.rebuildGUIDIndex()
+		m.rebuildMessageIndex()
 		m.renderContent()
 		return true
 	}
@@ -264,11 +268,11 @@ func (m *MessagesModel) renderContent() {
 	}
 }
 
-func (m *MessagesModel) rebuildGUIDIndex() {
-	m.messageGUIDs = make(map[string]struct{}, len(m.messages))
+func (m *MessagesModel) rebuildMessageIndex() {
+	m.messageKeys = make(map[string]struct{}, len(m.messages)*2)
 	for _, msg := range m.messages {
-		if msg.GUID != "" {
-			m.messageGUIDs[msg.GUID] = struct{}{}
+		for _, key := range messageDedupeKeys(msg) {
+			m.messageKeys[key] = struct{}{}
 		}
 	}
 }

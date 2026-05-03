@@ -4,8 +4,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/oovets/imessage-tui/models"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/oovets/imessage-tui/models"
 )
 
 // Direction for focus navigation
@@ -20,10 +20,10 @@ const (
 
 // WindowManager manages multiple chat windows and their layout
 type WindowManager struct {
-	root           *LayoutNode
-	windows        map[WindowID]*ChatWindow
-	nextID         WindowID
-	focusedWindow  WindowID
+	root            *LayoutNode
+	windows         map[WindowID]*ChatWindow
+	nextID          WindowID
+	focusedWindow   WindowID
 	maxWindows      int
 	showTimestamps  bool
 	showLineNumbers bool
@@ -31,7 +31,7 @@ type WindowManager struct {
 
 	// Message cache per chat GUID
 	messageCache     map[string][]models.Message
-	messageCacheGUID map[string]map[string]struct{}
+	messageCacheKeys map[string]map[string]struct{}
 
 	// Available dimensions
 	width, height int
@@ -44,7 +44,7 @@ func NewWindowManager() *WindowManager {
 		nextID:           1,
 		maxWindows:       4,
 		messageCache:     make(map[string][]models.Message),
-		messageCacheGUID: make(map[string]map[string]struct{}),
+		messageCacheKeys: make(map[string]map[string]struct{}),
 		showTimestamps:   true,
 		showLineNumbers:  true,
 		showSenderNames:  true,
@@ -280,14 +280,19 @@ func (wm *WindowManager) FocusDirection(dir Direction) {
 // The message is inserted in chronological order so the cache never goes
 // out of order, even if WS events arrive late or out of sequence.
 func (wm *WindowManager) CacheMessage(chatGUID string, msg models.Message) bool {
-	if msg.GUID != "" {
-		if _, ok := wm.messageCacheGUID[chatGUID]; !ok {
-			wm.messageCacheGUID[chatGUID] = make(map[string]struct{})
+	keys := messageDedupeKeys(msg)
+	if len(keys) > 0 {
+		if _, ok := wm.messageCacheKeys[chatGUID]; !ok {
+			wm.messageCacheKeys[chatGUID] = make(map[string]struct{})
 		}
-		if _, exists := wm.messageCacheGUID[chatGUID][msg.GUID]; exists {
-			return false
+		for _, key := range keys {
+			if _, exists := wm.messageCacheKeys[chatGUID][key]; exists {
+				return false
+			}
 		}
-		wm.messageCacheGUID[chatGUID][msg.GUID] = struct{}{}
+		for _, key := range keys {
+			wm.messageCacheKeys[chatGUID][key] = struct{}{}
+		}
 	}
 
 	existing := wm.messageCache[chatGUID]
@@ -314,17 +319,18 @@ func (wm *WindowManager) GetCachedMessages(chatGUID string) []models.Message {
 // sorted chronologically so downstream readers never have to worry about
 // ordering.
 func (wm *WindowManager) SetCachedMessages(chatGUID string, messages []models.Message) {
+	messages = dedupeMessages(messages)
 	sort.SliceStable(messages, func(i, j int) bool {
 		return messages[i].DateCreated < messages[j].DateCreated
 	})
 	wm.messageCache[chatGUID] = messages
-	idx := make(map[string]struct{}, len(messages))
+	idx := make(map[string]struct{}, len(messages)*2)
 	for _, msg := range messages {
-		if msg.GUID != "" {
-			idx[msg.GUID] = struct{}{}
+		for _, key := range messageDedupeKeys(msg) {
+			idx[key] = struct{}{}
 		}
 	}
-	wm.messageCacheGUID[chatGUID] = idx
+	wm.messageCacheKeys[chatGUID] = idx
 }
 
 // CachedMessagesSnapshot returns a shallow copy of the cached messages map.

@@ -56,6 +56,11 @@ func (m *ChatListModel) SelectChatByGUID(chatGUID string) bool {
 	return m.list.SelectByGUID(chatGUID)
 }
 
+// NewMessageCount returns how many chats currently have a new message marker.
+func (m *ChatListModel) NewMessageCount() int {
+	return m.list.NewMessageCount()
+}
+
 func (m ChatListModel) Update(msg tea.Msg) (ChatListModel, tea.Cmd) {
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)

@@ -1,6 +1,11 @@
 # iMessage TUI
 
-iMessage TUI is a terminal iMessage client for a BlueBubbles-compatible server.
+A keyboard-first terminal client for iMessage, powered by a BlueBubbles-compatible server.
+
+- Real-time message updates over WebSocket
+- Multi-pane conversation layout
+- Fast, low-friction keyboard workflow
+- Local UI and message cache persistence
 
 Module path:
 
@@ -8,47 +13,40 @@ Module path:
 github.com/oovets/imessage-tui
 ```
 
-This repository is standalone. It contains its own API client, config loading, models, and WebSocket code.
+## Why This Project
 
-## What The App Does
+iMessage TUI is built for engineers and power users who want native-feeling message throughput in a terminal environment. It focuses on reliability, predictable keybindings, and clean split-pane navigation instead of visual overhead.
 
-The TUI connects to your server, loads chats and messages over HTTP, and stays updated through a live WebSocket connection.
+## Feature Set
 
-It is optimized for keyboard-driven messaging:
+- Chat list with new-message indicators and activity-based ordering
+- Real-time updates via Socket.IO/WebSocket
+- Split windows (horizontal and vertical), up to 4 concurrent panes
+- Per-pane chat focus and unread state handling
+- Optional message timestamps, line numbers, and sender labels
+- Attachment-aware message fetch and image open helper (`/img #<n>`)
+- Debounced persistence for layout, UI state, and message cache
 
-- browse chats in the list view
-- open conversations in split windows
-- follow live message activity
-- send messages directly from the terminal
-- keep multiple conversations visible at once
+When the chat sidebar is hidden, new incoming messages are surfaced in the top status bar.
 
-## Features
-
-- Browse and read iMessage conversations with contact names
-- Real-time updates via WebSocket
-- Unread indicators and chat reordering on new activity
-- Split-window conversation layout
-- Clickable links in messages
-- Keyboard-driven navigation and messaging
-
-## Prerequisites
+## Requirements
 
 - Go 1.24+
-- A running compatible server on macOS
+- A running BlueBubbles-compatible server
 - Network access to the server
 
 ## Configuration
 
-Set environment variables or create a config file.
+You can configure the app through environment variables or config file.
 
-### Environment Variables
+### Environment variables
 
 ```bash
 export BB_SERVER_URL="https://your-server:1234"
 export BB_PASSWORD="your-api-password"
 ```
 
-### Config File
+### Config file
 
 ```text
 ~/.config/imessage-tui/imessage.yaml
@@ -63,20 +61,17 @@ message_limit: 50
 chat_limit: 50
 ```
 
-### Credential Storage
+### Credential behavior
 
-- Preferred: password is stored in the OS keyring
-- Fallback: password is stored in the config file
-- `BB_SERVER_URL` and `BB_PASSWORD` override stored config
+- Preferred storage: OS keyring
+- Fallback storage: config file
+- `BB_SERVER_URL` and `BB_PASSWORD` override stored values
 
 ## Build
 
 ```bash
-go version
 go build -o imessage-tui .
 ```
-
-If `go version` reports an older distro-provided toolchain such as Go 1.13, the build will fail with errors like `cannot load io/fs`. Install Go 1.24+ and ensure that newer binary is first on your `PATH`.
 
 ## Run
 
@@ -84,79 +79,82 @@ If `go version` reports an older distro-provided toolchain such as Go 1.13, the 
 ./imessage-tui
 ```
 
-Logs are written to `~/.imessage-tui.log`.
+Logs are written to:
 
-## Keyboard Shortcuts
+```text
+~/.imessage-tui.log
+```
+
+## Keybindings
 
 ### Navigation
 
 | Key | Action |
 |-----|--------|
-| `Tab` | Toggle focus between chat list and current window |
-| `Escape` | Return to the chat list |
-| `← / →` | Move between windows |
-| `Ctrl+↑ / Ctrl+↓` | Move to the window above or below |
-| `↑ / ↓` or `k / j` | Navigate chats or scroll messages |
+| `Tab` | Toggle focus between chat list and active window |
+| `Escape` | Move focus to chat list |
+| `Left` / `Right` | Move focus between windows |
+| `Ctrl+Up` / `Ctrl+Down` | Move focus vertically between windows |
+| `Up` / `Down` or `k` / `j` | Navigate chats or scroll messages |
 | `g` | Jump to top of chat list |
 | `G` | Jump to bottom of chat list |
-| `Enter` | Open selected chat or send from the input |
-| `Shift+Enter` | Insert a newline in the input |
+| `Enter` | Open selected chat or send message |
+| `Shift+Enter` | Insert newline in input |
 
-### Window Management
+### Window management
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+F` | Split the focused window horizontally |
-| `Ctrl+G` | Split the focused window vertically |
-| `Ctrl+W` | Close the focused window |
+| `Ctrl+F` | Split focused window horizontally |
+| `Ctrl+G` | Split focused window vertically |
+| `Ctrl+W` | Close focused window |
 
-Up to 4 windows can be open at once.
-
-### Toggles
+### Display toggles
 
 | Key | Action |
 |-----|--------|
 | `Ctrl+S` | Toggle chat list visibility |
-| `Ctrl+T` | Toggle message timestamps |
-| `Ctrl+N` | Toggle message line numbers |
-| `Ctrl+B` | Toggle sender names (show text only when off) |
-| `Alt+M` | Toggle sender names (alternative binding) |
+| `Ctrl+T` | Toggle timestamps |
+| `Ctrl+N` | Toggle line numbers |
+| `Ctrl+B` | Toggle sender names |
+| `Alt+M` | Alternative sender-name toggle |
+| `Ctrl+M` | Sender-name toggle in terminals that distinguish it from Enter |
 | `q` / `Ctrl+C` | Quit |
+
+## Command Input
+
+- `/img #<message-number>` opens the first image attachment from that rendered message row.
 
 ## Architecture
 
 ```text
-main.go             entry point
-api/                REST client
-config/             config loading and credential storage
-models/             chat and message data structures
-ws/                 WebSocket client for real-time updates
-tui/                Bubble Tea UI
+main.go             Program startup and Bubble Tea runtime
+api/                HTTP client for chats, messages, contacts, attachments
+config/             Config loading, credential handling, persisted UI/layout state
+models/             Domain models and WebSocket event envelope
+tui/                Bubble Tea models, split layout, input and rendering
+ws/                 Socket.IO WebSocket client with reconnect and overflow signaling
 ```
 
 ## Troubleshooting
 
-### Connection fails with "certificate signed by unknown authority"
+### TLS/certificate issues
 
-Some server setups use self-signed HTTPS certificates. This client is designed to work in that environment.
+If your server uses a self-signed certificate, verify the endpoint is reachable and credentials are correct.
 
-### Contact names are missing
+### Missing contacts or names
 
-Make sure contacts are available in the server itself.
+Ensure contacts are synced and available in your BlueBubbles environment.
 
-### No chats appear
+### No chats or stale updates
 
-Verify that the server has synced your iMessages and that your credentials are correct.
+- Verify server URL and password
+- Verify WebSocket connectivity and firewall rules
+- Restart the client to force full state reload
 
-### Messages do not update in real time
+### Build fails with modern stdlib errors
 
-Check WebSocket connectivity and firewall rules between the client and the server.
-
-### Build fails with `cannot load io/fs`
-
-This project depends on modern Go standard library packages and language features. That error usually means your shell is picking up an old Go toolchain.
-
-Verify the active binary:
+If you see errors like `cannot load io/fs`, your shell is likely picking an old Go toolchain. Confirm:
 
 ```bash
 which go
@@ -164,4 +162,4 @@ go version
 go env GOROOT
 ```
 
-If those point to an older install such as `/usr/lib/go-1.13`, install Go 1.24+ and update your `PATH` so the newer binary is used for builds.
+Then ensure Go 1.24+ is first on `PATH`.

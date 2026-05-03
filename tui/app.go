@@ -15,6 +15,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/google/uuid"
 	"github.com/oovets/imessage-tui/api"
 	"github.com/oovets/imessage-tui/config"
 	"github.com/oovets/imessage-tui/models"
@@ -611,8 +612,13 @@ func (m *AppModel) saveUIState() {
 }
 
 func (m *AppModel) updateLayout() {
+	contentHeight := m.height - 1 // reserve one row for status bar
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+
 	// Calculate chat list dimensions (no borders, just padding)
-	chatListContentHeight := m.height
+	chatListContentHeight := contentHeight
 	chatListWidth := 0
 	if m.showChatList {
 		chatListWidth = ChatListWidth
@@ -627,7 +633,7 @@ func (m *AppModel) updateLayout() {
 	if windowsWidth < 1 {
 		windowsWidth = 1
 	}
-	windowsHeight := m.height
+	windowsHeight := contentHeight
 	if windowsHeight < 1 {
 		windowsHeight = 1
 	}
@@ -668,8 +674,27 @@ func (m AppModel) View() string {
 		)
 	}
 
-	// Render status bar
-	return content
+	statusBar := m.statusBarView()
+	return lipgloss.JoinVertical(lipgloss.Left, statusBar, content)
+}
+
+func (m AppModel) statusBarView() string {
+	newMessageCount := m.chatList.NewMessageCount()
+	parts := []string{"iMessage TUI"}
+
+	if !m.showChatList && newMessageCount > 0 {
+		dot := lipgloss.NewStyle().
+			Foreground(ColorChatListNewMessage).
+			Render("●")
+		label := "new message"
+		if newMessageCount > 1 {
+			label = "new messages"
+		}
+		parts = append(parts, fmt.Sprintf("%s %d %s", dot, newMessageCount, label))
+	}
+
+	status := strings.Join(parts, "  ")
+	return StatusBarStyle.Width(m.width).Render(status)
 }
 
 // Command constructors
@@ -1000,7 +1025,7 @@ func (m *AppModel) prefetchTopChatsCmd(chats []models.Chat, skipGUID string) tea
 
 func sendMessageCmd(client *api.Client, chatGUID, text string, windowID WindowID, pendingGUID string) tea.Cmd {
 	return func() tea.Msg {
-		if err := client.SendMessage(chatGUID, text, ""); err != nil {
+		if err := client.SendMessageWithTempGUID(chatGUID, text, "", pendingGUID); err != nil {
 			return sendErrMsg{err: err, chatGUID: chatGUID, pendingGUID: pendingGUID}
 		}
 		return sendSuccessMsg{windowID: windowID}
@@ -1021,7 +1046,7 @@ func markChatReadCmd(client *api.Client, chatGUID string) tea.Cmd {
 
 func (m *AppModel) addPendingOutgoing(chatGUID, text string) models.Message {
 	pending := models.Message{
-		GUID:        fmt.Sprintf("local-%d", time.Now().UnixNano()),
+		GUID:        uuid.New().String(),
 		Text:        text,
 		IsFromMe:    true,
 		DateCreated: time.Now().UnixMilli(),
@@ -1347,10 +1372,15 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 		}
 
 		if msg.ChatGUID != "" {
+			if len(messageDedupeKeys(msg)) == 0 {
+				log.Printf("ignoring websocket new-message without usable identity for chat %s", msg.ChatGUID)
+				return m, waitForWSEventCmd(m.wsClient)
+			}
+
 			// Replace a local optimistic echo with the server-confirmed message.
 			m.matchAndRemovePendingOutgoing(msg)
 
-			// Cache the message (ignore duplicate WS events by GUID).
+			// Cache the message (ignore duplicate WS events by message identity).
 			if !m.windowManager.CacheMessage(msg.ChatGUID, msg) {
 				return m, waitForWSEventCmd(m.wsClient)
 			}

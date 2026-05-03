@@ -4,9 +4,9 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/oovets/imessage-tui/models"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/oovets/imessage-tui/models"
 )
 
 // stripEmojis removes emoji and symbol characters from a string using an
@@ -141,6 +141,17 @@ func (m *SimpleListModel) ClearNewMessage(chatGUID string) {
 			return
 		}
 	}
+}
+
+// NewMessageCount returns number of chats currently marked with new messages.
+func (m *SimpleListModel) NewMessageCount() int {
+	count := 0
+	for _, chat := range m.items {
+		if chat.HasNewMessage {
+			count++
+		}
+	}
+	return count
 }
 
 func (m SimpleListModel) Update(msg tea.Msg) (SimpleListModel, tea.Cmd) {
