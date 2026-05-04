@@ -5,8 +5,11 @@ import (
 )
 
 const (
-	ChatListWidth = 25  // fixed width for left panel
-	InputHeight   = 3   // input box + borders
+	DefaultChatListWidth = 25 // default width for left panel
+	MinChatListWidth     = 10
+	MaxChatListWidth     = 80
+	ChatListResizeStep   = 2
+	InputHeight          = 3 // input box + borders
 
 	// Window dividers
 	DividerVertical   = "│"
@@ -91,7 +94,7 @@ var (
 
 // CalculateLayout returns the optimal dimensions for each panel
 func CalculateLayout(screenWidth, screenHeight int) (chatListWidth, messagesWidth, messagesHeight, inputHeight int) {
-	chatListWidth = ChatListWidth
+	chatListWidth = DefaultChatListWidth
 	messagesWidth = screenWidth - chatListWidth - 2 // -2 for padding
 	messagesHeight = screenHeight - InputHeight - 1 // -1 status bar
 	inputHeight = InputHeight

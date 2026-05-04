@@ -104,6 +104,7 @@ type AppModel struct {
 	showLineNumbers bool
 	showChatList    bool
 	showSenderNames bool
+	chatListWidth   int
 
 	messageFetchInFlight map[string]bool
 	messageFetchedAt     map[string]time.Time
@@ -137,6 +138,7 @@ func NewAppModel(client *api.Client, wsClient *ws.Client) AppModel {
 		showLineNumbers:      ui.ShowLineNumbers,
 		showChatList:         ui.ShowChatList,
 		showSenderNames:      ui.ShowSenderNames,
+		chatListWidth:        clampChatListWidth(ui.ChatListWidth),
 		messageFetchInFlight: make(map[string]bool),
 		messageFetchedAt:     make(map[string]time.Time),
 		pendingOutgoing:      make(map[string][]models.Message),
@@ -325,7 +327,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Only handle left-click for focus/navigation; let other events
 		// (scroll wheel) fall through to the focused component.
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
-			if m.showChatList && msg.X < ChatListWidth {
+			if m.showChatList && msg.X < m.chatListWidth {
 				// Click in chat list — focus it and move cursor to clicked item
 				if m.focused == focusWindow {
 					if window := m.windowManager.FocusedWindow(); window != nil {
@@ -338,7 +340,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Click in windows area — find and focus the clicked window
 				relX := msg.X
 				if m.showChatList {
-					relX = msg.X - ChatListWidth
+					relX = msg.X - m.chatListWidth
 				}
 				for _, window := range m.windowManager.AllWindows() {
 					if relX >= window.x && relX < window.x+window.width &&
@@ -498,6 +500,22 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case "ctrl+left":
+			if m.showChatList {
+				m.chatListWidth = clampChatListWidth(m.chatListWidth - ChatListResizeStep)
+				m.updateLayout()
+				m.saveUIState()
+			}
+			return m, nil
+
+		case "ctrl+right":
+			if m.showChatList {
+				m.chatListWidth = clampChatListWidth(m.chatListWidth + ChatListResizeStep)
+				m.updateLayout()
+				m.saveUIState()
+			}
+			return m, nil
+
 		case "ctrl+up":
 			if m.focused == focusWindow {
 				before := m.windowManager.FocusedWindow()
@@ -608,7 +626,21 @@ func (m *AppModel) saveUIState() {
 		ShowLineNumbers: m.showLineNumbers,
 		ShowChatList:    m.showChatList,
 		ShowSenderNames: m.showSenderNames,
+		ChatListWidth:   m.chatListWidth,
 	})
+}
+
+func clampChatListWidth(w int) int {
+	if w <= 0 {
+		return DefaultChatListWidth
+	}
+	if w < MinChatListWidth {
+		return MinChatListWidth
+	}
+	if w > MaxChatListWidth {
+		return MaxChatListWidth
+	}
+	return w
 }
 
 func (m *AppModel) updateLayout() {
@@ -621,14 +653,14 @@ func (m *AppModel) updateLayout() {
 	chatListContentHeight := contentHeight
 	chatListWidth := 0
 	if m.showChatList {
-		chatListWidth = ChatListWidth
+		chatListWidth = m.chatListWidth
 	}
 	m.chatList.SetSize(chatListWidth, chatListContentHeight)
 
 	// Calculate window area (everything to the right of chat list)
 	windowsWidth := m.width - 2 // -2 for padding
 	if m.showChatList {
-		windowsWidth -= ChatListWidth
+		windowsWidth -= m.chatListWidth
 	}
 	if windowsWidth < 1 {
 		windowsWidth = 1
@@ -655,7 +687,7 @@ func (m AppModel) View() string {
 		}
 		panelHeight := m.height
 		chatPanel = chatListStyle.
-			Width(ChatListWidth).
+			Width(m.chatListWidth).
 			Height(panelHeight).
 			MaxHeight(panelHeight).
 			Render(m.chatList.View())
