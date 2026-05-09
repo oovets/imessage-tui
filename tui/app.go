@@ -22,7 +22,9 @@ import (
 	"github.com/oovets/imessage-tui/ws"
 )
 
-const initialMessageFetchLimit = 50
+const defaultMessageFetchLimit = 50
+const defaultChatFetchLimit = 50
+const defaultPollInterval = 10 * time.Second
 const messageCacheRefreshTTL = 20 * time.Second
 const initialPrefetchChatCount = 5
 
@@ -62,7 +64,9 @@ type (
 	wsConnectSuccessMsg struct{}
 	wsConnectFailMsg    struct{ err error }
 	wsReconnectedMsg    struct{}
+	wsDisconnectedMsg   struct{}
 	wsOverflowMsg       struct{}
+	refreshTickMsg      struct{}
 	markReadSuccessMsg  struct{ chatGUID string }
 	markReadErrMsg      struct {
 		chatGUID string
@@ -100,11 +104,15 @@ type AppModel struct {
 	// Debug
 	lastKey string
 
-	showTimestamps  bool
-	showLineNumbers bool
-	showChatList    bool
-	showSenderNames bool
-	chatListWidth   int
+	showTimestamps   bool
+	showLineNumbers  bool
+	showChatList     bool
+	showSenderNames  bool
+	showPaneDividers bool
+	chatListWidth    int
+	messageLimit     int
+	chatLimit        int
+	pollInterval     time.Duration
 
 	messageFetchInFlight map[string]bool
 	messageFetchedAt     map[string]time.Time
@@ -121,11 +129,33 @@ type AppModel struct {
 }
 
 func NewAppModel(client *api.Client, wsClient *ws.Client) AppModel {
+	return NewAppModelWithConfig(client, wsClient, nil)
+}
+
+func NewAppModelWithConfig(client *api.Client, wsClient *ws.Client, cfg *config.Config) AppModel {
 	ui := config.LoadUIState()
+	messageLimit := defaultMessageFetchLimit
+	chatLimit := defaultChatFetchLimit
+	pollInterval := defaultPollInterval
+	if cfg != nil {
+		if cfg.MessageLimit > 0 {
+			messageLimit = cfg.MessageLimit
+		}
+		if cfg.ChatLimit > 0 {
+			chatLimit = cfg.ChatLimit
+		}
+		if cfg.PollIntervalSec > 0 {
+			pollInterval = time.Duration(cfg.PollIntervalSec) * time.Second
+		} else {
+			pollInterval = 0
+		}
+	}
+
 	wm := NewWindowManager()
 	wm.SetShowTimestamps(ui.ShowTimestamps)
 	wm.SetShowLineNumbers(ui.ShowLineNumbers)
 	wm.SetShowSenderNames(ui.ShowSenderNames)
+	wm.SetShowPaneDividers(ui.ShowPaneDividers)
 	app := AppModel{
 		chatList:             NewChatListModel(),
 		windowManager:        wm,
@@ -138,7 +168,11 @@ func NewAppModel(client *api.Client, wsClient *ws.Client) AppModel {
 		showLineNumbers:      ui.ShowLineNumbers,
 		showChatList:         ui.ShowChatList,
 		showSenderNames:      ui.ShowSenderNames,
+		showPaneDividers:     ui.ShowPaneDividers,
 		chatListWidth:        clampChatListWidth(ui.ChatListWidth),
+		messageLimit:         messageLimit,
+		chatLimit:            chatLimit,
+		pollInterval:         pollInterval,
 		messageFetchInFlight: make(map[string]bool),
 		messageFetchedAt:     make(map[string]time.Time),
 		pendingOutgoing:      make(map[string][]models.Message),
@@ -154,12 +188,15 @@ func NewAppModel(client *api.Client, wsClient *ws.Client) AppModel {
 
 func (m AppModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{
-		loadChatsCmd(m.apiClient),
+		loadChatsCmd(m.apiClient, m.chatLimit),
 	}
 
 	// Try to connect WebSocket for real-time updates
 	if m.wsClient != nil {
 		cmds = append(cmds, connectWSCmd(m.wsClient))
+	}
+	if m.pollInterval > 0 {
+		cmds = append(cmds, refreshTickCmd(m.pollInterval))
 	}
 
 	return tea.Batch(cmds...)
@@ -268,15 +305,20 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.messageFetchInFlight[msg.chatGUID] = true
-		return m, prefetchMessagesCmd(m.apiClient, msg.chatGUID)
+		return m, prefetchMessagesCmd(m.apiClient, msg.chatGUID, m.messageLimit)
 
 	case wsConnectSuccessMsg:
 		m.wsConnected = true
 		return m, tea.Batch(
 			waitForWSEventCmd(m.wsClient),
 			waitForWSReconnectCmd(m.wsClient),
+			waitForWSDisconnectCmd(m.wsClient),
 			waitForWSOverflowCmd(m.wsClient),
 		)
+
+	case wsDisconnectedMsg:
+		m.wsConnected = false
+		return m, waitForWSDisconnectCmd(m.wsClient)
 
 	case wsOverflowMsg:
 		// Events buffer overflowed - at least one event was dropped.
@@ -291,6 +333,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Socket came back after a drop; any events that arrived while we
 		// were offline are lost. Refetch all chats we know about so the
 		// user never misses incoming messages silently.
+		m.wsConnected = true
 		cmds := []tea.Cmd{waitForWSReconnectCmd(m.wsClient)}
 		if cmd := m.resyncAllChatsCmd(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -298,6 +341,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case wsConnectFailMsg:
+		m.wsConnected = false
 		m.err = msg.err
 		return m, nil
 
@@ -315,6 +359,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		log.Printf("mark chat read failed for %s: %v", msg.chatGUID, msg.err)
 		return m, nil
+
+	case refreshTickMsg:
+		m.lastRefreshTime = time.Now()
+		cmds := []tea.Cmd{refreshTickCmd(m.pollInterval)}
+		if cmd := m.refreshOpenChatsCmd(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
 
 	case wsEventMsg:
 		return m.handleWSEvent(models.WSEvent(msg))
@@ -432,6 +484,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// When disabled, rows show only IN/OUT direction + text.
 			m.showSenderNames = !m.showSenderNames
 			m.windowManager.SetShowSenderNames(m.showSenderNames)
+			m.saveUIState()
+			return m, nil
+
+		case "ctrl+e":
+			// Toggle pane dividers between split windows.
+			m.showPaneDividers = !m.showPaneDividers
+			m.windowManager.SetShowPaneDividers(m.showPaneDividers)
 			m.saveUIState()
 			return m, nil
 
@@ -622,11 +681,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *AppModel) saveUIState() {
 	m.persist.saveUI(config.UIState{
-		ShowTimestamps:  m.showTimestamps,
-		ShowLineNumbers: m.showLineNumbers,
-		ShowChatList:    m.showChatList,
-		ShowSenderNames: m.showSenderNames,
-		ChatListWidth:   m.chatListWidth,
+		ShowTimestamps:   m.showTimestamps,
+		ShowLineNumbers:  m.showLineNumbers,
+		ShowChatList:     m.showChatList,
+		ShowSenderNames:  m.showSenderNames,
+		ShowPaneDividers: m.showPaneDividers,
+		ChatListWidth:    m.chatListWidth,
 	})
 }
 
@@ -678,14 +738,19 @@ func (m AppModel) View() string {
 		return "Loading..."
 	}
 
-	// Render chat list panel
+	// Render chat list panel. Reserve one row for the status bar so the
+	// total frame height stays at m.height — otherwise the alt-screen
+	// scrolls and the status row gets clipped off the top.
 	chatPanel := ""
 	if m.showChatList {
 		chatListStyle := PanelStyle
 		if m.focused == focusChatList {
 			chatListStyle = ActivePanelStyle
 		}
-		panelHeight := m.height
+		panelHeight := m.height - 1
+		if panelHeight < 1 {
+			panelHeight = 1
+		}
 		chatPanel = chatListStyle.
 			Width(m.chatListWidth).
 			Height(panelHeight).
@@ -711,29 +776,39 @@ func (m AppModel) View() string {
 }
 
 func (m AppModel) statusBarView() string {
-	newMessageCount := m.chatList.NewMessageCount()
-	parts := []string{"iMessage TUI"}
+	connColor := ColorConnectionDown
+	if m.wsConnected {
+		connColor = ColorConnectionUp
+	}
+	dot := lipgloss.NewStyle().Foreground(connColor).Bold(true).Render("●")
 
+	parts := []string{dot}
+
+	newMessageCount := m.chatList.NewMessageCount()
 	if !m.showChatList && newMessageCount > 0 {
-		dot := lipgloss.NewStyle().
+		newDot := lipgloss.NewStyle().
 			Foreground(ColorChatListNewMessage).
 			Render("●")
 		label := "new message"
 		if newMessageCount > 1 {
 			label = "new messages"
 		}
-		parts = append(parts, fmt.Sprintf("%s %d %s", dot, newMessageCount, label))
+		parts = append(parts, fmt.Sprintf("%s %d %s", newDot, newMessageCount, label))
 	}
 
 	status := strings.Join(parts, "  ")
-	return StatusBarStyle.Width(m.width).Render(status)
+	return lipgloss.NewStyle().
+		Width(m.width).
+		Padding(0, 1).
+		Foreground(ColorStatusBarForeground).
+		Render(status)
 }
 
 // Command constructors
 
-func loadChatsCmd(client *api.Client) tea.Cmd {
+func loadChatsCmd(client *api.Client, limit int) tea.Cmd {
 	return func() tea.Msg {
-		chats, err := client.GetChats(50)
+		chats, err := client.GetChats(limit)
 		if err != nil {
 			return errMsg{err: fmt.Errorf("failed to load chats: %v", err)}
 		}
@@ -741,9 +816,9 @@ func loadChatsCmd(client *api.Client) tea.Cmd {
 	}
 }
 
-func loadMessagesCmd(client *api.Client, chatGUID string, windowID WindowID) tea.Cmd {
+func loadMessagesCmd(client *api.Client, chatGUID string, limit int) tea.Cmd {
 	return func() tea.Msg {
-		messages, err := client.GetMessages(chatGUID, initialMessageFetchLimit)
+		messages, err := client.GetMessages(chatGUID, limit)
 		if err != nil {
 			return loadMessagesErrMsg{chatGUID: chatGUID, err: fmt.Errorf("failed to load messages: %v", err), report: true}
 		}
@@ -751,9 +826,9 @@ func loadMessagesCmd(client *api.Client, chatGUID string, windowID WindowID) tea
 	}
 }
 
-func prefetchMessagesCmd(client *api.Client, chatGUID string) tea.Cmd {
+func prefetchMessagesCmd(client *api.Client, chatGUID string, limit int) tea.Cmd {
 	return func() tea.Msg {
-		messages, err := client.GetMessages(chatGUID, initialMessageFetchLimit)
+		messages, err := client.GetMessages(chatGUID, limit)
 		if err != nil {
 			return loadMessagesErrMsg{chatGUID: chatGUID, err: fmt.Errorf("failed to prefetch messages: %v", err), report: false}
 		}
@@ -777,7 +852,7 @@ func (m *AppModel) selectChat(chat *models.Chat, window *ChatWindow) tea.Cmd {
 	var cmds []tea.Cmd
 	if m.shouldRefreshMessages(chat.GUID) {
 		m.messageFetchInFlight[chat.GUID] = true
-		cmds = append(cmds, loadMessagesCmd(m.apiClient, chat.GUID, window.ID))
+		cmds = append(cmds, loadMessagesCmd(m.apiClient, chat.GUID, m.messageLimit))
 	}
 	if cmd := m.markChatReadIfNeeded(chat.GUID); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -1045,7 +1120,7 @@ func (m *AppModel) prefetchTopChatsCmd(chats []models.Chat, skipGUID string) tea
 			continue
 		}
 		m.messageFetchInFlight[chatGUID] = true
-		cmds = append(cmds, prefetchMessagesCmd(m.apiClient, chatGUID))
+		cmds = append(cmds, prefetchMessagesCmd(m.apiClient, chatGUID, m.messageLimit))
 	}
 
 	if len(cmds) == 0 {
@@ -1331,6 +1406,16 @@ func waitForWSReconnectCmd(wsClient *ws.Client) tea.Cmd {
 	}
 }
 
+func waitForWSDisconnectCmd(wsClient *ws.Client) tea.Cmd {
+	return func() tea.Msg {
+		_, ok := <-wsClient.Disconnect
+		if !ok {
+			return nil
+		}
+		return wsDisconnectedMsg{}
+	}
+}
+
 func waitForWSOverflowCmd(wsClient *ws.Client) tea.Cmd {
 	return func() tea.Msg {
 		_, ok := <-wsClient.Overflow
@@ -1339,6 +1424,44 @@ func waitForWSOverflowCmd(wsClient *ws.Client) tea.Cmd {
 		}
 		return wsOverflowMsg{}
 	}
+}
+
+func refreshTickCmd(interval time.Duration) tea.Cmd {
+	return tea.Tick(interval, func(time.Time) tea.Msg {
+		return refreshTickMsg{}
+	})
+}
+
+// refreshOpenChatsCmd periodically reconciles every chat currently visible in a
+// pane. WebSocket remains the fast path; this catches missed/delayed events and
+// keeps panes fresh when the socket is reconnecting.
+func (m *AppModel) refreshOpenChatsCmd() tea.Cmd {
+	seen := make(map[string]struct{})
+	var cmds []tea.Cmd
+
+	for _, window := range m.windowManager.AllWindows() {
+		if window.Chat == nil {
+			continue
+		}
+		chatGUID := strings.TrimSpace(window.Chat.GUID)
+		if chatGUID == "" {
+			continue
+		}
+		if _, ok := seen[chatGUID]; ok {
+			continue
+		}
+		seen[chatGUID] = struct{}{}
+		if m.messageFetchInFlight[chatGUID] {
+			continue
+		}
+		m.messageFetchInFlight[chatGUID] = true
+		cmds = append(cmds, prefetchMessagesCmd(m.apiClient, chatGUID, m.messageLimit))
+	}
+
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
 }
 
 // resyncAllChatsCmd forces a fresh API fetch for every chat we already know
@@ -1362,7 +1485,7 @@ func (m *AppModel) resyncAllChatsCmd() tea.Cmd {
 		}
 		// Force through the TTL gate - this is a resync, not a cache read.
 		m.messageFetchInFlight[chatGUID] = true
-		cmds = append(cmds, prefetchMessagesCmd(m.apiClient, chatGUID))
+		cmds = append(cmds, prefetchMessagesCmd(m.apiClient, chatGUID, m.messageLimit))
 	}
 
 	for _, window := range m.windowManager.AllWindows() {
@@ -1382,6 +1505,7 @@ func (m *AppModel) resyncAllChatsCmd() tea.Cmd {
 
 // handleWSEvent processes incoming WebSocket events
 func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
+	log.Printf("[WS-DEBUG] handleWSEvent type=%q", event.Type)
 	switch event.Type {
 	case "new-message":
 		// Parse incoming message
@@ -1393,6 +1517,7 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 			} `json:"chats"`
 		}
 		if err := json.Unmarshal(event.Data, &wsMsg); err != nil {
+			log.Printf("[WS-DEBUG] new-message unmarshal failed: %v", err)
 			return m, waitForWSEventCmd(m.wsClient)
 		}
 
@@ -1402,6 +1527,8 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 		} else if msg.ChatGUID == "" {
 			msg.ChatGUID = wsMsg.ChatGUID
 		}
+		log.Printf("[WS-DEBUG] new-message guid=%q chatGUID=%q text=%q fromMe=%v",
+			msg.GUID, msg.ChatGUID, msg.Text, msg.IsFromMe)
 
 		if msg.ChatGUID != "" {
 			if len(messageDedupeKeys(msg)) == 0 {
@@ -1414,8 +1541,11 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 
 			// Cache the message (ignore duplicate WS events by message identity).
 			if !m.windowManager.CacheMessage(msg.ChatGUID, msg) {
+				log.Printf("[WS-DEBUG] CacheMessage rejected as duplicate: guid=%q", msg.GUID)
 				return m, waitForWSEventCmd(m.wsClient)
 			}
+			log.Printf("[WS-DEBUG] CacheMessage accepted, %d windows show this chat",
+				len(m.windowManager.WindowsShowingChat(msg.ChatGUID)))
 			// Intentionally do NOT refresh messageFetchedAt here. Only real
 			// API fetches bump it so the TTL in shouldRefreshMessages can
 			// still trigger a reconciling refetch and heal any hole that

@@ -16,24 +16,26 @@ import (
 )
 
 type Client struct {
-	baseURL   string
-	password  string
-	conn      *websocket.Conn
-	Events    chan models.WSEvent
-	Reconnect chan struct{}
-	Overflow  chan struct{}
-	done      chan struct{}
-	mu        sync.Mutex
+	baseURL    string
+	password   string
+	conn       *websocket.Conn
+	Events     chan models.WSEvent
+	Reconnect  chan struct{}
+	Disconnect chan struct{}
+	Overflow   chan struct{}
+	done       chan struct{}
+	mu         sync.Mutex
 }
 
 func NewClient(baseURL, password string) *Client {
 	return &Client{
-		baseURL:   strings.TrimRight(baseURL, "/"),
-		password:  password,
-		Events:    make(chan models.WSEvent, 500),
-		Reconnect: make(chan struct{}, 4),
-		Overflow:  make(chan struct{}, 4),
-		done:      make(chan struct{}),
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		password:   password,
+		Events:     make(chan models.WSEvent, 500),
+		Reconnect:  make(chan struct{}, 4),
+		Disconnect: make(chan struct{}, 4),
+		Overflow:   make(chan struct{}, 4),
+		done:       make(chan struct{}),
 	}
 }
 
@@ -106,6 +108,11 @@ func (c *Client) readLoop() {
 			select {
 			case <-c.done:
 				return
+			default:
+			}
+
+			select {
+			case c.Disconnect <- struct{}{}:
 			default:
 			}
 

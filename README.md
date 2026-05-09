@@ -122,6 +122,7 @@ server_url: "https://your-server:1234"
 password: "your-api-password"
 message_limit: 50
 chat_limit: 50
+poll_interval_sec: 10
 ```
 
 ### Credential behavior
@@ -182,7 +183,11 @@ Logs are written to:
 | `Ctrl+B` | Toggle sender names |
 | `Alt+M` | Alternative sender-name toggle |
 | `Ctrl+M` | Sender-name toggle in terminals that distinguish it from Enter |
+| `Ctrl+E` | Toggle dividers between split panes |
 | `q` / `Ctrl+C` | Quit |
+
+A small dot in the top-left corner of the screen shows BlueBubbles WebSocket
+status: green when connected, red when disconnected or reconnecting.
 
 ## Command Input
 

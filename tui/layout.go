@@ -45,8 +45,9 @@ func (n *LayoutNode) IsLeaf() bool {
 	return n.Direction == SplitNone
 }
 
-// CalculateLayout recursively calculates bounds for all nodes
-func (n *LayoutNode) CalculateLayout(x, y, w, h int) {
+// CalculateLayout recursively calculates bounds for all nodes.
+// When withDividers is false, no space is reserved for inter-pane dividers.
+func (n *LayoutNode) CalculateLayout(x, y, w, h int, withDividers bool) {
 	n.x = x
 	n.y = y
 	n.width = w
@@ -62,35 +63,36 @@ func (n *LayoutNode) CalculateLayout(x, y, w, h int) {
 
 	if n.Direction == SplitHorizontal {
 		// Split horizontally: left | right
-		leftW, rightW, dividerW := splitAxis(w, n.SplitRatio)
+		leftW, rightW, dividerW := splitAxis(w, n.SplitRatio, withDividers)
 		if n.Left != nil {
-			n.Left.CalculateLayout(x, y, leftW, h)
+			n.Left.CalculateLayout(x, y, leftW, h, withDividers)
 		}
 		if n.Right != nil {
-			n.Right.CalculateLayout(x+leftW+dividerW, y, rightW, h)
+			n.Right.CalculateLayout(x+leftW+dividerW, y, rightW, h, withDividers)
 		}
 	} else {
 		// Split vertically: top / bottom
-		topH, bottomH, dividerH := splitAxis(h, n.SplitRatio)
+		topH, bottomH, dividerH := splitAxis(h, n.SplitRatio, withDividers)
 		if n.Left != nil {
-			n.Left.CalculateLayout(x, y, w, topH)
+			n.Left.CalculateLayout(x, y, w, topH, withDividers)
 		}
 		if n.Right != nil {
-			n.Right.CalculateLayout(x, y+topH+dividerH, w, bottomH)
+			n.Right.CalculateLayout(x, y+topH+dividerH, w, bottomH, withDividers)
 		}
 	}
 }
 
 // splitAxis returns first, second, divider sizes for a split dimension.
 // It keeps both panes visible when possible and avoids overshooting the parent size.
-func splitAxis(total int, ratio float64) (int, int, int) {
+// When includeDivider is false, no space is reserved for the divider between panes.
+func splitAxis(total int, ratio float64, includeDivider bool) (int, int, int) {
 	if total <= 0 {
 		return 0, 0, 0
 	}
 
 	divider := 0
 	usable := total
-	if total >= 3 {
+	if includeDivider && total >= 3 {
 		divider = 1
 		usable = total - divider
 	}

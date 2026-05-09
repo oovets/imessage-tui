@@ -7,11 +7,12 @@ import (
 )
 
 type UIState struct {
-	ShowTimestamps  bool `json:"show_timestamps"`
-	ShowLineNumbers bool `json:"show_line_numbers"`
-	ShowChatList    bool `json:"show_chat_list"`
-	ShowSenderNames bool `json:"show_sender_names"`
-	ChatListWidth   int  `json:"chat_list_width"`
+	ShowTimestamps   bool `json:"show_timestamps"`
+	ShowLineNumbers  bool `json:"show_line_numbers"`
+	ShowChatList     bool `json:"show_chat_list"`
+	ShowSenderNames  bool `json:"show_sender_names"`
+	ShowPaneDividers bool `json:"show_pane_dividers"`
+	ChatListWidth    int  `json:"chat_list_width"`
 }
 
 func uiStatePath() (string, error) {
@@ -32,11 +33,12 @@ func legacyUIStatePath() (string, error) {
 
 func LoadUIState() UIState {
 	defaults := UIState{
-		ShowTimestamps:  true,
-		ShowLineNumbers: true,
-		ShowChatList:    true,
-		ShowSenderNames: true,
-		ChatListWidth:   25,
+		ShowTimestamps:   true,
+		ShowLineNumbers:  true,
+		ShowChatList:     true,
+		ShowSenderNames:  true,
+		ShowPaneDividers: true,
+		ChatListWidth:    25,
 	}
 	path, err := uiStatePath()
 	if err != nil {

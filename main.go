@@ -38,7 +38,7 @@ func main() {
 
 	wsClient := ws.NewClient(cfg.ServerURL, cfg.Password)
 
-	p := tea.NewProgram(tui.NewAppModel(apiClient, wsClient), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(tui.NewAppModelWithConfig(apiClient, wsClient, cfg), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		log.Fatalf("Error running program: %v", err)
 		os.Exit(1)

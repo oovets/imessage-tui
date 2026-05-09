@@ -23,6 +23,7 @@ const (
 	PaletteGray       = lipgloss.Color("242")
 	PaletteDarkGray   = lipgloss.Color("240")
 	PaletteRed        = lipgloss.Color("196")
+	PaletteGreen      = lipgloss.Color("46")
 	PaletteStatusFG   = lipgloss.Color("241")
 	PaletteStatusBG   = lipgloss.Color("235")
 )
@@ -34,14 +35,16 @@ const (
 	ColorChatListNewMessage         = PaletteRed
 	ColorWindowPlaceholder          = PaletteGray
 	ColorWindowDivider              = PaletteDarkGray
+	ColorConnectionUp               = PaletteGreen
+	ColorConnectionDown             = PaletteRed
 	ColorStatusBarForeground        = PaletteStatusFG
 	ColorStatusBarBackground        = PaletteStatusBG
 	ColorMyMessageDark              = "86"
-	ColorMyMessageLight             = "22"
+	ColorMyMessageLight             = "27"
 	ColorTheirMessageDark           = "252"
-	ColorTheirMessageLight          = "232"
+	ColorTheirMessageLight          = "235"
 	ColorTimestampDark              = "242"
-	ColorTimestampLight             = "240"
+	ColorTimestampLight             = "244"
 )
 
 var (

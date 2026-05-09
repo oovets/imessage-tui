@@ -20,14 +20,15 @@ const (
 
 // WindowManager manages multiple chat windows and their layout
 type WindowManager struct {
-	root            *LayoutNode
-	windows         map[WindowID]*ChatWindow
-	nextID          WindowID
-	focusedWindow   WindowID
-	maxWindows      int
-	showTimestamps  bool
-	showLineNumbers bool
-	showSenderNames bool
+	root             *LayoutNode
+	windows          map[WindowID]*ChatWindow
+	nextID           WindowID
+	focusedWindow    WindowID
+	maxWindows       int
+	showTimestamps   bool
+	showLineNumbers  bool
+	showSenderNames  bool
+	showPaneDividers bool
 
 	// Message cache per chat GUID
 	messageCache     map[string][]models.Message
@@ -48,6 +49,7 @@ func NewWindowManager() *WindowManager {
 		showTimestamps:   true,
 		showLineNumbers:  true,
 		showSenderNames:  true,
+		showPaneDividers: true,
 	}
 
 	// Create initial window
@@ -73,7 +75,7 @@ func (wm *WindowManager) SetSize(width, height int) {
 // recalculateLayout updates all window bounds based on current size
 func (wm *WindowManager) recalculateLayout() {
 	if wm.root != nil && wm.width > 0 && wm.height > 0 {
-		wm.root.CalculateLayout(0, 0, wm.width, wm.height)
+		wm.root.CalculateLayout(0, 0, wm.width, wm.height, wm.showPaneDividers)
 	}
 }
 
@@ -402,6 +404,16 @@ func (wm *WindowManager) SetShowSenderNames(show bool) {
 	}
 }
 
+// SetShowPaneDividers toggles whether dividers are drawn between split panes.
+// When hidden, the divider column/row is also reclaimed for pane content.
+func (wm *WindowManager) SetShowPaneDividers(show bool) {
+	if wm.showPaneDividers == show {
+		return
+	}
+	wm.showPaneDividers = show
+	wm.recalculateLayout()
+}
+
 // Render renders all windows
 func (wm *WindowManager) Render() string {
 	if wm.root == nil || wm.width == 0 || wm.height == 0 {
@@ -424,7 +436,7 @@ func (wm *WindowManager) renderNode(node *LayoutNode) string {
 	rightView := wm.renderNode(node.Right)
 
 	if node.Direction == SplitHorizontal {
-		_, _, dividerW := splitAxis(node.width, node.SplitRatio)
+		_, _, dividerW := splitAxis(node.width, node.SplitRatio, wm.showPaneDividers)
 		if dividerW == 0 {
 			return lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
 		}
@@ -439,7 +451,7 @@ func (wm *WindowManager) renderNode(node *LayoutNode) string {
 		return lipgloss.JoinHorizontal(lipgloss.Top, leftView, dividerStyled, rightView)
 	}
 
-	_, _, dividerH := splitAxis(node.height, node.SplitRatio)
+	_, _, dividerH := splitAxis(node.height, node.SplitRatio, wm.showPaneDividers)
 	if dividerH == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, leftView, rightView)
 	}
