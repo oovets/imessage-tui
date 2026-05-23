@@ -333,10 +333,18 @@ func (c *Client) SendReaction(chatGUID, selectedMessageGUID, reaction string, pa
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		if isPrivateAPIHelperError(respBody) {
+			return fmt.Errorf("BlueBubbles Private API Helper is not connected; reactions require Private API Helper")
+		}
 		return fmt.Errorf("reaction API error: %s (status %d)", string(respBody), resp.StatusCode)
 	}
 
 	return nil
+}
+
+func isPrivateAPIHelperError(body []byte) bool {
+	text := strings.ToLower(string(body))
+	return strings.Contains(text, "private api") && strings.Contains(text, "helper")
 }
 
 func (c *Client) MarkChatRead(chatGUID string) error {

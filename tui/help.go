@@ -44,6 +44,8 @@ func helpOverlayView(width, height int) string {
 				"PgUp/PgDn    Scroll message history",
 				"End / G      Jump to newest messages",
 				"/img #N      Open image on message row N",
+				"/h /lol      React to latest message",
+				"/tu /te      Thumbs up / down latest message",
 			},
 		},
 		{

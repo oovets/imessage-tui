@@ -75,6 +75,53 @@ func TestMessagesModelAppendMessageDedupesLiveVariant(t *testing.T) {
 	}
 }
 
+func TestMessagesModelMarksSoftWrappedContinuationLines(t *testing.T) {
+	model := NewMessagesModel()
+	model.SetShowTimestamps(false)
+	model.SetShowSenderNames(false)
+	model.SetShowLineNumbers(false)
+	model.SetSize(24, 8)
+	model.SetMessages([]models.Message{
+		{
+			GUID:        "message-a",
+			Text:        "This is a long message that should wrap onto another terminal row",
+			DateCreated: 1000,
+		},
+	})
+
+	view := stripANSI(model.View())
+	if !strings.Contains(view, "↳") {
+		t.Fatalf("expected wrapped continuation marker: %q", view)
+	}
+}
+
+func TestMessagesModelDoesNotMarkWrappedLinkPreviewLines(t *testing.T) {
+	model := NewMessagesModel()
+	model.SetShowTimestamps(false)
+	model.SetShowSenderNames(false)
+	model.SetShowLineNumbers(false)
+	model.SetSize(24, 8)
+	model.SetMessages([]models.Message{
+		{
+			GUID:        "message-a",
+			Text:        "https://open.spotify.com/track/abc",
+			DateCreated: 1000,
+			LinkPreviews: []models.LinkPreview{
+				{
+					URL:      "https://open.spotify.com/track/abc",
+					Title:    "A very long track title that wraps",
+					SiteName: "Spotify",
+				},
+			},
+		},
+	})
+
+	view := stripANSI(model.View())
+	if strings.Contains(view, "↳") {
+		t.Fatalf("preview continuation lines should not be marked: %q", view)
+	}
+}
+
 func TestMessagesModelFoldsReactionMessagesIntoEmojiOnly(t *testing.T) {
 	model := NewMessagesModel()
 	model.SetShowTimestamps(false)
@@ -105,6 +152,9 @@ func TestMessagesModelFoldsReactionMessagesIntoEmojiOnly(t *testing.T) {
 	}
 	if strings.Contains(view, "×1") {
 		t.Fatalf("single reaction should not show explicit count: %q", view)
+	}
+	if !strings.Contains(trimRightLines(stripANSI(view)), "hello\n  ❤️") {
+		t.Fatalf("reaction should render on indented line below message: %q", stripANSI(view))
 	}
 }
 
@@ -583,4 +633,12 @@ func TestApplyChatOverridesAddsLocalAlias(t *testing.T) {
 func stripANSI(s string) string {
 	re := regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	return re.ReplaceAllString(s, "")
+}
+
+func trimRightLines(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " ")
+	}
+	return strings.Join(lines, "\n")
 }

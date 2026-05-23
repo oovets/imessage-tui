@@ -44,6 +44,26 @@ func TestSendMessageWithTempGUIDUsesProvidedTempGUID(t *testing.T) {
 	}
 }
 
+func TestSendReactionReportsPrivateAPIHelperSetupError(t *testing.T) {
+	client := NewClient("http://bluebubbles.test", "secret")
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("Please make sure you have completed the setup for the Private API, and your helper is connected!")),
+			Request:    r,
+		}, nil
+	})}
+
+	err := client.SendReaction("chat-a", "message-a", "love", 0)
+	if err == nil {
+		t.Fatal("expected private API helper error")
+	}
+	if got, want := err.Error(), "BlueBubbles Private API Helper is not connected; reactions require Private API Helper"; got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
+
 func TestGetLinkPreviewUsesSpotifyOEmbedEndpoint(t *testing.T) {
 	var requestedURLs []string
 	client := NewClient("http://bluebubbles.test", "secret")

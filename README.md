@@ -84,7 +84,7 @@ Current test coverage focuses on:
 
 - API request shape for sends and link-preview provider routing
 - Message de-duplication across API/cache/WebSocket variants
-- Message ordering, image-row lookup, tapback folding, and link-preview rendering
+- Message ordering, image-row lookup, tapback folding, slash reactions, and link-preview rendering
 - Chat delete/rename state transitions and local alias persistence
 - Split-pane layout, divider hit-testing, and resize behavior
 - Chat-list preview toggling and timestamp formatting
@@ -148,7 +148,11 @@ Runtime CPU and memory depend on chat/message limits, open panes, message cache 
 | `PgUp` / `PgDn` | Scroll message history |
 | `End` / `G` | Jump to newest messages |
 | `/img #N` | Open first image attachment from rendered message row `N` |
+| `/h`, `/lol`, `/tu`, `/te` | React to the latest message in the active chat with heart, laugh, thumbs up, or thumbs down |
+| `/!!`, `/?` | Emphasize or question the latest message in the active chat |
 | Click image row | Open image attachment |
+
+Slash reactions use BlueBubbles Private API Helper via `/api/v1/message/react`.
 
 ### Panes
 

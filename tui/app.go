@@ -68,15 +68,17 @@ type (
 		chatGUID    string
 		pendingGUID string
 	}
-	wsEventMsg          models.WSEvent
-	wsConnectSuccessMsg struct{}
-	wsConnectFailMsg    struct{ err error }
-	wsReconnectedMsg    struct{}
-	wsDisconnectedMsg   struct{}
-	wsOverflowMsg       struct{}
-	refreshTickMsg      struct{}
-	markReadSuccessMsg  struct{ chatGUID string }
-	markReadErrMsg      struct {
+	sendReactionSuccessMsg struct{}
+	sendReactionErrMsg     struct{ err error }
+	wsEventMsg             models.WSEvent
+	wsConnectSuccessMsg    struct{}
+	wsConnectFailMsg       struct{ err error }
+	wsReconnectedMsg       struct{}
+	wsDisconnectedMsg      struct{}
+	wsOverflowMsg          struct{}
+	refreshTickMsg         struct{}
+	markReadSuccessMsg     struct{ chatGUID string }
+	markReadErrMsg         struct {
 		chatGUID string
 		err      error
 	}
@@ -352,6 +354,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sendErrMsg:
 		m.removePendingOutgoingByGUID(msg.chatGUID, msg.pendingGUID)
+		m.setAppError(msg.err)
+		return m, nil
+
+	case sendReactionErrMsg:
 		m.setAppError(msg.err)
 		return m, nil
 
@@ -1037,7 +1043,8 @@ func (m *AppModel) updateLayout() {
 	if m.showChatList {
 		chatListWidth = m.chatListWidth
 	}
-	m.chatList.SetSize(chatListWidth, chatListContentHeight)
+	chatListInnerWidth := max(1, chatListWidth-3)
+	m.chatList.SetSize(chatListInnerWidth, chatListContentHeight)
 	m.chatList.SetFocused(m.focused == focusChatList && m.showChatList)
 
 	// Calculate window area (everything to the right of chat list)
@@ -1576,6 +1583,18 @@ func sendMessageCmd(client *api.Client, chatGUID, text string, windowID WindowID
 	}
 }
 
+func sendReactionCmd(client *api.Client, chatGUID, messageGUID, reaction string) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return sendReactionErrMsg{err: fmt.Errorf("api client not configured")}
+		}
+		if err := client.SendReaction(chatGUID, messageGUID, reaction, 0); err != nil {
+			return sendReactionErrMsg{err: err}
+		}
+		return sendReactionSuccessMsg{}
+	}
+}
+
 func markChatReadCmd(client *api.Client, chatGUID string) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
@@ -1709,6 +1728,16 @@ func (m *AppModel) matchAndRemovePendingOutgoing(msg models.Message) {
 }
 
 func (m *AppModel) handleLocalInputCommand(window *ChatWindow, raw string) (tea.Cmd, bool) {
+	if reaction, handled := parseReactionCommand(raw); handled {
+		targetGUID := window.Messages.LatestMessageGUID()
+		if targetGUID == "" {
+			m.setAppError(fmt.Errorf("no message to react to"))
+			return nil, true
+		}
+		window.Input.Clear()
+		return sendReactionCmd(m.apiClient, window.Chat.GUID, targetGUID, reaction), true
+	}
+
 	msgNum, handled, err := parseImgCommand(raw)
 	if !handled {
 		return nil, false
@@ -1726,6 +1755,29 @@ func (m *AppModel) handleLocalInputCommand(window *ChatWindow, raw string) (tea.
 
 	window.Input.Clear()
 	return openImageAttachmentCmd(m.apiClient, att), true
+}
+
+func parseReactionCommand(raw string) (string, bool) {
+	parts := strings.Fields(strings.TrimSpace(raw))
+	if len(parts) != 1 {
+		return "", false
+	}
+	switch parts[0] {
+	case "/h":
+		return "love", true
+	case "/lol":
+		return "laugh", true
+	case "/tu":
+		return "like", true
+	case "/te":
+		return "dislike", true
+	case "/!!":
+		return "emphasize", true
+	case "/?":
+		return "question", true
+	default:
+		return "", false
+	}
 }
 
 func parseImgCommand(raw string) (int, bool, error) {

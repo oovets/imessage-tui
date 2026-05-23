@@ -316,14 +316,7 @@ func (m *MessagesModel) renderContent() {
 				bodyLines[len(bodyLines)-1] += " " + attLabel
 			}
 		}
-		if reactionLabel := formatReactionCounts(msg.ReactionCounts); reactionLabel != "" {
-			if len(bodyLines) == 0 {
-				bodyLines = append(bodyLines, reactionLabel)
-				bodyLineLinks = append(bodyLineLinks, "")
-			} else {
-				bodyLines[len(bodyLines)-1] += " " + reactionLabel
-			}
-		}
+		reactionLabel := formatReactionCounts(msg.ReactionCounts)
 		for _, preview := range previews {
 			label := linkPreviewLabel(preview)
 			if label == "" {
@@ -346,6 +339,10 @@ func (m *MessagesModel) renderContent() {
 			lineNum = fmt.Sprintf("#%d ", i+1)
 		}
 		fullLines, fullLineLinks := messageRenderLines(prefix, lineNum, sender, bodyLines, bodyLineLinks, m.showSenderNames)
+		if reactionLabel != "" {
+			fullLines = append(fullLines, "  "+reactionLabel)
+			fullLineLinks = append(fullLineLinks, "")
+		}
 
 		msgStyle := MyMessageStyle
 		if msg.Pending {
@@ -355,8 +352,7 @@ func (m *MessagesModel) renderContent() {
 		if msg.IsFromMe {
 			wroteLine := false
 			for li, rawLine := range fullLines {
-				wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(rawLine)
-				for _, line := range strings.Split(wrapped, "\n") {
+				for _, line := range messageWrappedLines(rawLine, wrapWidth, fullLineLinks[li] == "") {
 					if wroteLine {
 						sb.WriteString("\n")
 					}
@@ -378,12 +374,11 @@ func (m *MessagesModel) renderContent() {
 			}
 			wroteLine := false
 			for li, rawLine := range fullLines {
-				rendered := style.Width(wrapWidth).Render(rawLine)
-				for _, line := range strings.Split(rendered, "\n") {
+				for _, line := range messageWrappedLines(rawLine, wrapWidth, fullLineLinks[li] == "") {
 					if wroteLine {
 						sb.WriteString("\n")
 					}
-					sb.WriteString(line)
+					sb.WriteString(style.Width(wrapWidth).Render(line))
 					m.lineMessages = append(m.lineMessages, i+1)
 					m.lineLinks = append(m.lineLinks, fullLineLinks[li])
 					wroteLine = true
@@ -441,6 +436,30 @@ func splitNonEmptyLines(text string) []string {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+const continuationMarker = "↳ "
+
+func messageWrappedLines(rawLine string, width int, markContinuations bool) []string {
+	if width < 1 {
+		width = 1
+	}
+	wrapWidth := width
+	if markContinuations {
+		wrapWidth = width - lipgloss.Width(continuationMarker)
+		if wrapWidth < 1 {
+			wrapWidth = width
+		}
+	}
+	wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(rawLine)
+	lines := strings.Split(wrapped, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " ")
+		if markContinuations && i > 0 {
+			lines[i] = continuationMarker + strings.TrimLeft(lines[i], " ")
 		}
 	}
 	return lines
@@ -521,6 +540,15 @@ func (m *MessagesModel) rebuildMessageIndex() {
 			m.messageKeys[key] = struct{}{}
 		}
 	}
+}
+
+func (m *MessagesModel) LatestMessageGUID() string {
+	for i := len(m.messages) - 1; i >= 0; i-- {
+		if guid := strings.TrimSpace(m.messages[i].GUID); guid != "" {
+			return guid
+		}
+	}
+	return ""
 }
 
 func hasImageAttachment(msg models.Message) bool {

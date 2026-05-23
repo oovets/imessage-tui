@@ -475,33 +475,42 @@ func (m SimpleListModel) View() string {
 	for fi := m.offset; fi < end; fi++ {
 		idx := m.filteredIndices[fi]
 		chat := m.items[idx]
-		name := stripEmojis(chat.GetDisplayName())
-		prefix := chatListPrefix(chat)
-		displayName := prefix + name
+		displayName := chatListPrefix(chat) + stripEmojis(chat.GetDisplayName())
 
-		if len([]rune(displayName)) > nameWidth {
-			runes := []rune(displayName)
-			displayName = string(runes[:nameWidth-1]) + "…"
+		linePrefix := ""
+		if chat.HasNewMessage {
+			linePrefix = "● "
+		}
+		lineSuffix := ""
+		if chat.UnreadCount > 1 {
+			lineSuffix = " (" + itoa(chat.UnreadCount) + ")"
 		}
 
-		timeStr := formatChatListTime(chat.LastMessageTime)
-		timePad := ""
+		lineWidth := m.width
+		if lineWidth > 1 {
+			lineWidth--
+		}
+
+		timeStr := ""
+		timeStyled := m.timeStyle.Render(formatChatListTime(chat.LastMessageTime))
+		reserved := 1 + lipgloss.Width(linePrefix) + lipgloss.Width(lineSuffix)
+		if lipgloss.Width(timeStyled) > 0 && lineWidth-reserved-lipgloss.Width(timeStyled)-1 >= 1 {
+			timeStr = timeStyled
+			reserved += lipgloss.Width(timeStyled) + 1
+		}
+		nameWidth = lineWidth - reserved
+		if nameWidth < 1 {
+			nameWidth = 1
+		}
+		displayName = truncatePreview(displayName, nameWidth)
+
+		line1 := linePrefix + displayName + lineSuffix
 		if timeStr != "" {
-			timeStyled := m.timeStyle.Render(timeStr)
-			gap := m.width - lipgloss.Width(" "+displayName) - lipgloss.Width(timeStyled) - 2
+			gap := lineWidth - lipgloss.Width(" "+line1) - lipgloss.Width(timeStr)
 			if gap < 1 {
 				gap = 1
 			}
-			timePad = strings.Repeat(" ", gap)
-			timeStr = timePad + timeStyled
-		}
-
-		line1 := displayName
-		if chat.HasNewMessage {
-			line1 = "● " + line1
-		}
-		if chat.UnreadCount > 1 {
-			line1 += " (" + itoa(chat.UnreadCount) + ")"
+			timeStr = strings.Repeat(" ", gap) + timeStr
 		}
 
 		if fi == m.cursor {
