@@ -233,3 +233,77 @@ func (n *LayoutNode) RemoveWindow(targetID WindowID) *LayoutNode {
 func (n *LayoutNode) GetBounds() (x, y, width, height int) {
 	return n.x, n.y, n.width, n.height
 }
+
+// findParentOfWindow returns the split node whose direct child contains id.
+func findParentOfWindow(n *LayoutNode, id WindowID) *LayoutNode {
+	if n == nil || n.IsLeaf() {
+		return nil
+	}
+	if n.Left != nil && n.Left.IsLeaf() && n.Left.Window != nil && n.Left.Window.ID == id {
+		return n
+	}
+	if n.Right != nil && n.Right.IsLeaf() && n.Right.Window != nil && n.Right.Window.ID == id {
+		return n
+	}
+	if p := findParentOfWindow(n.Left, id); p != nil {
+		return p
+	}
+	return findParentOfWindow(n.Right, id)
+}
+
+func findDividerAt(n *LayoutNode, x, y int, withDividers bool) *LayoutNode {
+	if n == nil || n.IsLeaf() || !withDividers {
+		return nil
+	}
+
+	if n.Direction == SplitHorizontal {
+		leftW, _, dividerW := splitAxis(n.width, n.SplitRatio, true)
+		dividerX := n.x + leftW
+		if dividerW > 0 && x == dividerX && y >= n.y && y < n.y+n.height {
+			return n
+		}
+	} else if n.Direction == SplitVertical {
+		topH, _, dividerH := splitAxis(n.height, n.SplitRatio, true)
+		dividerY := n.y + topH
+		if dividerH > 0 && y == dividerY && x >= n.x && x < n.x+n.width {
+			return n
+		}
+	}
+
+	if found := findDividerAt(n.Left, x, y, withDividers); found != nil {
+		return found
+	}
+	return findDividerAt(n.Right, x, y, withDividers)
+}
+
+func splitRatioFromPoint(n *LayoutNode, x, y int) (float64, bool) {
+	if n == nil || n.IsLeaf() {
+		return 0, false
+	}
+
+	if n.Direction == SplitHorizontal {
+		_, _, dividerW := splitAxis(n.width, n.SplitRatio, true)
+		usable := n.width - dividerW
+		if usable <= 1 {
+			return 0, false
+		}
+		return clampSplitRatio(float64(x-n.x) / float64(usable)), true
+	}
+
+	_, _, dividerH := splitAxis(n.height, n.SplitRatio, true)
+	usable := n.height - dividerH
+	if usable <= 1 {
+		return 0, false
+	}
+	return clampSplitRatio(float64(y-n.y) / float64(usable)), true
+}
+
+func clampSplitRatio(ratio float64) float64 {
+	if ratio < 0.1 {
+		return 0.1
+	}
+	if ratio > 0.9 {
+		return 0.9
+	}
+	return ratio
+}

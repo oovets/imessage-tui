@@ -175,6 +175,70 @@ func (wm *WindowManager) SplitWindow(direction SplitDirection) bool {
 	return true
 }
 
+// AdjustFocusedSplit changes the split ratio of the focused pane's parent.
+func (wm *WindowManager) AdjustFocusedSplit(delta float64) bool {
+	if wm.root == nil || len(wm.windows) <= 1 {
+		return false
+	}
+	parent := findParentOfWindow(wm.root, wm.focusedWindow)
+	if parent == nil {
+		return false
+	}
+	parent.SplitRatio = clampSplitRatio(parent.SplitRatio + delta)
+	wm.recalculateLayout()
+	return true
+}
+
+func (wm *WindowManager) DividerAt(x, y int) *LayoutNode {
+	if wm.root == nil || !wm.showPaneDividers {
+		return nil
+	}
+	return findDividerAt(wm.root, x, y, wm.showPaneDividers)
+}
+
+func (wm *WindowManager) SetSplitRatio(node *LayoutNode, ratio float64) bool {
+	if node == nil || node.IsLeaf() {
+		return false
+	}
+	node.SplitRatio = clampSplitRatio(ratio)
+	wm.recalculateLayout()
+	return true
+}
+
+func (wm *WindowManager) SetSplitRatioFromPoint(node *LayoutNode, x, y int) bool {
+	ratio, ok := splitRatioFromPoint(node, x, y)
+	if !ok {
+		return false
+	}
+	return wm.SetSplitRatio(node, ratio)
+}
+
+// WindowAt returns the window whose bounds contain (x, y), or nil.
+func (wm *WindowManager) WindowAt(x, y int) *ChatWindow {
+	for _, window := range wm.windows {
+		if x >= window.x && x < window.x+window.width &&
+			y >= window.y && y < window.y+window.height {
+			return window
+		}
+	}
+	return nil
+}
+
+func (wm *WindowManager) assignPaneLabels() {
+	ids := make([]WindowID, 0, len(wm.windows))
+	for id := range wm.windows {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	total := len(ids)
+	for i, id := range ids {
+		if w, ok := wm.windows[id]; ok {
+			w.PaneIndex = i + 1
+			w.PaneTotal = total
+		}
+	}
+}
+
 // CloseWindow closes the focused window
 // Returns true if closed, false if it's the last window
 func (wm *WindowManager) CloseWindow() bool {
@@ -282,6 +346,13 @@ func (wm *WindowManager) FocusDirection(dir Direction) {
 // The message is inserted in chronological order so the cache never goes
 // out of order, even if WS events arrive late or out of sequence.
 func (wm *WindowManager) CacheMessage(chatGUID string, msg models.Message) bool {
+	if emoji := reactionEmoji(msg); emoji != "" {
+		messages := wm.messageCache[chatGUID]
+		if addReactionToMessages(messages, msg.AssociatedMessageGUID, emoji) {
+			wm.messageCache[chatGUID] = messages
+			return false
+		}
+	}
 	keys := messageDedupeKeys(msg)
 	if len(keys) > 0 {
 		if _, ok := wm.messageCacheKeys[chatGUID]; !ok {
@@ -317,11 +388,17 @@ func (wm *WindowManager) GetCachedMessages(chatGUID string) []models.Message {
 	return wm.messageCache[chatGUID]
 }
 
+func (wm *WindowManager) DeleteCachedMessages(chatGUID string) {
+	delete(wm.messageCache, chatGUID)
+	delete(wm.messageCacheKeys, chatGUID)
+}
+
 // SetCachedMessages sets the cached messages for a chat. The slice is
 // sorted chronologically so downstream readers never have to worry about
 // ordering.
 func (wm *WindowManager) SetCachedMessages(chatGUID string, messages []models.Message) {
 	messages = dedupeMessages(messages)
+	messages = foldReactionMessages(messages)
 	sort.SliceStable(messages, func(i, j int) bool {
 		return messages[i].DateCreated < messages[j].DateCreated
 	})
@@ -333,6 +410,44 @@ func (wm *WindowManager) SetCachedMessages(chatGUID string, messages []models.Me
 		}
 	}
 	wm.messageCacheKeys[chatGUID] = idx
+}
+
+func (wm *WindowManager) SetCachedLinkPreview(chatGUID, messageGUID string, preview models.LinkPreview) bool {
+	messages := wm.messageCache[chatGUID]
+	for i := range messages {
+		if messages[i].GUID != messageGUID {
+			continue
+		}
+		messages[i].LinkPreviews = upsertLinkPreview(messages[i].LinkPreviews, preview)
+		wm.messageCache[chatGUID] = messages
+		return true
+	}
+	return false
+}
+
+func (wm *WindowManager) ClearChatFromWindows(chatGUID string) bool {
+	changed := false
+	for _, window := range wm.windows {
+		if window.Chat == nil || window.Chat.GUID != chatGUID {
+			continue
+		}
+		window.SetChat(nil)
+		changed = true
+	}
+	return changed
+}
+
+func (wm *WindowManager) SetLocalDisplayName(chatGUID, displayName string) bool {
+	changed := false
+	for _, window := range wm.windows {
+		if window.Chat == nil || window.Chat.GUID != chatGUID {
+			continue
+		}
+		window.Chat.LocalDisplayName = strings.TrimSpace(displayName)
+		window.Messages.SetChatName(window.Chat.GetDisplayName())
+		changed = true
+	}
+	return changed
 }
 
 // CachedMessagesSnapshot returns a shallow copy of the cached messages map.
@@ -419,7 +534,7 @@ func (wm *WindowManager) Render() string {
 	if wm.root == nil || wm.width == 0 || wm.height == 0 {
 		return ""
 	}
-
+	wm.assignPaneLabels()
 	return wm.renderNode(wm.root)
 }
 

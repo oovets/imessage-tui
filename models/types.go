@@ -9,14 +9,16 @@ import (
 
 // Chat represents a conversation thread (1:1 or group)
 type Chat struct {
-	GUID            string   `json:"guid"`
-	DisplayName     string   `json:"displayName"`
-	ChatIdentifier  string   `json:"chatIdentifier"` // phone number, email, or group ID
-	Participants    []Handle `json:"participants"`
-	LastMessage     *Message `json:"lastMessage"`
-	UnreadCount     int      `json:"unreadCount"`
-	HasNewMessage   bool     `json:"-"` // Set when a new WS message arrives for this chat
-	LastMessageText string   `json:"-"` // Preview of latest message (not from API)
+	GUID             string   `json:"guid"`
+	DisplayName      string   `json:"displayName"`
+	ChatIdentifier   string   `json:"chatIdentifier"` // phone number, email, or group ID
+	Participants     []Handle `json:"participants"`
+	LastMessage      *Message `json:"lastMessage"`
+	UnreadCount      int      `json:"unreadCount"`
+	HasNewMessage    bool     `json:"-"` // Set when a new WS message arrives for this chat
+	LastMessageText  string   `json:"-"` // Preview of latest message (not from API)
+	LastMessageTime  int64    `json:"-"` // Milliseconds epoch of latest message preview
+	LocalDisplayName string   `json:"-"` // local user alias
 }
 
 // IsGroup returns true when the chat has more than one participant (group chat).
@@ -26,6 +28,9 @@ func (c *Chat) IsGroup() bool {
 
 // GetDisplayName returns a suitable name for the chat
 func (c *Chat) GetDisplayName() string {
+	if strings.TrimSpace(c.LocalDisplayName) != "" {
+		return c.LocalDisplayName
+	}
 	// For 1:1 chats, try to use contact name from participants first
 	if len(c.Participants) == 1 && c.Participants[0].DisplayName != "" {
 		return c.Participants[0].DisplayName
@@ -93,6 +98,18 @@ type Message struct {
 	AssociatedMessageType string         `json:"associatedMessageType"`
 	ChatGUID              string         `json:"-"` // injected after parse
 	ReactionCounts        map[string]int `json:"-"` // folded tapbacks for rendering
+	Pending               bool           `json:"-"` // local optimistic outgoing not yet confirmed
+	LinkPreviews          []LinkPreview  `json:"linkPreviews,omitempty"`
+}
+
+type LinkPreview struct {
+	URL         string `json:"url"`
+	Title       string `json:"title,omitempty"`
+	AuthorName  string `json:"authorName,omitempty"`
+	Description string `json:"description,omitempty"`
+	SiteName    string `json:"siteName,omitempty"`
+	ImageURL    string `json:"imageUrl,omitempty"`
+	Unavailable bool   `json:"unavailable,omitempty"`
 }
 
 // ParsedTime returns the message creation time

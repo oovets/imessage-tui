@@ -1,9 +1,11 @@
 package tui
 
 import (
-	"github.com/oovets/imessage-tui/models"
+	"fmt"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/oovets/imessage-tui/models"
 )
 
 // WindowID uniquely identifies a chat window
@@ -11,11 +13,13 @@ type WindowID int
 
 // ChatWindow represents a single chat view with its own messages and input
 type ChatWindow struct {
-	ID       WindowID
-	Chat     *models.Chat  // Which chat is displayed (nil = empty window)
-	Messages MessagesModel // Own viewport for messages
-	Input    InputModel    // Own input field
-	Focused  bool          // Has keyboard focus?
+	ID        WindowID
+	Chat      *models.Chat // Which chat is displayed (nil = empty window)
+	Messages  MessagesModel
+	Input     InputModel
+	Focused   bool
+	PaneIndex int // 1-based index shown in header
+	PaneTotal int
 
 	// Calculated dimensions from layout
 	x, y, width, height int
@@ -43,9 +47,10 @@ func (w *ChatWindow) SetBounds(x, y, width, height int) {
 	maxInputHeight := max(1, height-1)
 	w.Input.SetSize(contentWidth, maxInputHeight)
 	inputHeight := w.Input.Height()
+	gapHeight := messageInputGapHeight(height, inputHeight)
 
 	// Reserve space for input.
-	messagesHeight := height - inputHeight
+	messagesHeight := height - inputHeight - gapHeight
 	if messagesHeight < 1 {
 		messagesHeight = 1
 	}
@@ -75,7 +80,8 @@ func (w *ChatWindow) SetChat(chat *models.Chat) {
 func (w *ChatWindow) syncMessagesSizeToInput() {
 	contentWidth := max(1, w.width-2)
 	inputHeight := w.Input.Height()
-	messagesHeight := w.height - inputHeight
+	gapHeight := messageInputGapHeight(w.height, inputHeight)
+	messagesHeight := w.height - inputHeight - gapHeight
 	if messagesHeight < 1 {
 		messagesHeight = 1
 	}
@@ -95,9 +101,6 @@ func (w *ChatWindow) Update(msg tea.Msg) tea.Cmd {
 
 		w.syncMessagesSizeToInput()
 
-		// Do not forward KeyMsg to the message viewport: its default keymap uses
-		// j/k, space, h/l, etc., which conflicts with typing and clears
-		// stick-to-bottom via AtBottom() after spurious scrolls.
 		switch msg.(type) {
 		case tea.KeyMsg:
 			// keyboard handled by Input only
@@ -108,9 +111,74 @@ func (w *ChatWindow) Update(msg tea.Msg) tea.Cmd {
 				cmds = append(cmds, cmd2)
 			}
 		}
+	} else {
+		switch msg := msg.(type) {
+		case tea.MouseMsg:
+			if mouseIsWheel(msg) {
+				if msg.Button == tea.MouseButtonWheelUp {
+					w.Messages.ScrollUp()
+				} else if msg.Button == tea.MouseButtonWheelDown {
+					w.Messages.ScrollDown()
+				}
+			} else {
+				var cmd tea.Cmd
+				w.Messages, cmd = w.Messages.Update(msg)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
+		default:
+			var cmd tea.Cmd
+			w.Messages, cmd = w.Messages.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 	}
 
 	return tea.Batch(cmds...)
+}
+
+func (w *ChatWindow) FirstImageAttachmentAtContentY(y int) (models.Attachment, bool) {
+	viewportY, ok := w.messageViewportY(y)
+	if !ok {
+		return models.Attachment{}, false
+	}
+	return w.Messages.FirstImageAttachmentAtViewportY(viewportY)
+}
+
+func (w *ChatWindow) LinkAtContentY(y int) (string, bool) {
+	viewportY, ok := w.messageViewportY(y)
+	if !ok {
+		return "", false
+	}
+	return w.Messages.LinkAtViewportY(viewportY)
+}
+
+func (w *ChatWindow) messageViewportY(y int) (int, bool) {
+	if y < 0 || w.height <= 0 {
+		return 0, false
+	}
+
+	inputHeight := w.Input.Height()
+	if inputHeight > w.height-1 {
+		inputHeight = max(1, w.height-1)
+	}
+	gapHeight := messageInputGapHeight(w.height, inputHeight)
+	messageAreaHeight := w.height - inputHeight - gapHeight
+	if messageAreaHeight < 1 || y >= messageAreaHeight {
+		return 0, false
+	}
+
+	headerRows := 0
+	if w.Chat != nil {
+		headerRows = 1
+	}
+	viewportY := y - headerRows
+	if viewportY < 0 {
+		return 0, false
+	}
+	return viewportY, true
 }
 
 // View renders the window
@@ -136,12 +204,16 @@ func (w *ChatWindow) View() string {
 
 	// Handle empty window
 	if w.Chat == nil {
+		hint := "Select a chat (Enter in chat list)\nTab to switch focus  ? for help"
+		if w.PaneTotal > 1 {
+			hint = w.paneHeaderLine(contentWidth) + "\n\n" + hint
+		}
 		placeholder := lipgloss.NewStyle().
 			Foreground(ColorWindowPlaceholder).
 			Align(lipgloss.Center).
 			Width(contentWidth).
 			Height(contentHeight).
-			Render("Select a chat\n(Enter in chat list)")
+			Render(hint)
 
 		return style.
 			Width(w.width).
@@ -154,13 +226,23 @@ func (w *ChatWindow) View() string {
 	if inputHeight > contentHeight-1 {
 		inputHeight = max(1, contentHeight-1)
 	}
-	messagesHeight := contentHeight - inputHeight
+	gapHeight := messageInputGapHeight(contentHeight, inputHeight)
+	messagesHeight := contentHeight - inputHeight - gapHeight
 	if messagesHeight < 1 {
 		messagesHeight = 1
 	}
 
-	// Render messages
+	// Render messages (includes chat name header when single-pane)
+	w.Messages.SetShowHeader(w.PaneTotal <= 1)
 	messagesView := w.Messages.View()
+	if w.PaneTotal > 1 {
+		header := w.paneHeaderLine(contentWidth)
+		messagesView = header + "\n" + messagesView
+		messagesHeight--
+		if messagesHeight < 1 {
+			messagesHeight = 1
+		}
+	}
 
 	// Render input
 	inputView := w.Input.View()
@@ -175,7 +257,12 @@ func (w *ChatWindow) View() string {
 			Render(messagesView),
 		lipgloss.NewStyle().
 			Width(contentWidth).
-			Height(inputHeight).
+			Height(gapHeight).
+			MaxHeight(gapHeight).
+			Render(""),
+		lipgloss.NewStyle().
+			Width(contentWidth).
+			MaxHeight(inputHeight).
 			Render(inputView),
 	)
 
@@ -183,4 +270,39 @@ func (w *ChatWindow) View() string {
 		Width(w.width).
 		Height(w.height).
 		Render(content)
+}
+
+func messageInputGapHeight(contentHeight, inputHeight int) int {
+	if contentHeight-inputHeight > 1 {
+		return 1
+	}
+	return 0
+}
+
+func (w *ChatWindow) paneHeaderLine(width int) string {
+	label := fmt.Sprintf("[%d", w.PaneIndex)
+	if w.PaneTotal > 0 {
+		label += fmt.Sprintf("/%d", w.PaneTotal)
+	}
+	label += "]"
+	if w.Chat != nil {
+		name := stripEmojis(w.Chat.GetDisplayName())
+		label += " " + name
+	}
+	if w.Messages.HasUnseenIncoming() {
+		label += " ●"
+	}
+	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	if w.Focused {
+		headerStyle = headerStyle.Bold(true).Foreground(ColorChatListSelectedBackground)
+	}
+	line := headerStyle.Render(label)
+	if lipgloss.Width(line) > width {
+		runes := []rune(label)
+		if len(runes) > width-1 {
+			label = string(runes[:width-1]) + "…"
+		}
+		line = headerStyle.Render(label)
+	}
+	return line
 }

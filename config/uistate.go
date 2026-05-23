@@ -12,6 +12,7 @@ type UIState struct {
 	ShowChatList     bool `json:"show_chat_list"`
 	ShowSenderNames  bool `json:"show_sender_names"`
 	ShowPaneDividers bool `json:"show_pane_dividers"`
+	ShowChatPreview  bool `json:"show_chat_preview"`
 	ChatListWidth    int  `json:"chat_list_width"`
 }
 
@@ -38,6 +39,7 @@ func LoadUIState() UIState {
 		ShowChatList:     true,
 		ShowSenderNames:  true,
 		ShowPaneDividers: true,
+		ShowChatPreview:  true,
 		ChatListWidth:    25,
 	}
 	path, err := uiStatePath()

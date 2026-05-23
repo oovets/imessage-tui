@@ -149,6 +149,7 @@ func (c *Client) GetChats(limit int) ([]models.Chat, error) {
 		chatActivities[result.index].lastMsgTime = result.lastMsgTime
 		chatActivities[result.index].messageCount = result.messageCount
 		chatActivities[result.index].chat.LastMessageText = result.messageText
+		chatActivities[result.index].chat.LastMessageTime = result.lastMsgTime
 	}
 
 	slices.SortFunc(chatActivities, func(a, b chatWithActivity) int {
@@ -361,6 +362,81 @@ func (c *Client) MarkChatRead(chatGUID string) error {
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("mark chat read API error: %s (status %d)", string(respBody), resp.StatusCode)
+	}
+
+	return nil
+}
+
+func (c *Client) DeleteChat(chatGUID string) error {
+	u, err := url.Parse(fmt.Sprintf("%s/api/v1/chat/%s/delete", c.baseURL, url.PathEscape(strings.TrimSpace(chatGUID))))
+	if err != nil {
+		return err
+	}
+
+	q := u.Query()
+	q.Set("guid", c.password)
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequest(http.MethodDelete, u.String(), nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("delete chat API error: %s (status %d)", string(respBody), resp.StatusCode)
+	}
+
+	return nil
+}
+
+func (c *Client) RenameChat(chatGUID, displayName string) error {
+	u, err := url.Parse(fmt.Sprintf("%s/api/v1/chat/%s", c.baseURL, url.PathEscape(strings.TrimSpace(chatGUID))))
+	if err != nil {
+		return err
+	}
+
+	q := u.Query()
+	q.Set("guid", c.password)
+	u.RawQuery = q.Encode()
+
+	payload := map[string]string{
+		"displayName": strings.TrimSpace(displayName),
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, u.String(), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("rename chat API error: %s (status %d)", string(respBody), resp.StatusCode)
 	}
 
 	return nil

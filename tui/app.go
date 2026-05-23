@@ -40,6 +40,14 @@ const (
 	focusWindow
 )
 
+type chatActionMode int
+
+const (
+	chatActionNone chatActionMode = iota
+	chatActionDelete
+	chatActionRename
+)
+
 // Message types for Bubble Tea
 type (
 	chatsLoadedMsg    []models.Chat
@@ -76,7 +84,33 @@ type (
 		chatGUID    string
 		pendingGUID string
 	}
-	errMsg struct{ err error }
+	linkPreviewLoadedMsg struct {
+		chatGUID    string
+		messageGUID string
+		url         string
+		preview     models.LinkPreview
+		err         error
+	}
+	deleteChatSuccessMsg struct{ chatGUID string }
+	deleteChatErrMsg     struct {
+		chatGUID string
+		err      error
+	}
+	renameChatSuccessMsg struct {
+		chatGUID    string
+		displayName string
+	}
+	renameChatErrMsg struct {
+		chatGUID    string
+		displayName string
+		err         error
+	}
+	errMsg          struct{ err error }
+	noticeExpireMsg struct{}
+	toastMsg        struct {
+		text     string
+		duration time.Duration
+	}
 )
 
 type AppModel struct {
@@ -104,23 +138,42 @@ type AppModel struct {
 	// Debug
 	lastKey string
 
-	showTimestamps   bool
-	showLineNumbers  bool
-	showChatList     bool
-	showSenderNames  bool
-	showPaneDividers bool
-	chatListWidth    int
-	messageLimit     int
-	chatLimit        int
-	pollInterval     time.Duration
+	showTimestamps        bool
+	showLineNumbers       bool
+	showChatList          bool
+	showSenderNames       bool
+	showPaneDividers      bool
+	showChatPreview       bool
+	chatListWidth         int
+	messageLimit          int
+	chatLimit             int
+	pollInterval          time.Duration
+	enableLinkPreviews    bool
+	maxPreviewsPerMessage int
 
 	messageFetchInFlight map[string]bool
 	messageFetchedAt     map[string]time.Time
 	pendingOutgoing      map[string][]models.Message
 	readMarkInFlight     map[string]bool
+	linkPreviewInFlight  map[string]bool
+	linkPreviewAttempted map[string]bool
 	disableReadSync      bool
 	savedLayoutState     *config.LayoutState
 	didRestoreLayout     bool
+	chatOverrides        config.ChatOverridesState
+
+	showHelp         bool
+	chatAction       chatActionMode
+	actionChatGUID   string
+	actionChatName   string
+	renameText       string
+	toastText        string
+	toastUntil       time.Time
+	errUntil         time.Time
+	sidebarDragging  bool
+	sidebarDragStart int
+	dividerDragging  bool
+	dividerNode      *LayoutNode
 
 	// All disk writes go through this so the Update loop never blocks on
 	// fsync/marshal. Blocking Update for even 50ms causes dropped
@@ -134,9 +187,12 @@ func NewAppModel(client *api.Client, wsClient *ws.Client) AppModel {
 
 func NewAppModelWithConfig(client *api.Client, wsClient *ws.Client, cfg *config.Config) AppModel {
 	ui := config.LoadUIState()
+	chatOverrides := config.LoadChatOverrides()
 	messageLimit := defaultMessageFetchLimit
 	chatLimit := defaultChatFetchLimit
 	pollInterval := defaultPollInterval
+	enableLinkPreviews := true
+	maxPreviewsPerMessage := 2
 	if cfg != nil {
 		if cfg.MessageLimit > 0 {
 			messageLimit = cfg.MessageLimit
@@ -149,6 +205,14 @@ func NewAppModelWithConfig(client *api.Client, wsClient *ws.Client, cfg *config.
 		} else {
 			pollInterval = 0
 		}
+		enableLinkPreviews = cfg.EnableLinkPreviews
+		if cfg.MaxPreviewsPerMessage > 0 {
+			maxPreviewsPerMessage = cfg.MaxPreviewsPerMessage
+		}
+		if client != nil {
+			client.SetPreviewProxyURL(cfg.PreviewProxyURL)
+			client.SetOEmbedEndpoint(cfg.OEmbedEndpoint)
+		}
 	}
 
 	wm := NewWindowManager()
@@ -157,31 +221,39 @@ func NewAppModelWithConfig(client *api.Client, wsClient *ws.Client, cfg *config.
 	wm.SetShowSenderNames(ui.ShowSenderNames)
 	wm.SetShowPaneDividers(ui.ShowPaneDividers)
 	app := AppModel{
-		chatList:             NewChatListModel(),
-		windowManager:        wm,
-		apiClient:            client,
-		wsClient:             wsClient,
-		focused:              focusChatList,
-		width:                80,
-		height:               24,
-		showTimestamps:       ui.ShowTimestamps,
-		showLineNumbers:      ui.ShowLineNumbers,
-		showChatList:         ui.ShowChatList,
-		showSenderNames:      ui.ShowSenderNames,
-		showPaneDividers:     ui.ShowPaneDividers,
-		chatListWidth:        clampChatListWidth(ui.ChatListWidth),
-		messageLimit:         messageLimit,
-		chatLimit:            chatLimit,
-		pollInterval:         pollInterval,
-		messageFetchInFlight: make(map[string]bool),
-		messageFetchedAt:     make(map[string]time.Time),
-		pendingOutgoing:      make(map[string][]models.Message),
-		readMarkInFlight:     make(map[string]bool),
-		persist:              newPersister(),
+		chatList:              NewChatListModel(),
+		windowManager:         wm,
+		apiClient:             client,
+		wsClient:              wsClient,
+		focused:               focusChatList,
+		width:                 80,
+		height:                24,
+		showTimestamps:        ui.ShowTimestamps,
+		showLineNumbers:       ui.ShowLineNumbers,
+		showChatList:          ui.ShowChatList,
+		showSenderNames:       ui.ShowSenderNames,
+		showPaneDividers:      ui.ShowPaneDividers,
+		showChatPreview:       ui.ShowChatPreview,
+		chatListWidth:         clampChatListWidth(ui.ChatListWidth),
+		messageLimit:          messageLimit,
+		chatLimit:             chatLimit,
+		pollInterval:          pollInterval,
+		enableLinkPreviews:    enableLinkPreviews,
+		maxPreviewsPerMessage: maxPreviewsPerMessage,
+		messageFetchInFlight:  make(map[string]bool),
+		messageFetchedAt:      make(map[string]time.Time),
+		pendingOutgoing:       make(map[string][]models.Message),
+		readMarkInFlight:      make(map[string]bool),
+		linkPreviewInFlight:   make(map[string]bool),
+		linkPreviewAttempted:  make(map[string]bool),
+		chatOverrides:         chatOverrides,
+		persist:               newPersister(),
+		loading:               true,
 	}
 	if layoutState, ok := config.LoadLayoutState(); ok {
 		app.savedLayoutState = &layoutState
 	}
+	app.chatList.SetShowPreview(app.showChatPreview)
 	app.restoreMessageCache()
 	return app
 }
@@ -189,6 +261,7 @@ func NewAppModelWithConfig(client *api.Client, wsClient *ws.Client, cfg *config.
 func (m AppModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		loadChatsCmd(m.apiClient, m.chatLimit),
+		noticeExpireCmd(),
 	}
 
 	// Try to connect WebSocket for real-time updates
@@ -211,29 +284,33 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case chatsLoadedMsg:
-		m.chatList.SetChats([]models.Chat(msg))
-		if m.restoreLayoutFromState([]models.Chat(msg)) {
+		m.loading = false
+		m.chatList.SetLoading(false)
+		chats := []models.Chat(msg)
+		applyChatOverrides(chats, m.chatOverrides.Aliases)
+		m.chatList.SetChats(chats)
+		if m.restoreLayoutFromState(chats) {
 			m.updateLayout()
 			return m, nil
 		}
 		m.updateLayout()
 		var cmds []tea.Cmd
 		// Auto-select first chat in focused window if available
-		if len(msg) > 0 {
+		if len(chats) > 0 {
 			window := m.windowManager.FocusedWindow()
 			if window != nil {
-				chat := msg[0]
+				chat := chats[0]
 				m.focused = focusWindow
 				window.Input.textarea.Focus()
 				if cmd := m.selectChat(&chat, window); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
-				if cmd := m.prefetchTopChatsCmd([]models.Chat(msg), chat.GUID); cmd != nil {
+				if cmd := m.prefetchTopChatsCmd(chats, chat.GUID); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 				return m, tea.Batch(cmds...)
 			}
-			if cmd := m.prefetchTopChatsCmd([]models.Chat(msg), ""); cmd != nil {
+			if cmd := m.prefetchTopChatsCmd(chats, ""); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			if len(cmds) > 0 {
@@ -246,39 +323,24 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Merge API messages with any WS messages that arrived after the API snapshot.
 		// This prevents a race where WS-appended messages disappear when the API
 		// response (which may not yet include them) replaces the message list.
-		merged := msg.messages
-		if len(merged) > 0 {
-			newestAPITime := merged[len(merged)-1].DateCreated
-			for _, cached := range m.windowManager.GetCachedMessages(msg.chatGUID) {
-				if cached.DateCreated <= newestAPITime {
-					continue
-				}
-				// Only add if not already present
-				found := false
-				for _, m := range merged {
-					if m.GUID == cached.GUID {
-						found = true
-						break
-					}
-				}
-				if !found {
-					merged = append(merged, cached)
-				}
-			}
-		}
+		merged := mergeLoadedMessagesWithCache(msg.messages, m.windowManager.GetCachedMessages(msg.chatGUID))
 		m.windowManager.SetCachedMessages(msg.chatGUID, merged)
 		m.messageFetchInFlight[msg.chatGUID] = false
 		m.messageFetchedAt[msg.chatGUID] = time.Now()
 		m.saveMessageCache()
 		for _, window := range m.windowManager.WindowsShowingChat(msg.chatGUID) {
 			window.Messages.SetMessages(merged)
+			window.Messages.SetLoading(false)
 		}
-		return m, nil
+		return m, m.linkPreviewCmdsForMessages(msg.chatGUID, merged)
 
 	case loadMessagesErrMsg:
 		m.messageFetchInFlight[msg.chatGUID] = false
+		for _, window := range m.windowManager.WindowsShowingChat(msg.chatGUID) {
+			window.Messages.SetLoading(false)
+		}
 		if msg.report {
-			m.err = msg.err
+			m.setAppError(msg.err)
 		}
 		return m, nil
 
@@ -290,7 +352,24 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sendErrMsg:
 		m.removePendingOutgoingByGUID(msg.chatGUID, msg.pendingGUID)
-		m.err = msg.err
+		m.setAppError(msg.err)
+		return m, nil
+
+	case noticeExpireMsg:
+		now := time.Now()
+		if !m.errUntil.IsZero() && now.After(m.errUntil) {
+			m.err = nil
+			m.errUntil = time.Time{}
+		}
+		if m.toastText != "" && !m.toastUntil.IsZero() && now.After(m.toastUntil) {
+			m.toastText = ""
+			m.toastUntil = time.Time{}
+		}
+		return m, noticeExpireCmd()
+
+	case toastMsg:
+		m.toastText = msg.text
+		m.toastUntil = time.Now().Add(msg.duration)
 		return m, nil
 
 	case pendingTimeoutMsg:
@@ -306,6 +385,43 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.messageFetchInFlight[msg.chatGUID] = true
 		return m, prefetchMessagesCmd(m.apiClient, msg.chatGUID, m.messageLimit)
+
+	case linkPreviewLoadedMsg:
+		key := linkPreviewKey(msg.messageGUID, msg.url)
+		if m.linkPreviewAttempted == nil {
+			m.linkPreviewAttempted = make(map[string]bool)
+		}
+		delete(m.linkPreviewInFlight, key)
+		m.linkPreviewAttempted[key] = true
+		if msg.err != nil {
+			log.Printf("link preview failed for %s: %v", msg.url, msg.err)
+		}
+		if m.windowManager.SetCachedLinkPreview(msg.chatGUID, msg.messageGUID, msg.preview) {
+			m.saveMessageCache()
+		}
+		for _, window := range m.windowManager.WindowsShowingChat(msg.chatGUID) {
+			window.Messages.SetLinkPreview(msg.messageGUID, msg.preview)
+		}
+		return m, nil
+
+	case deleteChatSuccessMsg:
+		m.removeChatLocalState(msg.chatGUID)
+		m.saveMessageCache()
+		m.saveLayoutState()
+		return m, showToastCmd("Chat deleted", 3*time.Second)
+
+	case deleteChatErrMsg:
+		m.setAppError(msg.err)
+		return m, nil
+
+	case renameChatSuccessMsg:
+		m.applyLocalChatAlias(msg.chatGUID, msg.displayName)
+		return m, showToastCmd("Chat renamed", 3*time.Second)
+
+	case renameChatErrMsg:
+		m.applyLocalChatAlias(msg.chatGUID, msg.displayName)
+		m.setAppError(fmt.Errorf("server rename failed; saved local alias: %w", msg.err))
+		return m, nil
 
 	case wsConnectSuccessMsg:
 		m.wsConnected = true
@@ -342,7 +458,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case wsConnectFailMsg:
 		m.wsConnected = false
-		m.err = msg.err
+		m.setAppError(msg.err)
 		return m, nil
 
 	case markReadSuccessMsg:
@@ -372,50 +488,98 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleWSEvent(models.WSEvent(msg))
 
 	case errMsg:
-		m.err = msg.err
+		m.setAppError(msg.err)
 		return m, nil
 
 	case tea.MouseMsg:
-		// Only handle left-click for focus/navigation; let other events
-		// (scroll wheel) fall through to the focused component.
-		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
-			if m.showChatList && msg.X < m.chatListWidth {
-				// Click in chat list — focus it and move cursor to clicked item
-				if m.focused == focusWindow {
-					if window := m.windowManager.FocusedWindow(); window != nil {
-						window.Input.textarea.Blur()
-					}
-				}
-				m.focused = focusChatList
-				m.chatList.ClickAt(msg.Y)
-			} else {
-				// Click in windows area — find and focus the clicked window
-				relX := msg.X
-				if m.showChatList {
-					relX = msg.X - m.chatListWidth
-				}
-				for _, window := range m.windowManager.AllWindows() {
-					if relX >= window.x && relX < window.x+window.width &&
-						msg.Y >= window.y && msg.Y < window.y+window.height {
-						if old := m.windowManager.FocusedWindow(); old != nil && old.ID != window.ID {
-							old.Input.textarea.Blur()
-						}
-						m.windowManager.SetFocus(window.ID)
-						window.Input.textarea.Focus()
-						m.focused = focusWindow
-						cmd := m.clearFocusedWindowNewMessageIndicator()
-						m.saveLayoutState()
-						return m, cmd
-					}
-				}
+		return m.handleMouseMsg(msg)
+
+	case tea.KeyMsg:
+		if m.showHelp {
+			switch msg.String() {
+			case "?", "esc", "q", "ctrl+c":
+				m.showHelp = false
 			}
 			return m, nil
 		}
+		if m.chatAction != chatActionNone {
+			return m.handleChatActionKey(msg)
+		}
 
-	case tea.KeyMsg:
 		m.lastKey = msg.String()
+		if m.focused == focusChatList && !m.chatList.SearchActive() {
+			switch msg.String() {
+			case "d":
+				if m.beginDeleteChatAction() {
+					return m, nil
+				}
+			case "r":
+				if m.beginRenameChatAction() {
+					return m, nil
+				}
+			}
+		}
+		if m.focused == focusWindow {
+			switch msg.String() {
+			case "ctrl+d":
+				if m.beginDeleteChatAction() {
+					return m, nil
+				}
+			case "ctrl+r":
+				if m.beginRenameChatAction() {
+					return m, nil
+				}
+			case "up":
+				before := m.windowManager.FocusedWindow()
+				m.windowManager.FocusDirection(DirUp)
+				after := m.windowManager.FocusedWindow()
+				if before != after {
+					after.Input.textarea.Focus()
+					cmd := m.clearFocusedWindowNewMessageIndicator()
+					m.saveLayoutState()
+					return m, cmd
+				}
+				return m, nil
+			case "down":
+				before := m.windowManager.FocusedWindow()
+				m.windowManager.FocusDirection(DirDown)
+				after := m.windowManager.FocusedWindow()
+				if before != after {
+					after.Input.textarea.Focus()
+					cmd := m.clearFocusedWindowNewMessageIndicator()
+					m.saveLayoutState()
+					return m, cmd
+				}
+				return m, nil
+			}
+		}
+
 		// Handle global keys first
 		switch msg.String() {
+		case "?":
+			m.showHelp = !m.showHelp
+			return m, nil
+
+		case "pgup":
+			if m.focused == focusWindow {
+				m.scrollFocusedMessages(-1)
+			}
+			return m, nil
+
+		case "pgdown":
+			if m.focused == focusWindow {
+				m.scrollFocusedMessages(1)
+			}
+			return m, nil
+
+		case "end":
+			if m.focused == focusWindow {
+				if window := m.windowManager.FocusedWindow(); window != nil {
+					window.Messages.GotoBottom()
+				}
+			}
+			return m, nil
+
 		case "q", "ctrl+c":
 			m.saveMessageCache()
 			m.saveLayoutState()
@@ -426,15 +590,17 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Split operations
 		case "ctrl+f":
-			// Split horizontal (side by side)
-			m.windowManager.SplitWindow(SplitHorizontal)
+			if !m.windowManager.SplitWindow(SplitHorizontal) {
+				return m, showToastCmd("Max 4 panes (Ctrl+W to close)", 3*time.Second)
+			}
 			m.updateLayout()
 			m.saveLayoutState()
 			return m, nil
 
 		case "ctrl+g":
-			// Split vertical (stacked)
-			m.windowManager.SplitWindow(SplitVertical)
+			if !m.windowManager.SplitWindow(SplitVertical) {
+				return m, showToastCmd("Max 4 panes (Ctrl+W to close)", 3*time.Second)
+			}
 			m.updateLayout()
 			m.saveLayoutState()
 			return m, nil
@@ -491,6 +657,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle pane dividers between split windows.
 			m.showPaneDividers = !m.showPaneDividers
 			m.windowManager.SetShowPaneDividers(m.showPaneDividers)
+			m.saveUIState()
+			return m, nil
+
+		case "ctrl+p":
+			m.showChatPreview = !m.showChatPreview
+			m.chatList.SetShowPreview(m.showChatPreview)
 			m.saveUIState()
 			return m, nil
 
@@ -556,6 +728,22 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd := m.clearFocusedWindowNewMessageIndicator()
 				m.saveLayoutState()
 				return m, cmd
+			}
+			return m, nil
+
+		case "ctrl+shift+left":
+			if m.focused == focusWindow {
+				if m.windowManager.AdjustFocusedSplit(-0.05) {
+					m.saveLayoutState()
+				}
+			}
+			return m, nil
+
+		case "ctrl+shift+right":
+			if m.focused == focusWindow {
+				if m.windowManager.AdjustFocusedSplit(0.05) {
+					m.saveLayoutState()
+				}
 			}
 			return m, nil
 
@@ -625,6 +813,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "enter":
+			if m.focused == focusChatList && m.chatList.SearchActive() {
+				m.chatList.ClearSearch()
+				return m, nil
+			}
 			if m.focused == focusChatList {
 				// Select chat and load in focused window
 				selected := m.chatList.SelectedChat()
@@ -663,6 +855,18 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+
+		if m.focused == focusChatList && msg.String() == "/" {
+			m.chatList.StartSearch()
+			return m, nil
+		}
+
+		if m.focused == focusWindow && msg.String() == "G" {
+			if window := m.windowManager.FocusedWindow(); window != nil {
+				window.Messages.GotoBottom()
+			}
+			return m, nil
+		}
 	}
 
 	// Delegate to focused component
@@ -686,6 +890,7 @@ func (m *AppModel) saveUIState() {
 		ShowChatList:     m.showChatList,
 		ShowSenderNames:  m.showSenderNames,
 		ShowPaneDividers: m.showPaneDividers,
+		ShowChatPreview:  m.showChatPreview,
 		ChatListWidth:    m.chatListWidth,
 	})
 }
@@ -703,6 +908,123 @@ func clampChatListWidth(w int) int {
 	return w
 }
 
+func (m *AppModel) currentActionChat() *models.Chat {
+	if m.focused == focusChatList {
+		return m.chatList.SelectedChat()
+	}
+	if window := m.windowManager.FocusedWindow(); window != nil {
+		return window.Chat
+	}
+	return nil
+}
+
+func (m *AppModel) beginDeleteChatAction() bool {
+	chat := m.currentActionChat()
+	if chat == nil || strings.TrimSpace(chat.GUID) == "" {
+		return false
+	}
+	m.chatAction = chatActionDelete
+	m.actionChatGUID = chat.GUID
+	m.actionChatName = chat.GetDisplayName()
+	m.renameText = ""
+	return true
+}
+
+func (m *AppModel) beginRenameChatAction() bool {
+	chat := m.currentActionChat()
+	if chat == nil || strings.TrimSpace(chat.GUID) == "" {
+		return false
+	}
+	m.chatAction = chatActionRename
+	m.actionChatGUID = chat.GUID
+	m.actionChatName = chat.GetDisplayName()
+	m.renameText = chat.GetDisplayName()
+	return true
+}
+
+func (m *AppModel) clearChatAction() {
+	m.chatAction = chatActionNone
+	m.actionChatGUID = ""
+	m.actionChatName = ""
+	m.renameText = ""
+}
+
+func (m *AppModel) removeChatLocalState(chatGUID string) {
+	chatGUID = strings.TrimSpace(chatGUID)
+	if chatGUID == "" {
+		return
+	}
+	m.chatList.RemoveChatByGUID(chatGUID)
+	m.windowManager.DeleteCachedMessages(chatGUID)
+	m.windowManager.ClearChatFromWindows(chatGUID)
+	delete(m.messageFetchedAt, chatGUID)
+	delete(m.messageFetchInFlight, chatGUID)
+	delete(m.pendingOutgoing, chatGUID)
+	delete(m.readMarkInFlight, chatGUID)
+	delete(m.chatOverrides.Aliases, chatGUID)
+	_ = config.SaveChatOverrides(m.chatOverrides)
+}
+
+func (m *AppModel) applyLocalChatAlias(chatGUID, displayName string) {
+	chatGUID = strings.TrimSpace(chatGUID)
+	displayName = strings.TrimSpace(displayName)
+	if chatGUID == "" {
+		return
+	}
+	if m.chatOverrides.Aliases == nil {
+		m.chatOverrides.Aliases = make(map[string]string)
+	}
+	if displayName == "" {
+		delete(m.chatOverrides.Aliases, chatGUID)
+	} else {
+		m.chatOverrides.Aliases[chatGUID] = displayName
+	}
+	m.chatList.SetLocalDisplayName(chatGUID, displayName)
+	m.windowManager.SetLocalDisplayName(chatGUID, displayName)
+	_ = config.SaveChatOverrides(m.chatOverrides)
+}
+
+func (m AppModel) handleChatActionKey(msg tea.KeyMsg) (AppModel, tea.Cmd) {
+	switch m.chatAction {
+	case chatActionDelete:
+		switch msg.String() {
+		case "esc", "escape":
+			m.clearChatAction()
+			return m, nil
+		case "D":
+			chatGUID := m.actionChatGUID
+			m.clearChatAction()
+			return m, deleteChatCmd(m.apiClient, chatGUID)
+		default:
+			return m, nil
+		}
+	case chatActionRename:
+		switch msg.String() {
+		case "esc", "escape":
+			m.clearChatAction()
+			return m, nil
+		case "backspace", "ctrl+h":
+			if m.renameText != "" {
+				runes := []rune(m.renameText)
+				m.renameText = string(runes[:len(runes)-1])
+			}
+			return m, nil
+		case "enter":
+			chatGUID := m.actionChatGUID
+			displayName := strings.TrimSpace(m.renameText)
+			m.clearChatAction()
+			return m, renameChatCmd(m.apiClient, chatGUID, displayName)
+		default:
+			if len(msg.Runes) > 0 {
+				m.renameText += string(msg.Runes)
+			}
+			return m, nil
+		}
+	default:
+		return m, nil
+	}
+}
+
 func (m *AppModel) updateLayout() {
 	contentHeight := m.height - 1 // reserve one row for status bar
 	if contentHeight < 1 {
@@ -716,6 +1038,7 @@ func (m *AppModel) updateLayout() {
 		chatListWidth = m.chatListWidth
 	}
 	m.chatList.SetSize(chatListWidth, chatListContentHeight)
+	m.chatList.SetFocused(m.focused == focusChatList && m.showChatList)
 
 	// Calculate window area (everything to the right of chat list)
 	windowsWidth := m.width - 2 // -2 for padding
@@ -736,6 +1059,10 @@ func (m *AppModel) updateLayout() {
 func (m AppModel) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "Loading..."
+	}
+
+	if m.showHelp {
+		return helpOverlayView(m.width, m.height)
 	}
 
 	// Render chat list panel. Reserve one row for the status bar so the
@@ -781,8 +1108,20 @@ func (m AppModel) statusBarView() string {
 		connColor = ColorConnectionUp
 	}
 	dot := lipgloss.NewStyle().Foreground(connColor).Bold(true).Render("●")
-
 	parts := []string{dot}
+
+	if m.loading {
+		parts = append(parts, "loading chats…")
+	}
+	if actionText := m.chatActionStatusText(); actionText != "" {
+		parts = append(parts, actionText)
+	}
+
+	if window := m.windowManager.FocusedWindow(); m.focused == focusWindow && window != nil && window.Chat != nil {
+		if window.PaneTotal > 1 {
+			parts = append(parts, fmt.Sprintf("pane %d/%d", window.PaneIndex, window.PaneTotal))
+		}
+	}
 
 	newMessageCount := m.chatList.NewMessageCount()
 	if !m.showChatList && newMessageCount > 0 {
@@ -796,12 +1135,35 @@ func (m AppModel) statusBarView() string {
 		parts = append(parts, fmt.Sprintf("%s %d %s", newDot, newMessageCount, label))
 	}
 
+	now := time.Now()
+	if m.err != nil && !m.errUntil.IsZero() && now.Before(m.errUntil) {
+		errText := m.err.Error()
+		if len(errText) > 48 {
+			errText = errText[:47] + "…"
+		}
+		parts = append(parts, lipgloss.NewStyle().Foreground(ColorChatListNewMessage).Render("! "+errText))
+	}
+	if m.toastText != "" && !m.toastUntil.IsZero() && now.Before(m.toastUntil) {
+		parts = append(parts, m.toastText)
+	}
+
+	parts = append(parts, "? help")
+
 	status := strings.Join(parts, "  ")
-	return lipgloss.NewStyle().
+	return StatusBarStyle.
 		Width(m.width).
-		Padding(0, 1).
-		Foreground(ColorStatusBarForeground).
 		Render(status)
+}
+
+func (m AppModel) chatActionStatusText() string {
+	switch m.chatAction {
+	case chatActionDelete:
+		return fmt.Sprintf("Delete %q? Press D to confirm, Esc to cancel", m.actionChatName)
+	case chatActionRename:
+		return fmt.Sprintf("Rename %q: %s", m.actionChatName, m.renameText)
+	default:
+		return ""
+	}
 }
 
 // Command constructors
@@ -852,6 +1214,7 @@ func (m *AppModel) selectChat(chat *models.Chat, window *ChatWindow) tea.Cmd {
 	var cmds []tea.Cmd
 	if m.shouldRefreshMessages(chat.GUID) {
 		m.messageFetchInFlight[chat.GUID] = true
+		window.Messages.SetLoading(true)
 		cmds = append(cmds, loadMessagesCmd(m.apiClient, chat.GUID, m.messageLimit))
 	}
 	if cmd := m.markChatReadIfNeeded(chat.GUID); cmd != nil {
@@ -881,6 +1244,84 @@ func (m *AppModel) shouldRefreshMessages(chatGUID string) bool {
 	return time.Since(lastFetch) > messageCacheRefreshTTL
 }
 
+func applyChatOverrides(chats []models.Chat, aliases map[string]string) {
+	if len(chats) == 0 || len(aliases) == 0 {
+		return
+	}
+	for i := range chats {
+		alias := strings.TrimSpace(aliases[chats[i].GUID])
+		if alias == "" {
+			continue
+		}
+		chats[i].LocalDisplayName = alias
+	}
+}
+
+func mergeLoadedMessagesWithCache(loaded, cached []models.Message) []models.Message {
+	merged := make([]models.Message, len(loaded))
+	copy(merged, loaded)
+
+	cachedByKey := make(map[string]models.Message, len(cached)*2)
+	for _, msg := range cached {
+		for _, key := range messageDedupeKeys(msg) {
+			cachedByKey[key] = msg
+		}
+	}
+
+	for i := range merged {
+		for _, key := range messageDedupeKeys(merged[i]) {
+			cachedMsg, ok := cachedByKey[key]
+			if !ok {
+				continue
+			}
+			for _, preview := range cachedMsg.LinkPreviews {
+				merged[i].LinkPreviews = upsertLinkPreview(merged[i].LinkPreviews, preview)
+			}
+			break
+		}
+	}
+
+	if len(merged) == 0 {
+		return merged
+	}
+
+	newestLoadedTime := merged[0].DateCreated
+	for _, loadedMsg := range merged[1:] {
+		if loadedMsg.DateCreated > newestLoadedTime {
+			newestLoadedTime = loadedMsg.DateCreated
+		}
+	}
+	for _, cachedMsg := range cached {
+		if cachedMsg.DateCreated <= newestLoadedTime {
+			continue
+		}
+		found := false
+		for _, loadedMsg := range merged {
+			if messagesShareDedupeKey(loadedMsg, cachedMsg) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			merged = append(merged, cachedMsg)
+		}
+	}
+	return merged
+}
+
+func messagesShareDedupeKey(a, b models.Message) bool {
+	keys := make(map[string]struct{})
+	for _, key := range messageDedupeKeys(a) {
+		keys[key] = struct{}{}
+	}
+	for _, key := range messageDedupeKeys(b) {
+		if _, ok := keys[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *AppModel) restoreMessageCache() {
 	state := config.LoadMessageCache()
 	if len(state.Chats) == 0 {
@@ -902,10 +1343,6 @@ func (m *AppModel) restoreMessageCache() {
 
 func (m *AppModel) saveMessageCache() {
 	snapshot := m.windowManager.CachedMessagesSnapshot()
-	if len(snapshot) == 0 {
-		return
-	}
-
 	state := config.MessageCacheState{
 		Chats: make(map[string]config.CachedChatMessages, len(snapshot)),
 	}
@@ -1151,6 +1588,30 @@ func markChatReadCmd(client *api.Client, chatGUID string) tea.Cmd {
 	}
 }
 
+func deleteChatCmd(client *api.Client, chatGUID string) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return deleteChatErrMsg{chatGUID: chatGUID, err: fmt.Errorf("api client not configured")}
+		}
+		if err := client.DeleteChat(chatGUID); err != nil {
+			return deleteChatErrMsg{chatGUID: chatGUID, err: err}
+		}
+		return deleteChatSuccessMsg{chatGUID: chatGUID}
+	}
+}
+
+func renameChatCmd(client *api.Client, chatGUID, displayName string) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return renameChatErrMsg{chatGUID: chatGUID, displayName: displayName, err: fmt.Errorf("api client not configured")}
+		}
+		if err := client.RenameChat(chatGUID, displayName); err != nil {
+			return renameChatErrMsg{chatGUID: chatGUID, displayName: displayName, err: err}
+		}
+		return renameChatSuccessMsg{chatGUID: chatGUID, displayName: displayName}
+	}
+}
+
 func (m *AppModel) addPendingOutgoing(chatGUID, text string) models.Message {
 	pending := models.Message{
 		GUID:        uuid.New().String(),
@@ -1158,9 +1619,11 @@ func (m *AppModel) addPendingOutgoing(chatGUID, text string) models.Message {
 		IsFromMe:    true,
 		DateCreated: time.Now().UnixMilli(),
 		ChatGUID:    chatGUID,
+		Pending:     true,
 	}
 
 	m.pendingOutgoing[chatGUID] = append(m.pendingOutgoing[chatGUID], pending)
+	m.chatList.UpdateChatPreview(chatGUID, text, pending.DateCreated)
 	for _, window := range m.windowManager.WindowsShowingChat(chatGUID) {
 		window.Messages.AppendMessage(pending)
 	}
@@ -1251,13 +1714,13 @@ func (m *AppModel) handleLocalInputCommand(window *ChatWindow, raw string) (tea.
 		return nil, false
 	}
 	if err != nil {
-		m.err = err
+		m.setAppError(err)
 		return nil, true
 	}
 
 	att, ok := window.Messages.FirstImageAttachmentByNumber(msgNum)
 	if !ok {
-		m.err = fmt.Errorf("message #%d has no image attachment", msgNum)
+		m.setAppError(fmt.Errorf("message #%d has no image attachment", msgNum))
 		return nil, true
 	}
 
@@ -1364,6 +1827,15 @@ func openWithSystem(target string) error {
 		_ = cmd.Process.Release()
 	}
 	return nil
+}
+
+func openURLCmd(rawURL string) tea.Cmd {
+	return func() tea.Msg {
+		if err := openWithSystem(rawURL); err != nil {
+			return errMsg{err: fmt.Errorf("failed to open link: %v", err)}
+		}
+		return nil
+	}
 }
 
 func openCommand(target string) (string, []string) {
@@ -1571,9 +2043,18 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 			} else if !msg.IsFromMe {
 				m.chatList.MarkNewMessage(msg.ChatGUID)
 			}
+			preview := strings.TrimSpace(msg.Text)
+			if preview == "" && len(msg.Attachments) > 0 {
+				preview = attachmentPreviewFromMessage(msg)
+			}
+			m.chatList.UpdateChatPreview(msg.ChatGUID, preview, msg.DateCreated)
 		}
 
-		return m, waitForWSEventCmd(m.wsClient)
+		cmds := []tea.Cmd{waitForWSEventCmd(m.wsClient)}
+		if cmd := m.linkPreviewCmdsForMessages(msg.ChatGUID, []models.Message{msg}); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
 
 	case "updated-message":
 		return m, waitForWSEventCmd(m.wsClient)
@@ -1583,5 +2064,234 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 
 	default:
 		return m, waitForWSEventCmd(m.wsClient)
+	}
+}
+
+func (m *AppModel) setAppError(err error) {
+	if err == nil {
+		return
+	}
+	m.err = err
+	m.errUntil = time.Now().Add(5 * time.Second)
+}
+
+func (m AppModel) scrollFocusedMessages(direction int) {
+	window := m.windowManager.FocusedWindow()
+	if window == nil {
+		return
+	}
+	if direction < 0 {
+		window.Messages.ScrollPageUp()
+	} else {
+		window.Messages.ScrollPageDown()
+	}
+}
+
+func (m AppModel) handleMouseMsg(msg tea.MouseMsg) (AppModel, tea.Cmd) {
+	contentY := msg.Y - 1
+	if contentY < 0 {
+		return m, nil
+	}
+
+	if mouseIsWheel(msg) {
+		relX := msg.X
+		if m.showChatList {
+			if msg.X < m.chatListWidth {
+				return m, nil
+			}
+			relX = msg.X - m.chatListWidth
+		}
+		if window := m.windowManager.WindowAt(relX, contentY); window != nil {
+			if msg.Button == tea.MouseButtonWheelUp {
+				window.Messages.ScrollUp()
+			} else if msg.Button == tea.MouseButtonWheelDown {
+				window.Messages.ScrollDown()
+			}
+		}
+		return m, nil
+	}
+
+	if m.dividerDragging {
+		switch msg.Action {
+		case tea.MouseActionMotion:
+			relX := msg.X
+			if m.showChatList {
+				relX = msg.X - m.chatListWidth
+			}
+			if m.windowManager.SetSplitRatioFromPoint(m.dividerNode, relX, contentY) {
+				m.updateLayout()
+			}
+			return m, nil
+		case tea.MouseActionRelease:
+			m.dividerDragging = false
+			m.dividerNode = nil
+			m.saveLayoutState()
+			return m, nil
+		}
+	}
+
+	if m.showChatList && msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+		border := m.chatListWidth
+		if msg.X >= border-1 && msg.X <= border+1 {
+			m.sidebarDragging = true
+			m.sidebarDragStart = msg.X
+			return m, nil
+		}
+	}
+
+	if m.sidebarDragging {
+		switch msg.Action {
+		case tea.MouseActionMotion:
+			if m.showChatList {
+				delta := msg.X - m.sidebarDragStart
+				if delta != 0 {
+					m.chatListWidth = clampChatListWidth(m.chatListWidth + delta)
+					m.sidebarDragStart = msg.X
+					m.updateLayout()
+				}
+			}
+			return m, nil
+		case tea.MouseActionRelease:
+			m.sidebarDragging = false
+			m.saveUIState()
+			return m, nil
+		}
+	}
+
+	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+		if m.showChatList && msg.X < m.chatListWidth {
+			if m.focused == focusWindow {
+				if window := m.windowManager.FocusedWindow(); window != nil {
+					window.Input.textarea.Blur()
+				}
+			}
+			m.focused = focusChatList
+			m.updateLayout()
+			m.chatList.ClickAt(contentY)
+			return m, nil
+		}
+
+		relX := msg.X
+		if m.showChatList {
+			relX = msg.X - m.chatListWidth
+		}
+		if divider := m.windowManager.DividerAt(relX, contentY); divider != nil {
+			m.dividerDragging = true
+			m.dividerNode = divider
+			return m, nil
+		}
+		if window := m.windowManager.WindowAt(relX, contentY); window != nil {
+			localY := contentY - window.y
+			if old := m.windowManager.FocusedWindow(); old != nil && old.ID != window.ID {
+				old.Input.textarea.Blur()
+			}
+			m.windowManager.SetFocus(window.ID)
+			window.Input.textarea.Focus()
+			m.focused = focusWindow
+			cmd := m.clearFocusedWindowNewMessageIndicator()
+			m.saveLayoutState()
+			if att, ok := window.FirstImageAttachmentAtContentY(localY); ok {
+				return m, tea.Batch(cmd, openImageAttachmentCmd(m.apiClient, att))
+			}
+			if rawURL, ok := window.LinkAtContentY(localY); ok {
+				return m, tea.Batch(cmd, openURLCmd(rawURL))
+			}
+			return m, cmd
+		}
+	}
+
+	return m, nil
+}
+
+func attachmentPreviewFromMessage(msg models.Message) string {
+	if len(msg.Attachments) == 0 {
+		return ""
+	}
+	if label := attachmentLabel(msg, false); label != "" {
+		return label
+	}
+	return "[attachment]"
+}
+
+func noticeExpireCmd() tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
+		return noticeExpireMsg{}
+	})
+}
+
+func showToastCmd(text string, duration time.Duration) tea.Cmd {
+	return func() tea.Msg {
+		return toastMsg{text: text, duration: duration}
+	}
+}
+
+func (m *AppModel) linkPreviewCmdsForMessages(chatGUID string, messages []models.Message) tea.Cmd {
+	if !m.enableLinkPreviews || m.apiClient == nil || m.maxPreviewsPerMessage <= 0 {
+		return nil
+	}
+
+	var cmds []tea.Cmd
+	for _, msg := range messages {
+		messageGUID := strings.TrimSpace(msg.GUID)
+		if messageGUID == "" {
+			continue
+		}
+		for _, rawURL := range supportedMediaLinksFromText(msg.Text, m.maxPreviewsPerMessage) {
+			if messageHasPreviewAttempt(msg, rawURL) {
+				continue
+			}
+			key := linkPreviewKey(messageGUID, rawURL)
+			if m.linkPreviewAttempted[key] {
+				continue
+			}
+			if m.linkPreviewInFlight[key] {
+				continue
+			}
+			if m.linkPreviewInFlight == nil {
+				m.linkPreviewInFlight = make(map[string]bool)
+			}
+			m.linkPreviewInFlight[key] = true
+			cmds = append(cmds, loadLinkPreviewCmd(m.apiClient, chatGUID, messageGUID, rawURL))
+		}
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
+}
+
+func linkPreviewKey(messageGUID, rawURL string) string {
+	return messageGUID + "\x00" + rawURL
+}
+
+func loadLinkPreviewCmd(client *api.Client, chatGUID, messageGUID, rawURL string) tea.Cmd {
+	return func() tea.Msg {
+		preview, err := client.GetLinkPreview(rawURL)
+		if err != nil {
+			return linkPreviewLoadedMsg{
+				chatGUID:    chatGUID,
+				messageGUID: messageGUID,
+				url:         rawURL,
+				preview: models.LinkPreview{
+					URL:         rawURL,
+					SiteName:    mediaSiteName(rawURL),
+					Unavailable: true,
+				},
+				err: err,
+			}
+		}
+		return linkPreviewLoadedMsg{
+			chatGUID:    chatGUID,
+			messageGUID: messageGUID,
+			url:         rawURL,
+			preview: models.LinkPreview{
+				URL:         rawURL,
+				Title:       preview.Title,
+				AuthorName:  preview.AuthorName,
+				Description: preview.Description,
+				SiteName:    preview.SiteName,
+				ImageURL:    preview.ImageURL,
+			},
+		}
 	}
 }

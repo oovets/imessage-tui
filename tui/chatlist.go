@@ -23,6 +23,38 @@ func (m *ChatListModel) SetChats(chats []models.Chat) {
 	m.list.SetItems(chats)
 }
 
+func (m *ChatListModel) RemoveChatByGUID(chatGUID string) bool {
+	removed := false
+	for i, chat := range m.chats {
+		if chat.GUID != chatGUID {
+			continue
+		}
+		m.chats = append(m.chats[:i], m.chats[i+1:]...)
+		removed = true
+		break
+	}
+	if m.list.RemoveByGUID(chatGUID) {
+		removed = true
+	}
+	return removed
+}
+
+func (m *ChatListModel) SetLocalDisplayName(chatGUID, displayName string) bool {
+	updated := false
+	for i := range m.chats {
+		if m.chats[i].GUID != chatGUID {
+			continue
+		}
+		m.chats[i].LocalDisplayName = displayName
+		updated = true
+		break
+	}
+	if m.list.SetLocalDisplayName(chatGUID, displayName) {
+		updated = true
+	}
+	return updated
+}
+
 func (m *ChatListModel) SetSize(width, height int) {
 	if m.width == width && m.height == height {
 		return
@@ -32,31 +64,54 @@ func (m *ChatListModel) SetSize(width, height int) {
 	m.list.SetSize(width, height)
 }
 
+func (m *ChatListModel) SetFocused(focused bool) {
+	m.list.SetFocused(focused)
+}
+
+func (m *ChatListModel) SetLoading(loading bool) {
+	m.list.SetLoading(loading)
+}
+
+func (m *ChatListModel) SetShowPreview(show bool) {
+	m.list.SetShowPreview(show)
+}
+
+func (m *ChatListModel) StartSearch() {
+	m.list.StartSearch()
+}
+
+func (m *ChatListModel) ClearSearch() {
+	m.list.ClearSearch()
+}
+
+func (m *ChatListModel) SearchActive() bool {
+	return m.list.SearchActive()
+}
+
+func (m *ChatListModel) UpdateChatPreview(chatGUID, text string, when int64) {
+	m.list.UpdateChatPreview(chatGUID, text, when)
+}
+
 func (m *ChatListModel) SelectedChat() *models.Chat {
 	return m.list.SelectedItem()
 }
 
-// MarkNewMessage marks a chat as having a new message and moves it to the top
 func (m *ChatListModel) MarkNewMessage(chatGUID string) {
 	m.list.MarkNewMessage(chatGUID)
 }
 
-// ClickAt sets the cursor to the item at the given y-coordinate.
 func (m *ChatListModel) ClickAt(y int) {
 	m.list.ClickAt(y)
 }
 
-// ClearNewMessage clears the new message indicator for a chat
 func (m *ChatListModel) ClearNewMessage(chatGUID string) {
 	m.list.ClearNewMessage(chatGUID)
 }
 
-// SelectChatByGUID moves chat list selection to a specific chat if present.
 func (m *ChatListModel) SelectChatByGUID(chatGUID string) bool {
 	return m.list.SelectByGUID(chatGUID)
 }
 
-// NewMessageCount returns how many chats currently have a new message marker.
 func (m *ChatListModel) NewMessageCount() int {
 	return m.list.NewMessageCount()
 }

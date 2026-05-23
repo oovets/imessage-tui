@@ -23,6 +23,10 @@ type MessagesModel struct {
 	showLineNumbers bool
 	showSenderNames bool
 	stickToBottom   bool
+	loading         bool
+	showHeader      bool
+	lineMessages    []int
+	lineLinks       []string
 }
 
 func NewMessagesModel() MessagesModel {
@@ -37,12 +41,14 @@ func NewMessagesModel() MessagesModel {
 		showLineNumbers: true,
 		showSenderNames: true,
 		stickToBottom:   true,
+		showHeader:      true,
 	}
 }
 
 func (m *MessagesModel) SetMessages(messages []models.Message) {
 	prevUnseen := m.unseenGUIDs
 	messages = dedupeMessages(messages)
+	messages = foldReactionMessages(messages)
 	// Always keep the list chronological so the newest message is last and
 	// stick-to-bottom points at the most recent entry, regardless of how
 	// callers assembled the slice (API, cache, merged sources, ...).
@@ -65,6 +71,12 @@ func (m *MessagesModel) SetMessages(messages []models.Message) {
 
 // AppendMessage adds a single message to the list, deduplicating by message identity and keeping chronological order.
 func (m *MessagesModel) AppendMessage(msg models.Message) {
+	if emoji := reactionEmoji(msg); emoji != "" {
+		if addReactionToMessages(m.messages, msg.AssociatedMessageGUID, emoji) {
+			m.renderContent()
+			return
+		}
+	}
 	keys := messageDedupeKeys(msg)
 	for _, key := range keys {
 		if _, exists := m.messageKeys[key]; exists {
@@ -101,6 +113,22 @@ func (m *MessagesModel) RemoveMessageByGUID(guid string) bool {
 		}
 		m.messages = append(m.messages[:i], m.messages[i+1:]...)
 		m.rebuildMessageIndex()
+		m.renderContent()
+		return true
+	}
+	return false
+}
+
+func (m *MessagesModel) SetLinkPreview(messageGUID string, preview models.LinkPreview) bool {
+	messageGUID = strings.TrimSpace(messageGUID)
+	if messageGUID == "" || strings.TrimSpace(preview.URL) == "" {
+		return false
+	}
+	for i := range m.messages {
+		if m.messages[i].GUID != messageGUID {
+			continue
+		}
+		m.messages[i].LinkPreviews = upsertLinkPreview(m.messages[i].LinkPreviews, preview)
 		m.renderContent()
 		return true
 	}
@@ -182,9 +210,46 @@ func (m *MessagesModel) FirstImageAttachmentByNumber(n int) (models.Attachment, 
 	return models.Attachment{}, false
 }
 
+func (m *MessagesModel) FirstImageAttachmentAtViewportY(y int) (models.Attachment, bool) {
+	n := m.messageNumberAtViewportY(y)
+	if n == 0 {
+		return models.Attachment{}, false
+	}
+	return m.FirstImageAttachmentByNumber(n)
+}
+
+func (m *MessagesModel) LinkAtViewportY(y int) (string, bool) {
+	if y < 0 {
+		return "", false
+	}
+	line := m.viewport.YOffset + y
+	if line < 0 || line >= len(m.lineLinks) {
+		return "", false
+	}
+	link := strings.TrimSpace(m.lineLinks[line])
+	return link, link != ""
+}
+
+func (m *MessagesModel) messageNumberAtViewportY(y int) int {
+	if y < 0 {
+		return 0
+	}
+	line := m.viewport.YOffset + y
+	if line < 0 || line >= len(m.lineMessages) {
+		return 0
+	}
+	return m.lineMessages[line]
+}
+
 func (m *MessagesModel) renderContent() {
+	m.lineMessages = m.lineMessages[:0]
+	m.lineLinks = m.lineLinks[:0]
 	if len(m.messages) == 0 {
-		m.viewport.SetContent("(No messages yet)")
+		if m.loading {
+			m.viewport.SetContent(lipgloss.NewStyle().Foreground(ColorWindowPlaceholder).Render("Loading messages…"))
+		} else {
+			m.viewport.SetContent("(No messages yet)")
+		}
 		return
 	}
 
@@ -194,9 +259,30 @@ func (m *MessagesModel) renderContent() {
 	}
 
 	var sb strings.Builder
+	var lastDay string
 
 	for i, msg := range m.messages {
-		timeStr := msg.ParsedTime().Format("15:04")
+		msgTime := msg.ParsedTime()
+		dayKey := msgTime.Format("2006-01-02")
+		if dayKey != lastDay {
+			if lastDay != "" {
+				sb.WriteString("\n")
+				m.lineMessages = append(m.lineMessages, 0)
+				m.lineLinks = append(m.lineLinks, "")
+			}
+			sep := "── " + formatDateSeparator(msgTime) + " ──"
+			sepStyle := lipgloss.NewStyle().
+				Foreground(ColorWindowPlaceholder).
+				Width(wrapWidth).
+				Align(lipgloss.Center)
+			sb.WriteString(sepStyle.Render(sep))
+			sb.WriteString("\n")
+			m.lineMessages = append(m.lineMessages, 0)
+			m.lineLinks = append(m.lineLinks, "")
+			lastDay = dayKey
+		}
+
+		timeStr := msgTime.Format("15:04")
 
 		var sender string
 		if msg.IsFromMe {
@@ -211,45 +297,78 @@ func (m *MessagesModel) renderContent() {
 
 		prefix := ""
 		if m.showTimestamps {
-			prefix = timeStr + " "
+			prefix = formatMessageTimestamp(timeStr)
 		}
 
-		body := strings.TrimSpace(msg.Text)
-		if hasImageAttachment(msg) {
-			if body == "" {
-				body = "[IMG]"
+		previews := linkPreviewsForMessage(msg, 2)
+		previewLinks := make([]string, 0, len(previews))
+		for _, preview := range previews {
+			previewLinks = append(previewLinks, preview.URL)
+		}
+
+		bodyLines := splitNonEmptyLines(stripSupportedMediaLinks(msg.Text, previewLinks))
+		bodyLineLinks := make([]string, len(bodyLines))
+		if attLabel := attachmentLabel(msg, len(previews) > 0); attLabel != "" {
+			if len(bodyLines) == 0 {
+				bodyLines = append(bodyLines, attLabel)
+				bodyLineLinks = append(bodyLineLinks, "")
 			} else {
-				body += " [IMG]"
+				bodyLines[len(bodyLines)-1] += " " + attLabel
 			}
 		}
+		if reactionLabel := formatReactionCounts(msg.ReactionCounts); reactionLabel != "" {
+			if len(bodyLines) == 0 {
+				bodyLines = append(bodyLines, reactionLabel)
+				bodyLineLinks = append(bodyLineLinks, "")
+			} else {
+				bodyLines[len(bodyLines)-1] += " " + reactionLabel
+			}
+		}
+		for _, preview := range previews {
+			label := linkPreviewLabel(preview)
+			if label == "" {
+				continue
+			}
+			bodyLines = append(bodyLines, label)
+			bodyLineLinks = append(bodyLineLinks, preview.URL)
+		}
+		if msg.Pending {
+			if len(bodyLines) == 0 {
+				bodyLines = append(bodyLines, "…")
+				bodyLineLinks = append(bodyLineLinks, "")
+			} else {
+				bodyLines[0] = "… " + bodyLines[0]
+			}
+		}
+
 		lineNum := ""
 		if m.showLineNumbers {
 			lineNum = fmt.Sprintf("#%d ", i+1)
 		}
-		fullText := ""
-		if m.showSenderNames {
-			fullText = fmt.Sprintf("%s%s%s:", prefix, lineNum, sender)
-			if body != "" {
-				fullText += " " + body
-			}
-		} else {
-			fullText = prefix + lineNum + body
+		fullLines, fullLineLinks := messageRenderLines(prefix, lineNum, sender, bodyLines, bodyLineLinks, m.showSenderNames)
+
+		msgStyle := MyMessageStyle
+		if msg.Pending {
+			msgStyle = msgStyle.Faint(true)
 		}
 
 		if msg.IsFromMe {
-			// Wrap to wrapWidth, then manually right-align each line.
-			// Using Align(Right)+Width together makes each wrapped line get
-			// padded independently, which looks wrong for short continuation lines.
-			wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(fullText)
-			for i, line := range strings.Split(wrapped, "\n") {
-				if i > 0 {
-					sb.WriteString("\n")
+			wroteLine := false
+			for li, rawLine := range fullLines {
+				wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(rawLine)
+				for _, line := range strings.Split(wrapped, "\n") {
+					if wroteLine {
+						sb.WriteString("\n")
+					}
+					content := strings.TrimRight(line, " ")
+					if padLen := wrapWidth - lipgloss.Width(content); padLen > 0 {
+						sb.WriteString(strings.Repeat(" ", padLen))
+					}
+					sb.WriteString(msgStyle.Render(content))
+					m.lineMessages = append(m.lineMessages, i+1)
+					m.lineLinks = append(m.lineLinks, fullLineLinks[li])
+					wroteLine = true
 				}
-				content := strings.TrimRight(line, " ")
-				if padLen := wrapWidth - lipgloss.Width(content); padLen > 0 {
-					sb.WriteString(strings.Repeat(" ", padLen))
-				}
-				sb.WriteString(MyMessageStyle.Render(content))
 			}
 			sb.WriteString("\n")
 		} else {
@@ -257,7 +376,19 @@ func (m *MessagesModel) renderContent() {
 			if _, unseen := m.unseenGUIDs[msg.GUID]; unseen {
 				style = style.Reverse(true)
 			}
-			sb.WriteString(style.Width(wrapWidth).Render(fullText))
+			wroteLine := false
+			for li, rawLine := range fullLines {
+				rendered := style.Width(wrapWidth).Render(rawLine)
+				for _, line := range strings.Split(rendered, "\n") {
+					if wroteLine {
+						sb.WriteString("\n")
+					}
+					sb.WriteString(line)
+					m.lineMessages = append(m.lineMessages, i+1)
+					m.lineLinks = append(m.lineLinks, fullLineLinks[li])
+					wroteLine = true
+				}
+			}
 			sb.WriteString("\n")
 		}
 	}
@@ -266,6 +397,121 @@ func (m *MessagesModel) renderContent() {
 	if m.stickToBottom {
 		m.viewport.GotoBottom()
 	}
+}
+
+func attachmentLabel(msg models.Message, hideGeneric bool) string {
+	if len(msg.Attachments) == 0 {
+		return ""
+	}
+	if hideGeneric {
+		return ""
+	}
+	images := 0
+	others := 0
+	var firstName string
+	for _, att := range msg.Attachments {
+		if isImageAttachment(att) {
+			images++
+			if firstName == "" {
+				firstName = strings.TrimSpace(att.FileName)
+			}
+		} else {
+			others++
+			if firstName == "" {
+				firstName = strings.TrimSpace(att.FileName)
+			}
+		}
+	}
+	if images > 0 && others == 0 {
+		if images == 1 && firstName != "" {
+			return "[IMG: " + truncatePreview(firstName, 24) + "]"
+		}
+		return fmt.Sprintf("[%d images]", images)
+	}
+	total := len(msg.Attachments)
+	if total == 1 && firstName != "" {
+		return "[" + truncatePreview(firstName, 24) + "]"
+	}
+	return fmt.Sprintf("[%d attachments]", total)
+}
+
+func splitNonEmptyLines(text string) []string {
+	var lines []string
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func formatMessageTimestamp(timeStr string) string {
+	timeStr = strings.TrimSpace(timeStr)
+	if timeStr == "" {
+		return ""
+	}
+	return TimestampStyle.Faint(true).Render(timeStr)
+}
+
+func messageRenderLines(prefix, lineNum, sender string, bodyLines, bodyLineLinks []string, showSenderNames bool) ([]string, []string) {
+	if len(bodyLines) == 0 {
+		if showSenderNames {
+			return []string{fmt.Sprintf("%s%s%s:", prefix, lineNum, sender)}, []string{""}
+		}
+		return []string{prefix + lineNum}, []string{""}
+	}
+
+	lines := make([]string, 0, len(bodyLines))
+	links := make([]string, 0, len(bodyLines))
+	if showSenderNames {
+		first := fmt.Sprintf("%s%s%s:", prefix, lineNum, sender)
+		if bodyLines[0] != "" {
+			first += " " + bodyLines[0]
+		}
+		lines = append(lines, first)
+		links = append(links, bodyLineLinks[0])
+		for i := 1; i < len(bodyLines); i++ {
+			lines = append(lines, bodyLines[i])
+			links = append(links, bodyLineLinks[i])
+		}
+		return lines, links
+	}
+
+	lines = append(lines, prefix+lineNum+bodyLines[0])
+	links = append(links, bodyLineLinks[0])
+	for i := 1; i < len(bodyLines); i++ {
+		lines = append(lines, bodyLines[i])
+		links = append(links, bodyLineLinks[i])
+	}
+	return lines, links
+}
+
+func formatReactionCounts(counts map[string]int) string {
+	if len(counts) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(counts))
+	for k := range counts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var parts []string
+	for _, k := range keys {
+		n := counts[k]
+		if n <= 0 {
+			continue
+		}
+		if n == 1 {
+			parts = append(parts, k)
+		} else {
+			parts = append(parts, fmt.Sprintf("%s×%d", k, n))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " ")
 }
 
 func (m *MessagesModel) rebuildMessageIndex() {
@@ -321,6 +567,41 @@ func (m *MessagesModel) ScrollDown() {
 	m.stickToBottom = m.viewport.AtBottom()
 }
 
+func (m *MessagesModel) ScrollPageUp() {
+	m.viewport.ViewUp()
+	m.stickToBottom = m.viewport.AtBottom()
+}
+
+func (m *MessagesModel) ScrollPageDown() {
+	m.viewport.ViewDown()
+	m.stickToBottom = m.viewport.AtBottom()
+}
+
+func (m *MessagesModel) GotoBottom() {
+	m.stickToBottom = true
+	m.viewport.GotoBottom()
+}
+
+func (m *MessagesModel) HasUnseenIncoming() bool {
+	return len(m.unseenGUIDs) > 0
+}
+
+func (m *MessagesModel) Loading() bool {
+	return m.loading
+}
+
+func (m *MessagesModel) SetShowHeader(show bool) {
+	m.showHeader = show
+}
+
+func (m *MessagesModel) SetLoading(loading bool) {
+	if m.loading == loading {
+		return
+	}
+	m.loading = loading
+	m.renderContent()
+}
+
 func (m MessagesModel) Update(msg tea.Msg) (MessagesModel, tea.Cmd) {
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
@@ -335,11 +616,19 @@ func (m MessagesModel) Update(msg tea.Msg) (MessagesModel, tea.Cmd) {
 
 func (m MessagesModel) View() string {
 	header := ""
-	if m.chatName != "" {
+	if m.showHeader && (m.chatName != "" || m.loading) {
+		var parts []string
+		if m.chatName != "" {
+			parts = append(parts, m.chatName)
+		}
+		if m.loading {
+			parts = append(parts, "…")
+		}
+		title := strings.Join(parts, " ")
 		header = lipgloss.NewStyle().
 			Bold(true).
 			Padding(0, 1).
-			Render(m.chatName) + "\n"
+			Render(title) + "\n"
 	}
 
 	return header + m.viewport.View()

@@ -47,6 +47,107 @@ func dedupeMessages(messages []models.Message) []models.Message {
 	return out
 }
 
+func foldReactionMessages(messages []models.Message) []models.Message {
+	if len(messages) == 0 {
+		return messages
+	}
+	out := make([]models.Message, 0, len(messages))
+	indexByGUID := make(map[string]int, len(messages))
+	pending := make(map[string][]string)
+
+	for _, msg := range messages {
+		if emoji := reactionEmoji(msg); emoji != "" {
+			targetGUID := normalizeAssociatedMessageGUID(msg.AssociatedMessageGUID)
+			if idx, ok := indexByGUID[targetGUID]; ok {
+				addReaction(&out[idx], emoji)
+			} else if targetGUID != "" {
+				pending[targetGUID] = append(pending[targetGUID], emoji)
+			}
+			continue
+		}
+
+		idx := len(out)
+		out = append(out, msg)
+		if guid := strings.TrimSpace(msg.GUID); guid != "" {
+			indexByGUID[guid] = idx
+			for _, emoji := range pending[guid] {
+				addReaction(&out[idx], emoji)
+			}
+			delete(pending, guid)
+		}
+	}
+
+	return out
+}
+
+func addReactionToMessages(messages []models.Message, associatedGUID, emoji string) bool {
+	associatedGUID = normalizeAssociatedMessageGUID(associatedGUID)
+	if associatedGUID == "" || emoji == "" {
+		return false
+	}
+	for i := range messages {
+		if messages[i].GUID != associatedGUID {
+			continue
+		}
+		addReaction(&messages[i], emoji)
+		return true
+	}
+	return false
+}
+
+func addReaction(msg *models.Message, emoji string) {
+	if msg.ReactionCounts == nil {
+		msg.ReactionCounts = make(map[string]int)
+	}
+	msg.ReactionCounts[emoji]++
+}
+
+func reactionEmoji(msg models.Message) string {
+	if normalizeAssociatedMessageGUID(msg.AssociatedMessageGUID) == "" {
+		return ""
+	}
+	raw := strings.ToLower(strings.TrimSpace(msg.AssociatedMessageType + " " + msg.Text))
+	switch {
+	case strings.Contains(raw, "2000"):
+		return "❤️"
+	case strings.Contains(raw, "3000"):
+		return "👍"
+	case strings.Contains(raw, "4000"):
+		return "👎"
+	case strings.Contains(raw, "5000"):
+		return "😂"
+	case strings.Contains(raw, "6000"):
+		return "‼️"
+	case strings.Contains(raw, "7000"):
+		return "❓"
+	case strings.Contains(raw, "❤️"), strings.Contains(raw, "❤"), strings.Contains(raw, "love"), strings.Contains(raw, "loved"), strings.Contains(raw, "heart"), strings.Contains(raw, "hjarta"):
+		return "❤️"
+	case strings.Contains(raw, "👍"), strings.Contains(raw, "like"), strings.Contains(raw, "liked"), strings.Contains(raw, "thumbs up"), strings.Contains(raw, "thumbsup"):
+		return "👍"
+	case strings.Contains(raw, "👎"), strings.Contains(raw, "dislike"), strings.Contains(raw, "disliked"), strings.Contains(raw, "thumbs down"), strings.Contains(raw, "thumbsdown"):
+		return "👎"
+	case strings.Contains(raw, "😂"), strings.Contains(raw, "🤣"), strings.Contains(raw, "laugh"), strings.Contains(raw, "laughed"), strings.Contains(raw, "haha"):
+		return "😂"
+	case strings.Contains(raw, "‼"), strings.Contains(raw, "emphasize"), strings.Contains(raw, "emphasized"), strings.Contains(raw, "exclaim"), strings.Contains(raw, "!!"):
+		return "‼️"
+	case strings.Contains(raw, "❓"), strings.Contains(raw, "question"), strings.Contains(raw, "?"):
+		return "❓"
+	default:
+		return ""
+	}
+}
+
+func normalizeAssociatedMessageGUID(guid string) string {
+	guid = strings.TrimSpace(guid)
+	if guid == "" {
+		return ""
+	}
+	if idx := strings.LastIndex(guid, "/"); idx >= 0 && idx < len(guid)-1 {
+		guid = guid[idx+1:]
+	}
+	return strings.TrimSpace(guid)
+}
+
 func messageDedupeKeys(msg models.Message) []string {
 	keys := make([]string, 0, 2)
 	if guid := strings.TrimSpace(msg.GUID); guid != "" {

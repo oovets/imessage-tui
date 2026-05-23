@@ -18,14 +18,14 @@ const (
 
 // Shared palette values.
 const (
-	PaletteBlack      = lipgloss.Color("0")
-	PalettePink       = lipgloss.Color("212")
-	PaletteGray       = lipgloss.Color("242")
-	PaletteDarkGray   = lipgloss.Color("240")
-	PaletteRed        = lipgloss.Color("196")
-	PaletteGreen      = lipgloss.Color("46")
-	PaletteStatusFG   = lipgloss.Color("241")
-	PaletteStatusBG   = lipgloss.Color("235")
+	PaletteBlack    = lipgloss.Color("0")
+	PalettePink     = lipgloss.Color("212")
+	PaletteGray     = lipgloss.Color("242")
+	PaletteDarkGray = lipgloss.Color("240")
+	PaletteRed      = lipgloss.Color("196")
+	PaletteGreen    = lipgloss.Color("46")
+	PaletteStatusFG = lipgloss.Color("241")
+	PaletteStatusBG = lipgloss.Color("235")
 )
 
 // Semantic colors by UI area.
@@ -50,49 +50,53 @@ const (
 var (
 	// Panel styles (no borders, just padding)
 	PanelStyle = lipgloss.NewStyle().
-		Padding(0, 1)
+			Padding(0, 1)
 
 	ActivePanelStyle = lipgloss.NewStyle().
-		Padding(0, 1)
+				Padding(0, 1).
+				Border(lipgloss.NormalBorder(), false, false, false, true).
+				BorderForeground(ColorChatListSelectedBackground)
 
 	// Chat list styles
 	ChatListItemStyle = lipgloss.NewStyle().
-		Padding(0).
-		Margin(0)
+				Padding(0).
+				Margin(0)
 
 	ChatListItemSelectedStyle = lipgloss.NewStyle().
-		Foreground(ColorChatListSelectedForeground).
-		Background(ColorChatListSelectedBackground).
-		Padding(0).
-		Margin(0)
+					Foreground(ColorChatListSelectedForeground).
+					Background(ColorChatListSelectedBackground).
+					Padding(0).
+					Margin(0)
 
 	// Message styles
 	MyMessageStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.AdaptiveColor{Dark: ColorMyMessageDark, Light: ColorMyMessageLight})
+			Foreground(lipgloss.AdaptiveColor{Dark: ColorMyMessageDark, Light: ColorMyMessageLight})
 
+	// Incoming messages use a fixed light gray so they stay readable on a
+	// black background regardless of terminal background detection.
 	TheirMessageStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.AdaptiveColor{Dark: ColorTheirMessageDark, Light: ColorTheirMessageLight}).
-		Align(lipgloss.Left)
+				Foreground(lipgloss.Color("250")).
+				Align(lipgloss.Left)
 
 	TimestampStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.AdaptiveColor{Dark: ColorTimestampDark, Light: ColorTimestampLight}).
-		PaddingRight(1)
+			Foreground(lipgloss.AdaptiveColor{Dark: ColorTimestampDark, Light: ColorTimestampLight}).
+			PaddingRight(1)
 
 	// Status bar
 	StatusBarStyle = lipgloss.NewStyle().
-		Foreground(ColorStatusBarForeground).
-		Background(ColorStatusBarBackground).
-		Padding(0, 1)
+			Foreground(ColorStatusBarForeground).
+			Background(ColorStatusBarBackground).
+			Padding(0, 1)
 
 	// Input styles (no border)
 	InputStyle = lipgloss.NewStyle()
 
 	// Window styles for split view (no borders)
 	FocusedWindowStyle = lipgloss.NewStyle().
-		Padding(0, 1)
+				Padding(0, 1)
 
 	UnfocusedWindowStyle = lipgloss.NewStyle().
-		Padding(0, 1)
+				Padding(0, 1)
 )
 
 // CalculateLayout returns the optimal dimensions for each panel
