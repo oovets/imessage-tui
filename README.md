@@ -1,5 +1,3 @@
-# imessage-tui
-
 [![Go](https://img.shields.io/badge/go-1.24%2B-00ADD8.svg)](https://go.dev/)
 [![Bubble Tea](https://img.shields.io/badge/tui-bubble%20tea-ff69b4.svg)](https://github.com/charmbracelet/bubbletea)
 [![Docs](https://img.shields.io/badge/docs-mkdocs--material-blue.svg)](https://stevoo.net/imessage-tui/)
@@ -11,17 +9,27 @@ module path: github.com/oovets/imessage-tui
 == features ==
 
 - real-time updates over socket.io/websocket, with api polling as a reconciliation path
+
 - multi-pane chat layout with horizontal/vertical splits, up to 4 panes
+
 - per-pane focus, unread/new-message indicators, layout + message-cache persistence
+
 - chat list with activity ordering, unread markers, timestamps, previews, search,
   resizable width
+
 - chat delete + rename, with local alias fallback for unsupported server-side renames
+
 - optional timestamps, line numbers, sender labels, pane dividers, chat previews
+
 - image attachment labels + /img #N, click-to-open, selected-row Enter open
+
 - youtube / spotify / instagram / news-site link previews via oembed, html metadata,
   or a configurable preview proxy
+
 - tapbacks render as compact emoji on the original message
+
 - optimistic outgoing messages with timeout reconciliation
+
 - mouse support: focus, chat-list resize, pane-divider resize, image open, scroll
 ```
 
@@ -76,14 +84,18 @@ navigation   Tab focus chat-list<->pane · Esc focus list / close help ·
              Left/Right pane focus (Left from leftmost -> list) · Ctrl+Up/Down pane
              focus vertically · Up/Down or k/j list · g/G top/bottom (G in pane ->
              newest) · Enter open chat / send / open image row · Shift+Enter newline
+
 chat list    / filter (Esc clears) · d then D delete · r rename · Ctrl+D/Ctrl+R
              delete/rename pane chat · Ctrl+Left/Right resize · Ctrl+P previews ·
              mouse-drag right edge to resize
+
 messages     PgUp/PgDn scroll · End/G newest · /img #N open image from row N ·
              /h /lol /tu /te react heart/laugh/up/down · /!! /? emphasize/question ·
              click image row to open  (reactions via /api/v1/message/react)
+
 panes        Ctrl+F split horizontal · Ctrl+G split vertical · Ctrl+W close ·
              Ctrl+Shift+Left/Right adjust ratio · mouse-drag divider to resize
+
 display      Ctrl+S chat list · Ctrl+T timestamps · Ctrl+N line numbers ·
              Ctrl+B/Alt+M/Ctrl+M sender labels · Ctrl+E pane dividers · ? help ·
              q / Ctrl+C quit
@@ -146,7 +158,10 @@ git diff --check
 == troubleshooting ==
 
 - tls errors: verify server url, certificate trust, and password.
+
 - missing names: ensure contacts are available to bluebubbles.
+
 - stale chats: verify websocket connectivity; polling reconciles open chats when enabled.
+
 - build errors on modern stdlib packages: ensure go 1.24+ is first on PATH.
 ```
