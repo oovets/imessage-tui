@@ -1,5 +1,9 @@
 # imessage-tui
 
+[![Go](https://img.shields.io/badge/go-1.24%2B-00ADD8.svg)](https://go.dev/)
+[![Bubble Tea](https://img.shields.io/badge/tui-bubble%20tea-ff69b4.svg)](https://github.com/charmbracelet/bubbletea)
+[![Docs](https://img.shields.io/badge/docs-mkdocs--material-blue.svg)](https://stevoo.net/imessage-tui/)
+
 keyboard-first terminal client for imessage, backed by a bluebubbles-compatible server.
 module path: github.com/oovets/imessage-tui
 
