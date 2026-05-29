@@ -8,14 +8,14 @@ keyboard-first terminal client for imessage, backed by a bluebubbles-compatible 
 == features ==
 
   real-time updates over socket.io/websocket, with api polling as a reconciliation path
-  multi-pane chat layout with horizontal/vertical splits, up to 4 panes per-pane focus,
-  unread/new-message indicators, layout + message-cache persistence chat list with activity
-  ordering, unread markers, timestamps, previews, search, resizable width
+  multi-pane chat layout with horizontal/vertical splits, up to 4 panes per-pane focus
+  unread msg indicators, layout + message-cache persistence chat list with activity
+   ordering, unread markers, timestamps, previews, search, resizable width
   chat delete + rename, with local alias fallback for unsupported server-side renames
   optional timestamps, line numbers, sender labels, pane dividers, chat previews
   image attachment labels + /img #N, click-to-open, selected-row Enter open
   youtube / spotify / instagram / news-site link previews via oembed, html metadata,
-  or a configurable preview proxy.
+   or a configurable preview proxy.
   tapbacks render as compact emoji on the original message
   optimistic outgoing messages with timeout reconciliation
   mouse support: focus, chat-list resize, pane-divider resize, image open, scroll
@@ -117,9 +117,9 @@ the chat list hidden, new incoming messages are summarised there.
 == chat management ==
 
 delete uses the bluebubbles private api (DELETE /api/v1/chat/{guid}/delete) and clears
-local cache/layout only after the server confirms: press d on a chat, then D to confirm,
-Esc to cancel. rename uses the group-rename api when available; if rejected, the tui saves
-a local alias in ~/.config/imessage-tui/chat_overrides.json and applies it on refresh.
+local cachet only after the server confirms: press d on a chat, then D to confirm,
+Esc to cancel. rename uses the group-rename api when available; if rejected, the tui
+ saves an alias in ~/.config/imessage-tui/chat_overrides.json and applies it on refresh.
 ```
 
 ```
@@ -132,15 +132,15 @@ supported media urls render a compact preview line, e.g.
 
 hosts: youtube.com m.youtube.com youtu.be spotify.com open.spotify.com instagram.com
 m.instagram.com aftonbladet.se expressen.se dn.se svd.se svt.se omni.se gp.se
-sydsvenskan.se di.se. fetches are async (fallback label first, then metadata); news sites
+sydsvenskan.se di.se. fetches are async (fallback label first, then metadata)
 prefer html metadata so generic titles like "search" are ignored and refetched.
 ```
 
 ```
 == bluebubbles setup ==
 
-bluebubbles must run on a mac signed into icloud with messages enabled; grant full disk
-access, accessibility, and automation to the server app.
+bluebubbles must run on a mac signed into icloud with messages enabled;
+ grant full disk access, accessibility, and automation to the server app.
 
 verify connectivity;
   curl -k "https://your-server/api/v1/server/info?password=YOUR_PASSWORD"
@@ -171,6 +171,7 @@ git diff --check
 == troubleshooting ==
 * tls errors: verify server url, certificate trust, and password.
 * missing names: ensure contacts are available to bluebubbles.
-* stale chats: verify websocket connectivity; polling reconciles open chats when enabled.
+* stale chats: verify websocket connectivity;
+  polling reconciles open chats when enabled.
 * build errors on modern stdlib packages: ensure go 1.24+ is first on PATH.
 ```
