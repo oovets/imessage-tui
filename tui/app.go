@@ -329,7 +329,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.windowManager.SetCachedMessages(msg.chatGUID, merged)
 		m.messageFetchInFlight[msg.chatGUID] = false
 		m.messageFetchedAt[msg.chatGUID] = time.Now()
-		m.saveMessageCache()
+		m.saveMessageCacheChat(msg.chatGUID)
 		for _, window := range m.windowManager.WindowsShowingChat(msg.chatGUID) {
 			window.Messages.SetMessages(merged)
 			window.Messages.SetLoading(false)
@@ -1381,6 +1381,35 @@ func (m *AppModel) saveMessageCache() {
 	m.persist.saveMessages(state)
 }
 
+// saveMessageCacheChat persists just one chat's cached messages. Use this on
+// hot single-chat paths (incoming WS messages, per-chat reloads) so we don't
+// deep-copy every cached chat on every message; the persister merges it into
+// the cumulative state. Broad changes (deletes, shutdown) still use
+// saveMessageCache to rebuild the whole state.
+func (m *AppModel) saveMessageCacheChat(chatGUID string) {
+	chatGUID = strings.TrimSpace(chatGUID)
+	if chatGUID == "" {
+		return
+	}
+	messages := m.windowManager.GetCachedMessages(chatGUID)
+	if len(messages) == 0 {
+		return
+	}
+	// GetCachedMessages returns the live slice; copy it so the debounced flush
+	// can't race a later append on the Update loop.
+	copied := make([]models.Message, len(messages))
+	copy(copied, messages)
+
+	fetchedAt := time.Now().UnixMilli()
+	if t, ok := m.messageFetchedAt[chatGUID]; ok && !t.IsZero() {
+		fetchedAt = t.UnixMilli()
+	}
+	m.persist.saveMessagesChat(chatGUID, config.CachedChatMessages{
+		Messages:           copied,
+		FetchedAtUnixMilli: fetchedAt,
+	})
+}
+
 func (m *AppModel) restoreLayoutFromState(chats []models.Chat) bool {
 	if m.didRestoreLayout {
 		return false
@@ -2075,7 +2104,7 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 			// API fetches bump it so the TTL in shouldRefreshMessages can
 			// still trigger a reconciling refetch and heal any hole that
 			// WS may have left behind.
-			m.saveMessageCache()
+			m.saveMessageCacheChat(msg.ChatGUID)
 
 			// Update ALL windows showing this chat
 			windowsShowing := m.windowManager.WindowsShowingChat(msg.ChatGUID)

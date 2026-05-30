@@ -15,8 +15,13 @@ import (
 type persister struct {
 	mu sync.Mutex
 
-	pendingMessages *config.MessageCacheState
-	messagesTimer   *time.Timer
+	// messages is the cumulative cache state, retained across flushes so a
+	// single-chat update doesn't have to re-supply every other chat. Updates
+	// always replace a whole entry (never mutate one in place), so flush can
+	// marshal the slices off the lock without racing the Update loop.
+	messages      map[string]config.CachedChatMessages
+	messagesDirty bool
+	messagesTimer *time.Timer
 
 	pendingLayout *config.LayoutState
 	layoutTimer   *time.Timer
@@ -33,26 +38,54 @@ func newPersister() *persister {
 	return &persister{debounce: 250 * time.Millisecond}
 }
 
+// saveMessages replaces the entire cached message state.
 func (p *persister) saveMessages(state config.MessageCacheState) {
 	p.mu.Lock()
-	p.pendingMessages = &state
+	p.messages = state.Chats
+	p.markMessagesDirtyLocked()
+	p.mu.Unlock()
+}
+
+// saveMessagesChat updates a single chat's cached messages, leaving the rest of
+// the cumulative state untouched. This keeps the per-message hot path from
+// copying every other chat on every incoming message. The caller must pass a
+// slice it will not mutate afterwards.
+func (p *persister) saveMessagesChat(chatGUID string, cached config.CachedChatMessages) {
+	p.mu.Lock()
+	if p.messages == nil {
+		p.messages = make(map[string]config.CachedChatMessages)
+	}
+	p.messages[chatGUID] = cached
+	p.markMessagesDirtyLocked()
+	p.mu.Unlock()
+}
+
+// markMessagesDirtyLocked schedules a debounced flush. Caller must hold p.mu.
+func (p *persister) markMessagesDirtyLocked() {
+	p.messagesDirty = true
 	if p.messagesTimer == nil {
 		p.messagesTimer = time.AfterFunc(p.debounce, p.flushMessages)
 	} else {
 		p.messagesTimer.Reset(p.debounce)
 	}
-	p.mu.Unlock()
 }
 
 func (p *persister) flushMessages() {
 	p.mu.Lock()
-	state := p.pendingMessages
-	p.pendingMessages = nil
-	p.mu.Unlock()
-	if state == nil {
+	if !p.messagesDirty || p.messages == nil {
+		p.mu.Unlock()
 		return
 	}
-	if err := config.SaveMessageCache(*state); err != nil {
+	// Copy the map (slice headers shared, contents immutable) so the marshal
+	// below runs off the lock without racing concurrent saves on the loop.
+	snapshot := config.MessageCacheState{Chats: make(map[string]config.CachedChatMessages, len(p.messages))}
+	for guid, cached := range p.messages {
+		snapshot.Chats[guid] = cached
+	}
+	p.messagesDirty = false
+	p.mu.Unlock()
+
+	if err := config.SaveMessageCache(snapshot); err != nil {
 		log.Printf("failed to save message cache: %v", err)
 	}
 }

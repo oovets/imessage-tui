@@ -27,6 +27,15 @@ type MessagesModel struct {
 	showHeader      bool
 	lineMessages    []int
 	lineLinks       []string
+
+	// Cached render so a single appended message doesn't re-render the whole
+	// history. renderedBody is the full viewport content; lastRenderedDay is
+	// the day key after the last rendered message; contentRendered is false
+	// while the viewport shows a placeholder (empty/loading) rather than a
+	// real render.
+	renderedBody    string
+	lastRenderedDay string
+	contentRendered bool
 }
 
 func NewMessagesModel() MessagesModel {
@@ -87,7 +96,8 @@ func (m *MessagesModel) AppendMessage(msg models.Message) {
 		m.messageKeys[key] = struct{}{}
 	}
 
-	if len(m.messages) == 0 || m.messages[len(m.messages)-1].DateCreated <= msg.DateCreated {
+	endAppend := len(m.messages) == 0 || m.messages[len(m.messages)-1].DateCreated <= msg.DateCreated
+	if endAppend {
 		// Fast path: most WS messages are newest.
 		m.messages = append(m.messages, msg)
 	} else {
@@ -98,6 +108,23 @@ func (m *MessagesModel) AppendMessage(msg models.Message) {
 		m.messages = append(m.messages, models.Message{})
 		copy(m.messages[pos+1:], m.messages[pos:])
 		m.messages[pos] = msg
+	}
+
+	// Appending at the end can't change any earlier line (line numbers count
+	// up, day separators only ever precede the new block), so render just the
+	// new message and tack it onto the cached body instead of re-rendering the
+	// whole history. Anything else (sorted insert, no prior render) falls back
+	// to a full render.
+	if endAppend && m.contentRendered {
+		var sb strings.Builder
+		i := len(m.messages) - 1
+		m.lastRenderedDay = m.renderMessageBlock(&sb, i, msg, m.lastRenderedDay, m.wrapWidth())
+		m.renderedBody += sb.String()
+		m.viewport.SetContent(m.renderedBody)
+		if m.stickToBottom {
+			m.viewport.GotoBottom()
+		}
+		return
 	}
 	m.renderContent()
 }
@@ -241,6 +268,14 @@ func (m *MessagesModel) messageNumberAtViewportY(y int) int {
 	return m.lineMessages[line]
 }
 
+func (m *MessagesModel) wrapWidth() int {
+	w := m.width
+	if w < 1 {
+		w = 60
+	}
+	return w
+}
+
 func (m *MessagesModel) renderContent() {
 	m.lineMessages = m.lineMessages[:0]
 	m.lineLinks = m.lineLinks[:0]
@@ -250,148 +285,157 @@ func (m *MessagesModel) renderContent() {
 		} else {
 			m.viewport.SetContent("(No messages yet)")
 		}
+		m.renderedBody = ""
+		m.lastRenderedDay = ""
+		m.contentRendered = false
 		return
 	}
 
-	wrapWidth := m.width
-	if wrapWidth < 1 {
-		wrapWidth = 60
+	wrapWidth := m.wrapWidth()
+	var sb strings.Builder
+	lastDay := ""
+	for i, msg := range m.messages {
+		lastDay = m.renderMessageBlock(&sb, i, msg, lastDay, wrapWidth)
 	}
 
-	var sb strings.Builder
-	var lastDay string
+	m.renderedBody = sb.String()
+	m.lastRenderedDay = lastDay
+	m.contentRendered = true
+	m.viewport.SetContent(m.renderedBody)
+	if m.stickToBottom {
+		m.viewport.GotoBottom()
+	}
+}
 
-	for i, msg := range m.messages {
-		msgTime := msg.ParsedTime()
-		dayKey := msgTime.Format("2006-01-02")
-		if dayKey != lastDay {
-			if lastDay != "" {
-				sb.WriteString("\n")
-				m.lineMessages = append(m.lineMessages, 0)
-				m.lineLinks = append(m.lineLinks, "")
-			}
-			sep := "── " + formatDateSeparator(msgTime) + " ──"
-			sepStyle := lipgloss.NewStyle().
-				Foreground(ColorWindowPlaceholder).
-				Width(wrapWidth).
-				Align(lipgloss.Center)
-			sb.WriteString(sepStyle.Render(sep))
+// renderMessageBlock renders message i (whose predecessor ended on day lastDay)
+// into sb, appending one entry per visual line to the line-index slices, and
+// returns the day key the next message should compare against.
+func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg models.Message, lastDay string, wrapWidth int) string {
+	msgTime := msg.ParsedTime()
+	dayKey := msgTime.Format("2006-01-02")
+	if dayKey != lastDay {
+		if lastDay != "" {
 			sb.WriteString("\n")
 			m.lineMessages = append(m.lineMessages, 0)
 			m.lineLinks = append(m.lineLinks, "")
-			lastDay = dayKey
 		}
+		sep := "── " + formatDateSeparator(msgTime) + " ──"
+		sepStyle := lipgloss.NewStyle().
+			Foreground(ColorWindowPlaceholder).
+			Width(wrapWidth).
+			Align(lipgloss.Center)
+		sb.WriteString(sepStyle.Render(sep))
+		sb.WriteString("\n")
+		m.lineMessages = append(m.lineMessages, 0)
+		m.lineLinks = append(m.lineLinks, "")
+		lastDay = dayKey
+	}
 
-		timeStr := msgTime.Format("15:04")
+	timeStr := msgTime.Format("15:04")
 
-		var sender string
-		if msg.IsFromMe {
-			sender = "You"
-		} else if msg.Handle != nil && msg.Handle.DisplayName != "" {
-			sender = stripEmojis(msg.Handle.DisplayName)
-		} else if msg.Handle != nil {
-			sender = msg.Handle.Address
+	var sender string
+	if msg.IsFromMe {
+		sender = "You"
+	} else if msg.Handle != nil && msg.Handle.DisplayName != "" {
+		sender = stripEmojis(msg.Handle.DisplayName)
+	} else if msg.Handle != nil {
+		sender = msg.Handle.Address
+	} else {
+		sender = "Unknown"
+	}
+
+	prefix := ""
+	if m.showTimestamps {
+		prefix = formatMessageTimestamp(timeStr)
+	}
+
+	previews := linkPreviewsForMessage(msg, 2)
+	previewLinks := make([]string, 0, len(previews))
+	for _, preview := range previews {
+		previewLinks = append(previewLinks, preview.URL)
+	}
+
+	bodyLines := splitNonEmptyLines(stripSupportedMediaLinks(msg.Text, previewLinks))
+	bodyLineLinks := make([]string, len(bodyLines))
+	if attLabel := attachmentLabel(msg, len(previews) > 0); attLabel != "" {
+		if len(bodyLines) == 0 {
+			bodyLines = append(bodyLines, attLabel)
+			bodyLineLinks = append(bodyLineLinks, "")
 		} else {
-			sender = "Unknown"
+			bodyLines[len(bodyLines)-1] += " " + attLabel
 		}
+	}
+	reactionLabel := formatReactionCounts(msg.ReactionCounts)
+	for _, preview := range previews {
+		label := linkPreviewLabel(preview)
+		if label == "" {
+			continue
+		}
+		bodyLines = append(bodyLines, label)
+		bodyLineLinks = append(bodyLineLinks, preview.URL)
+	}
+	if msg.Pending {
+		if len(bodyLines) == 0 {
+			bodyLines = append(bodyLines, "…")
+			bodyLineLinks = append(bodyLineLinks, "")
+		} else {
+			bodyLines[0] = "… " + bodyLines[0]
+		}
+	}
 
-		prefix := ""
-		if m.showTimestamps {
-			prefix = formatMessageTimestamp(timeStr)
-		}
+	lineNum := ""
+	if m.showLineNumbers {
+		lineNum = fmt.Sprintf("#%d ", i+1)
+	}
+	fullLines, fullLineLinks := messageRenderLines(prefix, lineNum, sender, bodyLines, bodyLineLinks, m.showSenderNames)
+	if reactionLabel != "" {
+		fullLines = append(fullLines, "  "+reactionLabel)
+		fullLineLinks = append(fullLineLinks, "")
+	}
 
-		previews := linkPreviewsForMessage(msg, 2)
-		previewLinks := make([]string, 0, len(previews))
-		for _, preview := range previews {
-			previewLinks = append(previewLinks, preview.URL)
-		}
-
-		bodyLines := splitNonEmptyLines(stripSupportedMediaLinks(msg.Text, previewLinks))
-		bodyLineLinks := make([]string, len(bodyLines))
-		if attLabel := attachmentLabel(msg, len(previews) > 0); attLabel != "" {
-			if len(bodyLines) == 0 {
-				bodyLines = append(bodyLines, attLabel)
-				bodyLineLinks = append(bodyLineLinks, "")
-			} else {
-				bodyLines[len(bodyLines)-1] += " " + attLabel
-			}
-		}
-		reactionLabel := formatReactionCounts(msg.ReactionCounts)
-		for _, preview := range previews {
-			label := linkPreviewLabel(preview)
-			if label == "" {
-				continue
-			}
-			bodyLines = append(bodyLines, label)
-			bodyLineLinks = append(bodyLineLinks, preview.URL)
-		}
-		if msg.Pending {
-			if len(bodyLines) == 0 {
-				bodyLines = append(bodyLines, "…")
-				bodyLineLinks = append(bodyLineLinks, "")
-			} else {
-				bodyLines[0] = "… " + bodyLines[0]
-			}
-		}
-
-		lineNum := ""
-		if m.showLineNumbers {
-			lineNum = fmt.Sprintf("#%d ", i+1)
-		}
-		fullLines, fullLineLinks := messageRenderLines(prefix, lineNum, sender, bodyLines, bodyLineLinks, m.showSenderNames)
-		if reactionLabel != "" {
-			fullLines = append(fullLines, "  "+reactionLabel)
-			fullLineLinks = append(fullLineLinks, "")
-		}
-
+	if msg.IsFromMe {
 		msgStyle := MyMessageStyle
 		if msg.Pending {
 			msgStyle = msgStyle.Faint(true)
 		}
-
-		if msg.IsFromMe {
-			wroteLine := false
-			for li, rawLine := range fullLines {
-				for _, line := range messageWrappedLines(rawLine, wrapWidth, fullLineLinks[li] == "") {
-					if wroteLine {
-						sb.WriteString("\n")
-					}
-					content := strings.TrimRight(line, " ")
-					if padLen := wrapWidth - lipgloss.Width(content); padLen > 0 {
-						sb.WriteString(strings.Repeat(" ", padLen))
-					}
-					sb.WriteString(msgStyle.Render(content))
-					m.lineMessages = append(m.lineMessages, i+1)
-					m.lineLinks = append(m.lineLinks, fullLineLinks[li])
-					wroteLine = true
+		wroteLine := false
+		for li, rawLine := range fullLines {
+			for _, line := range messageWrappedLines(rawLine, wrapWidth, fullLineLinks[li] == "") {
+				if wroteLine {
+					sb.WriteString("\n")
 				}
-			}
-			sb.WriteString("\n")
-		} else {
-			style := TheirMessageStyle
-			if _, unseen := m.unseenGUIDs[msg.GUID]; unseen {
-				style = style.Reverse(true)
-			}
-			wroteLine := false
-			for li, rawLine := range fullLines {
-				for _, line := range messageWrappedLines(rawLine, wrapWidth, fullLineLinks[li] == "") {
-					if wroteLine {
-						sb.WriteString("\n")
-					}
-					sb.WriteString(style.Width(wrapWidth).Render(line))
-					m.lineMessages = append(m.lineMessages, i+1)
-					m.lineLinks = append(m.lineLinks, fullLineLinks[li])
-					wroteLine = true
+				content := strings.TrimRight(line, " ")
+				if padLen := wrapWidth - lipgloss.Width(content); padLen > 0 {
+					sb.WriteString(strings.Repeat(" ", padLen))
 				}
+				sb.WriteString(msgStyle.Render(content))
+				m.lineMessages = append(m.lineMessages, i+1)
+				m.lineLinks = append(m.lineLinks, fullLineLinks[li])
+				wroteLine = true
 			}
-			sb.WriteString("\n")
 		}
+		sb.WriteString("\n")
+	} else {
+		style := TheirMessageStyle
+		if _, unseen := m.unseenGUIDs[msg.GUID]; unseen {
+			style = style.Reverse(true)
+		}
+		wroteLine := false
+		for li, rawLine := range fullLines {
+			for _, line := range messageWrappedLines(rawLine, wrapWidth, fullLineLinks[li] == "") {
+				if wroteLine {
+					sb.WriteString("\n")
+				}
+				sb.WriteString(style.Width(wrapWidth).Render(line))
+				m.lineMessages = append(m.lineMessages, i+1)
+				m.lineLinks = append(m.lineLinks, fullLineLinks[li])
+				wroteLine = true
+			}
+		}
+		sb.WriteString("\n")
 	}
 
-	m.viewport.SetContent(sb.String())
-	if m.stickToBottom {
-		m.viewport.GotoBottom()
-	}
+	return lastDay
 }
 
 func attachmentLabel(msg models.Message, hideGeneric bool) string {
