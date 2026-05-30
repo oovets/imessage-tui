@@ -2,3 +2,6 @@
 # mkdocs site build
 /site
 /docs/*.md
+
+# built binary
+/imessage-tui
