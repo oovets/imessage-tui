@@ -22,6 +22,12 @@ type InputModel struct {
 	lastValue  string
 	lastWidth  int
 	lastHeight int
+
+	// Emoji autocomplete state (see emoji_autocomplete.go).
+	acActive   bool
+	acQuery    string
+	acMatches  []emojiEntry
+	acSelected int
 }
 
 func NewInputModel() InputModel {
@@ -80,12 +86,14 @@ func (m *InputModel) Clear() {
 	m.lastValue = ""
 	m.lastHeight = 0
 	m.reflowHeight()
+	m.dismissAutocomplete()
 }
 
 func (m InputModel) Update(msg tea.Msg) (InputModel, tea.Cmd) {
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
 	m.reflowHeight()
+	m.refreshAutocomplete()
 	return m, cmd
 }
 

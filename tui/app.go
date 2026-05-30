@@ -503,13 +503,24 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.showHelp {
 			switch msg.String() {
-			case "?", "esc", "q", "ctrl+c":
+			case "f1", "esc", "q", "ctrl+c":
 				m.showHelp = false
 			}
 			return m, nil
 		}
 		if m.chatAction != chatActionNone {
 			return m.handleChatActionKey(msg)
+		}
+
+		// Emoji autocomplete grabs navigation/accept/dismiss keys before they
+		// reach the normal input and app handlers (so Enter accepts a suggestion
+		// instead of sending the message).
+		if m.focused == focusWindow {
+			if window := m.windowManager.FocusedWindow(); window != nil && window.Input.AutocompleteActive() {
+				if handled, cmd := window.Input.HandleAutocompleteKey(msg); handled {
+					return m, cmd
+				}
+			}
 		}
 
 		m.lastKey = msg.String()
@@ -562,7 +573,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle global keys first
 		switch msg.String() {
-		case "?":
+		case "f1":
 			m.showHelp = !m.showHelp
 			return m, nil
 
@@ -1154,7 +1165,7 @@ func (m AppModel) statusBarView() string {
 		parts = append(parts, m.toastText)
 	}
 
-	parts = append(parts, "? help")
+	parts = append(parts, "F1 help")
 
 	status := strings.Join(parts, "  ")
 	return StatusBarStyle.
@@ -1820,20 +1831,16 @@ func openImageAttachmentCmd(client *api.Client, att models.Attachment) tea.Cmd {
 	}
 }
 
+// attachmentOpenTarget returns a safe target to hand to the system opener.
+// Only remote http(s) URLs are accepted; server-supplied file:// URLs and
+// absolute local paths are deliberately rejected so a malicious or compromised
+// server can't make us open arbitrary local files via the desktop handler.
+// Anything not matched here falls back to downloading the attachment to a
+// temp file (see openImageAttachmentCmd).
 func attachmentOpenTarget(att models.Attachment) string {
-	for _, raw := range []string{att.URL, att.PathOnDisk, att.Path} {
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
-			continue
-		}
-		if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "file://") {
-			return raw
-		}
-		if strings.HasPrefix(raw, "/") {
-			if _, err := os.Stat(raw); err == nil {
-				return raw
-			}
-		}
+	raw := strings.TrimSpace(att.URL)
+	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
+		return raw
 	}
 	return ""
 }
@@ -2029,7 +2036,6 @@ func (m *AppModel) resyncAllChatsCmd() tea.Cmd {
 
 // handleWSEvent processes incoming WebSocket events
 func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
-	log.Printf("[WS-DEBUG] handleWSEvent type=%q", event.Type)
 	switch event.Type {
 	case "new-message":
 		// Parse incoming message
@@ -2041,7 +2047,7 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 			} `json:"chats"`
 		}
 		if err := json.Unmarshal(event.Data, &wsMsg); err != nil {
-			log.Printf("[WS-DEBUG] new-message unmarshal failed: %v", err)
+			log.Printf("new-message unmarshal failed: %v", err)
 			return m, waitForWSEventCmd(m.wsClient)
 		}
 
@@ -2051,8 +2057,6 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 		} else if msg.ChatGUID == "" {
 			msg.ChatGUID = wsMsg.ChatGUID
 		}
-		log.Printf("[WS-DEBUG] new-message guid=%q chatGUID=%q text=%q fromMe=%v",
-			msg.GUID, msg.ChatGUID, msg.Text, msg.IsFromMe)
 
 		if msg.ChatGUID != "" {
 			if len(messageDedupeKeys(msg)) == 0 {
@@ -2065,11 +2069,8 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 
 			// Cache the message (ignore duplicate WS events by message identity).
 			if !m.windowManager.CacheMessage(msg.ChatGUID, msg) {
-				log.Printf("[WS-DEBUG] CacheMessage rejected as duplicate: guid=%q", msg.GUID)
 				return m, waitForWSEventCmd(m.wsClient)
 			}
-			log.Printf("[WS-DEBUG] CacheMessage accepted, %d windows show this chat",
-				len(m.windowManager.WindowsShowingChat(msg.ChatGUID)))
 			// Intentionally do NOT refresh messageFetchedAt here. Only real
 			// API fetches bump it so the TTL in shouldRefreshMessages can
 			// still trigger a reconciling refetch and heal any hole that

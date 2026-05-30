@@ -8,8 +8,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,11 +19,18 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+// insecureTLS reports whether the user explicitly opted out of TLS certificate
+// verification (e.g. for a self-signed BlueBubbles server). Secure by default.
+func insecureTLS() bool {
+	return os.Getenv("BB_INSECURE_TLS") == "1"
+}
+
 type Client struct {
 	baseURL         string
 	password        string
 	httpClient      *http.Client
 	contactCache    map[string]string
+	contactMu       sync.Mutex
 	previewProxyURL string
 	oembedEndpoint  string
 }
@@ -31,7 +40,7 @@ func NewClient(baseURL, password string) *Client {
 		Timeout: 15 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
+				InsecureSkipVerify: insecureTLS(),
 			},
 		},
 	}
@@ -451,9 +460,13 @@ func (c *Client) RenameChat(chatGUID, displayName string) error {
 }
 
 func (c *Client) GetContacts() (map[string]string, error) {
+	c.contactMu.Lock()
 	if len(c.contactCache) > 0 {
-		return c.contactCache, nil
+		cached := c.contactCache
+		c.contactMu.Unlock()
+		return cached, nil
 	}
+	c.contactMu.Unlock()
 
 	u, err := url.Parse(fmt.Sprintf("%s/api/v1/contact/query", c.baseURL))
 	if err != nil {
@@ -507,7 +520,9 @@ func (c *Client) GetContacts() (map[string]string, error) {
 		}
 	}
 
+	c.contactMu.Lock()
 	c.contactCache = contactMap
+	c.contactMu.Unlock()
 
 	return contactMap, nil
 }

@@ -204,7 +204,7 @@ func (w *ChatWindow) View() string {
 
 	// Handle empty window
 	if w.Chat == nil {
-		hint := "Select a chat (Enter in chat list)\nTab to switch focus  ? for help"
+		hint := "Select a chat (Enter in chat list)\nTab to switch focus  F1 for help"
 		if w.PaneTotal > 1 {
 			hint = w.paneHeaderLine(contentWidth) + "\n\n" + hint
 		}
@@ -247,14 +247,38 @@ func (w *ChatWindow) View() string {
 	// Render input
 	inputView := w.Input.View()
 
-	// Stack messages and input
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
+	// Emoji autocomplete popup, shown directly above the input. It borrows
+	// rows from the message area so the window's total height is unchanged.
+	popupView := ""
+	if w.Focused {
+		// Leave at least one row of messages; the border eats two more.
+		maxRows := messagesHeight - 1 - 2
+		popupView = w.Input.AutocompleteView(contentWidth, maxRows)
+	}
+	popupHeight := 0
+	if popupView != "" {
+		popupHeight = lipgloss.Height(popupView)
+		messagesHeight -= popupHeight
+		if messagesHeight < 1 {
+			messagesHeight = 1
+		}
+	}
+
+	// Stack messages, (optional) popup, gap, and input.
+	sections := []string{
 		lipgloss.NewStyle().
 			Width(contentWidth).
 			Height(messagesHeight).
 			MaxHeight(messagesHeight).
 			Render(messagesView),
+	}
+	if popupView != "" {
+		sections = append(sections, lipgloss.NewStyle().
+			Width(contentWidth).
+			MaxHeight(popupHeight).
+			Render(popupView))
+	}
+	sections = append(sections,
 		lipgloss.NewStyle().
 			Width(contentWidth).
 			Height(gapHeight).
@@ -265,6 +289,7 @@ func (w *ChatWindow) View() string {
 			MaxHeight(inputHeight).
 			Render(inputView),
 	)
+	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
 
 	return style.
 		Width(w.width).

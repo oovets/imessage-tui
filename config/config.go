@@ -21,11 +21,11 @@ type Config struct {
 }
 
 const (
-	appConfigDirName       = "imessage-tui"
-	legacyConfigDirName    = "bluebubbles-tui"
-	appConfigFileName      = "imessage.yaml"
-	appConfigBaseName      = "imessage"
-	legacyConfigBaseName   = "bluebubbles"
+	appConfigDirName     = "imessage-tui"
+	legacyConfigDirName  = "bluebubbles-tui"
+	appConfigFileName    = "imessage.yaml"
+	appConfigBaseName    = "imessage"
+	legacyConfigBaseName = "bluebubbles"
 )
 
 func Load() (*Config, error) {
@@ -132,11 +132,15 @@ func SaveCredentials(serverURL, password string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
 	v.SetConfigFile(path)
-	return v.WriteConfigAs(path)
+	if err := v.WriteConfigAs(path); err != nil {
+		return err
+	}
+	// The fallback file holds the password in plaintext; keep it owner-only.
+	return os.Chmod(path, 0600)
 }
 
 func ClearStoredPassword() error {

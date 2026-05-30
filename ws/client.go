@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,16 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/oovets/imessage-tui/models"
 )
+
+// wsReadLimit caps a single incoming WebSocket frame so a malicious or buggy
+// server can't force an unbounded allocation.
+const wsReadLimit = 16 << 20 // 16 MiB
+
+// insecureTLS reports whether the user explicitly opted out of TLS certificate
+// verification (e.g. for a self-signed BlueBubbles server). Secure by default.
+func insecureTLS() bool {
+	return os.Getenv("BB_INSECURE_TLS") == "1"
+}
 
 type Client struct {
 	baseURL    string
@@ -24,6 +35,7 @@ type Client struct {
 	Disconnect chan struct{}
 	Overflow   chan struct{}
 	done       chan struct{}
+	closeOnce  sync.Once
 	mu         sync.Mutex
 }
 
@@ -71,7 +83,7 @@ func (c *Client) dial() (*websocket.Conn, error) {
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
+			InsecureSkipVerify: insecureTLS(),
 		},
 	}
 
@@ -79,6 +91,7 @@ func (c *Client) dial() (*websocket.Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("websocket dial failed: %v", err)
 	}
+	conn.SetReadLimit(wsReadLimit)
 
 	return conn, nil
 }
@@ -213,6 +226,6 @@ func (c *Client) Close() error {
 	if c.conn == nil {
 		return nil
 	}
-	close(c.done)
+	c.closeOnce.Do(func() { close(c.done) })
 	return c.conn.Close()
 }

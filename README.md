@@ -45,6 +45,7 @@ keyboard-first terminal client for imessage, backed by a bluebubbles-compatible 
   max_previews_per_message  BB_MAX_PREVIEWS_PER_MESSAGE 2         previews per message
   preview_proxy_url         BB_PREVIEW_PROXY_URL        empty     optional json proxy
   oembed_endpoint           BB_OEMBED_ENDPOINT          noembed   oembed endpoint
+  (env only)                BB_INSECURE_TLS             unset     skip tls verify (self-signed; insecure)
 ```
 
 ```yaml
@@ -170,6 +171,7 @@ git diff --check
 ```
 == troubleshooting ==
 * tls errors: verify server url, certificate trust, and password.
+  certs are verified by default; for a self-signed server set BB_INSECURE_TLS=1 (insecure).
 * missing names: ensure contacts are available to bluebubbles.
 * stale chats: verify websocket connectivity;
   polling reconciles open chats when enabled.

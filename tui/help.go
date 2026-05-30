@@ -66,7 +66,7 @@ func helpOverlayView(width, height int) string {
 				"Ctrl+B       Toggle sender names",
 				"Ctrl+E       Toggle pane dividers",
 				"Ctrl+P       Toggle chat previews",
-				"?            Toggle this help",
+				"F1           Toggle this help",
 				"q Ctrl+C     Quit",
 			},
 		},
@@ -85,7 +85,7 @@ func helpOverlayView(width, height int) string {
 		}
 		body.WriteString("\n")
 	}
-	body.WriteString(lipgloss.NewStyle().Foreground(ColorWindowPlaceholder).Render("Press ? or Esc to close"))
+	body.WriteString(lipgloss.NewStyle().Foreground(ColorWindowPlaceholder).Render("Press F1 or Esc to close"))
 
 	content := lipgloss.NewStyle().Padding(1, 2).Render(body.String())
 	box := lipgloss.NewStyle().
