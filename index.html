@@ -1,0 +1,476 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://oovets.github.io/imessage-tui/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>imessage-tui</title>
+      
+    
+    
+      <link rel="stylesheet" href="assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="extra.css">
+    
+      <link rel="stylesheet" href="https://stevoo.net/theme.css">
+    
+      <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css">
+    
+    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="green">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="/" title="imessage-tui" class="md-header__button md-logo" aria-label="imessage-tui" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            imessage-tui
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              readme
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="/" title="imessage-tui" class="md-nav__button md-logo" aria-label="imessage-tui" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    imessage-tui
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+      
+      <a href="." class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    readme
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+  <h1>readme</h1>
+
+<p><a href="https://go.dev/"><img alt="Go" src="https://img.shields.io/badge/go-1.24%2B-00ADD8.svg" /></a>
+<a href="https://github.com/charmbracelet/bubbletea"><img alt="Bubble Tea" src="https://img.shields.io/badge/tui-bubble%20tea-ff69b4.svg" /></a>
+<a href="https://stevoo.net/imessage-tui/"><img alt="Docs" src="https://img.shields.io/badge/docs-mkdocs--material-blue.svg" /></a></p>
+<p>keyboard-first terminal client for imessage, backed by a bluebubbles-compatible server.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="o">==</span><span class="w"> </span><span class="nv">features</span><span class="w"> </span><span class="o">==</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>real-time<span class="w"> </span>updates<span class="w"> </span>over<span class="w"> </span>socket.io/websocket,<span class="w"> </span>with<span class="w"> </span>api<span class="w"> </span>polling<span class="w"> </span>as<span class="w"> </span>a<span class="w"> </span>reconciliation<span class="w"> </span>path
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span>multi-pane<span class="w"> </span>chat<span class="w"> </span>layout<span class="w"> </span>with<span class="w"> </span>horizontal/vertical<span class="w"> </span>splits,<span class="w"> </span>up<span class="w"> </span>to<span class="w"> </span><span class="m">4</span><span class="w"> </span>panes<span class="w"> </span>per-pane<span class="w"> </span>focus
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span>unread<span class="w"> </span>msg<span class="w"> </span>indicators,<span class="w"> </span>layout<span class="w"> </span>+<span class="w"> </span>message-cache<span class="w"> </span>persistence<span class="w"> </span>chat<span class="w"> </span>list<span class="w"> </span>with<span class="w"> </span>activity
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">   </span>ordering,<span class="w"> </span>unread<span class="w"> </span>markers,<span class="w"> </span>timestamps,<span class="w"> </span>previews,<span class="w"> </span>search,<span class="w"> </span>resizable<span class="w"> </span>width
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span>chat<span class="w"> </span>delete<span class="w"> </span>+<span class="w"> </span>rename,<span class="w"> </span>with<span class="w"> </span><span class="nb">local</span><span class="w"> </span><span class="nb">alias</span><span class="w"> </span>fallback<span class="w"> </span><span class="k">for</span><span class="w"> </span>unsupported<span class="w"> </span>server-side<span class="w"> </span>renames
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span>optional<span class="w"> </span>timestamps,<span class="w"> </span>line<span class="w"> </span>numbers,<span class="w"> </span>sender<span class="w"> </span>labels,<span class="w"> </span>pane<span class="w"> </span>dividers,<span class="w"> </span>chat<span class="w"> </span>previews
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">  </span>image<span class="w"> </span>attachment<span class="w"> </span>labels<span class="w"> </span>+<span class="w"> </span>/img<span class="w"> </span><span class="c1">#N, click-to-open, selected-row Enter open</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">  </span>youtube<span class="w"> </span>/<span class="w"> </span>spotify<span class="w"> </span>/<span class="w"> </span>instagram<span class="w"> </span>/<span class="w"> </span>news-site<span class="w"> </span>link<span class="w"> </span>previews<span class="w"> </span>via<span class="w"> </span>oembed,<span class="w"> </span>html<span class="w"> </span>metadata,
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">   </span>or<span class="w"> </span>a<span class="w"> </span>configurable<span class="w"> </span>preview<span class="w"> </span>proxy.
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">  </span>tapbacks<span class="w"> </span>render<span class="w"> </span>as<span class="w"> </span>compact<span class="w"> </span>emoji<span class="w"> </span>on<span class="w"> </span>the<span class="w"> </span>original<span class="w"> </span>message
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">  </span>optimistic<span class="w"> </span>outgoing<span class="w"> </span>messages<span class="w"> </span>with<span class="w"> </span>timeout<span class="w"> </span>reconciliation
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">  </span>mouse<span class="w"> </span>support:<span class="w"> </span>focus,<span class="w"> </span>chat-list<span class="w"> </span>resize,<span class="w"> </span>pane-divider<span class="w"> </span>resize,<span class="w"> </span>image<span class="w"> </span>open,<span class="w"> </span>scroll
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="o">==</span><span class="w"> </span><span class="nv">requirements</span><span class="w"> </span><span class="o">==</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>go<span class="w"> </span><span class="m">1</span>.24+
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span>a<span class="w"> </span>running<span class="w"> </span>bluebubbles-compatible<span class="w"> </span>server
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span>network<span class="w"> </span>access<span class="w"> </span>from<span class="w"> </span>this<span class="w"> </span>client<span class="w"> </span>to<span class="w"> </span>the<span class="w"> </span>bluebubbles<span class="w"> </span>http<span class="w"> </span>+<span class="w"> </span>websocket<span class="w"> </span>endpoints
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="o">==</span><span class="w"> </span><span class="nv">configuration</span><span class="w"> </span><span class="o">==</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nb">read</span><span class="w"> </span>from<span class="w"> </span>env<span class="w"> </span>vars<span class="w"> </span>and<span class="w"> </span>~/.config/imessage-tui/imessage.yaml<span class="p">;</span><span class="w"> </span>env<span class="w"> </span>overrides<span class="w"> </span>the<span class="w"> </span>file.
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>credentials<span class="w"> </span>prefer<span class="w"> </span>the<span class="w"> </span>os<span class="w"> </span>keyring<span class="w"> </span>and<span class="w"> </span>fall<span class="w"> </span>back<span class="w"> </span>to<span class="w"> </span>the<span class="w"> </span>config<span class="w"> </span>file.
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span>ui/layout<span class="w"> </span>state,<span class="w"> </span>message<span class="w"> </span>cache,<span class="w"> </span>and<span class="w"> </span>chat<span class="w"> </span>aliases<span class="w"> </span>live<span class="w"> </span>under<span class="w"> </span>~/.config/imessage-tui/
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span>server_url<span class="w">                </span>BB_SERVER_URL<span class="w">               </span>required<span class="w">  </span>bluebubbles<span class="w"> </span>url
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span>password<span class="w">                  </span>BB_PASSWORD<span class="w">                 </span>required<span class="w">  </span>api<span class="w"> </span>password
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span>message_limit<span class="w">             </span>BB_MESSAGE_LIMIT<span class="w">            </span><span class="m">50</span><span class="w">        </span>messages<span class="w"> </span>per<span class="w"> </span>chat
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span>chat_limit<span class="w">                </span>BB_CHAT_LIMIT<span class="w">               </span><span class="m">50</span><span class="w">        </span>chats<span class="w"> </span><span class="k">in</span><span class="w"> </span>the<span class="w"> </span>sidebar
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span>poll_interval_sec<span class="w">         </span>BB_POLL_INTERVAL_SEC<span class="w">        </span><span class="m">10</span><span class="w">        </span>refresh<span class="p">;</span><span class="w"> </span><span class="m">0</span><span class="w"> </span>disables
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">  </span>enable_link_previews<span class="w">      </span>BB_ENABLE_LINK_PREVIEWS<span class="w">     </span><span class="nb">true</span><span class="w">      </span>preview<span class="w"> </span>metadata
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">  </span>max_previews_per_message<span class="w">  </span>BB_MAX_PREVIEWS_PER_MESSAGE<span class="w"> </span><span class="m">2</span><span class="w">         </span>previews<span class="w"> </span>per<span class="w"> </span>message
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">  </span>preview_proxy_url<span class="w">         </span>BB_PREVIEW_PROXY_URL<span class="w">        </span>empty<span class="w">     </span>optional<span class="w"> </span>json<span class="w"> </span>proxy
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">  </span>oembed_endpoint<span class="w">           </span>BB_OEMBED_ENDPOINT<span class="w">          </span>noembed<span class="w">   </span>oembed<span class="w"> </span>endpoint
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">  </span><span class="o">(</span>env<span class="w"> </span>only<span class="o">)</span><span class="w">                </span>BB_INSECURE_TLS<span class="w">             </span><span class="nb">unset</span><span class="w">     </span>skip<span class="w"> </span>tls<span class="w"> </span>verify<span class="w"> </span><span class="o">(</span>self-signed<span class="p">;</span><span class="w"> </span>insecure<span class="o">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># ~/.config/imessage-tui/imessage.yaml</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nt">server_url</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;https://your-server:1234&quot;</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nt">password</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;your-api-password&quot;</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="nt">message_limit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="nt">chat_limit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="nt">poll_interval_sec</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="nt">enable_link_previews</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="nt">max_previews_per_message</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># build and run -- runtime logs go to ~/.imessage-tui.log</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>go<span class="w"> </span><span class="nb">test</span><span class="w"> </span>./...
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>go<span class="w"> </span>build<span class="w"> </span>-o<span class="w"> </span>imessage-tui<span class="w"> </span>.
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>./imessage-tui
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="o">==</span><span class="w"> </span><span class="nv">keybindings</span><span class="w"> </span><span class="o">==</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="sb">`</span>tab<span class="sb">`</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span>toggle<span class="w"> </span>focus<span class="w"> </span>between<span class="w"> </span>chat<span class="w"> </span>list<span class="w"> </span>and<span class="w"> </span>current<span class="w"> </span>window
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="sb">`</span>esc<span class="sb">`</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">  </span><span class="k">return</span><span class="w"> </span>to<span class="w"> </span>the<span class="w"> </span>chat<span class="w"> </span>list
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="sb">`</span>←<span class="w"> </span>/<span class="w"> </span>→<span class="sb">`</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">  </span>move<span class="w"> </span>between<span class="w"> </span>windows
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="sb">`</span>ctrl+↑<span class="w"> </span>/<span class="w"> </span>ctrl+↓<span class="sb">`</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">  </span>move<span class="w"> </span>to<span class="w"> </span>the<span class="w"> </span>window<span class="w"> </span>above<span class="w"> </span>or<span class="w"> </span>below
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="sb">`</span>↑<span class="w"> </span>/<span class="w"> </span>↓<span class="sb">`</span><span class="w"> </span>or<span class="w"> </span><span class="sb">`</span>k<span class="w"> </span>/<span class="w"> </span>j<span class="sb">`</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">  </span>navigate<span class="w"> </span>chats<span class="w"> </span>or<span class="w"> </span>scroll<span class="w"> </span>messages
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="sb">`</span>g<span class="sb">`</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">  </span>jump<span class="w"> </span>to<span class="w"> </span>top<span class="w"> </span>of<span class="w"> </span>chat<span class="w"> </span>list
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="sb">`</span>G<span class="sb">`</span>
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="w">  </span>jump<span class="w"> </span>to<span class="w"> </span>bottom<span class="w"> </span>of<span class="w"> </span>chat<span class="w"> </span>list
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="sb">`</span>enter<span class="sb">`</span>
+<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="w">  </span>open<span class="w"> </span>selected<span class="w"> </span>chat<span class="w"> </span>or<span class="w"> </span>send<span class="w"> </span>from<span class="w"> </span>the<span class="w"> </span>input
+<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="sb">`</span>shift+enter<span class="sb">`</span>
+<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a><span class="w">  </span>insert<span class="w"> </span>a<span class="w"> </span>newline<span class="w"> </span><span class="k">in</span><span class="w"> </span>the<span class="w"> </span><span class="nv">input</span>
+<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>
+<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a><span class="o">==</span><span class="w"> </span>window<span class="w"> </span><span class="nv">management</span><span class="w"> </span><span class="o">==</span>
+<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a>
+<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a><span class="sb">`</span>ctrl+f<span class="sb">`</span>
+<a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a><span class="w"> </span>split<span class="w"> </span>the<span class="w"> </span>focused<span class="w"> </span>window<span class="w"> </span>horizontally
+<a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a><span class="sb">`</span>ctrl+g<span class="sb">`</span>
+<a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a><span class="w"> </span>split<span class="w"> </span>the<span class="w"> </span>focused<span class="w"> </span>window<span class="w"> </span>vertically
+<a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a><span class="sb">`</span>ctrl+w<span class="sb">`</span>
+<a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a><span class="w"> </span>close<span class="w"> </span>the<span class="w"> </span>focused<span class="w"> </span>window
+<a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a>
+<a id="__codelineno-5-31" name="__codelineno-5-31" href="#__codelineno-5-31"></a><span class="sb">`</span>ctrl+S<span class="sb">`</span>
+<a id="__codelineno-5-32" name="__codelineno-5-32" href="#__codelineno-5-32"></a><span class="w">  </span>toggle<span class="w"> </span>chat<span class="w"> </span>list<span class="w"> </span>visibility
+<a id="__codelineno-5-33" name="__codelineno-5-33" href="#__codelineno-5-33"></a><span class="sb">`</span>ctrl+T<span class="sb">`</span>
+<a id="__codelineno-5-34" name="__codelineno-5-34" href="#__codelineno-5-34"></a><span class="w">  </span>toggle<span class="w"> </span>message<span class="w"> </span>timestamps
+<a id="__codelineno-5-35" name="__codelineno-5-35" href="#__codelineno-5-35"></a><span class="sb">`</span>ctrl+N<span class="sb">`</span>
+<a id="__codelineno-5-36" name="__codelineno-5-36" href="#__codelineno-5-36"></a><span class="w">  </span>toggle<span class="w"> </span>message<span class="w"> </span>line<span class="w"> </span>numbers
+<a id="__codelineno-5-37" name="__codelineno-5-37" href="#__codelineno-5-37"></a><span class="sb">`</span>ctrl+B<span class="sb">`</span>
+<a id="__codelineno-5-38" name="__codelineno-5-38" href="#__codelineno-5-38"></a><span class="w">  </span>toggle<span class="w"> </span>sender<span class="w"> </span>names<span class="w"> </span><span class="o">(</span>show<span class="w"> </span>text<span class="w"> </span>only<span class="w"> </span>when<span class="w"> </span>off<span class="o">)</span>
+<a id="__codelineno-5-39" name="__codelineno-5-39" href="#__codelineno-5-39"></a><span class="sb">`</span>alt+M<span class="sb">`</span>
+<a id="__codelineno-5-40" name="__codelineno-5-40" href="#__codelineno-5-40"></a><span class="w">  </span>toggle<span class="w"> </span>sender<span class="w"> </span>names<span class="w"> </span><span class="o">(</span>alternative<span class="w"> </span>binding<span class="o">)</span>
+<a id="__codelineno-5-41" name="__codelineno-5-41" href="#__codelineno-5-41"></a><span class="sb">`</span>q<span class="sb">`</span><span class="w"> </span>/<span class="w"> </span><span class="sb">`</span>ctrl+C<span class="sb">`</span>
+<a id="__codelineno-5-42" name="__codelineno-5-42" href="#__codelineno-5-42"></a><span class="w">  </span>quit
+</code></pre></div>
+<p>status bar shows a connection dot (green connected, red disconnected/reconnecting); with
+the chat list hidden, new incoming messages are summarised there.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="o">==</span><span class="w"> </span>chat<span class="w"> </span><span class="nv">management</span><span class="w"> </span><span class="o">==</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>delete<span class="w"> </span>uses<span class="w"> </span>the<span class="w"> </span>bluebubbles<span class="w"> </span>private<span class="w"> </span>api<span class="w"> </span><span class="o">(</span>DELETE<span class="w"> </span>/api/v1/chat/<span class="o">{</span>guid<span class="o">}</span>/delete<span class="o">)</span><span class="w"> </span>and<span class="w"> </span>clears
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nb">local</span><span class="w"> </span>cachet<span class="w"> </span>only<span class="w"> </span>after<span class="w"> </span>the<span class="w"> </span>server<span class="w"> </span>confirms:<span class="w"> </span>press<span class="w"> </span>d<span class="w"> </span>on<span class="w"> </span>a<span class="w"> </span>chat,<span class="w"> </span><span class="k">then</span><span class="w"> </span>D<span class="w"> </span>to<span class="w"> </span>confirm,
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>Esc<span class="w"> </span>to<span class="w"> </span>cancel.<span class="w"> </span>rename<span class="w"> </span>uses<span class="w"> </span>the<span class="w"> </span>group-rename<span class="w"> </span>api<span class="w"> </span>when<span class="w"> </span>available<span class="p">;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span>rejected,<span class="w"> </span>the<span class="w"> </span>tui
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w"> </span>saves<span class="w"> </span>an<span class="w"> </span><span class="nb">alias</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>~/.config/imessage-tui/chat_overrides.json<span class="w"> </span>and<span class="w"> </span>applies<span class="w"> </span>it<span class="w"> </span>on<span class="w"> </span>refresh.
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="o">==</span><span class="w"> </span>link<span class="w"> </span><span class="nv">previews</span><span class="w"> </span><span class="o">==</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>supported<span class="w"> </span>media<span class="w"> </span>urls<span class="w"> </span>render<span class="w"> </span>a<span class="w"> </span>compact<span class="w"> </span>preview<span class="w"> </span>line,<span class="w"> </span>e.g.
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">  </span><span class="o">[</span>YouTube<span class="o">]</span><span class="w"> </span>video<span class="w"> </span>title<span class="w">      </span><span class="o">[</span>Spotify<span class="o">]</span><span class="w"> </span>track/playlist<span class="w"> </span>title
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">  </span><span class="o">[</span>Instagram<span class="o">]</span><span class="w"> </span>post/reel<span class="w">      </span><span class="o">[</span>Aftonbladet<span class="o">]</span><span class="w"> </span>article<span class="w"> </span>title
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>hosts:<span class="w"> </span>youtube.com<span class="w"> </span>m.youtube.com<span class="w"> </span>youtu.be<span class="w"> </span>spotify.com<span class="w"> </span>open.spotify.com<span class="w"> </span>instagram.com
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>m.instagram.com<span class="w"> </span>aftonbladet.se<span class="w"> </span>expressen.se<span class="w"> </span>dn.se<span class="w"> </span>svd.se<span class="w"> </span>svt.se<span class="w"> </span>omni.se<span class="w"> </span>gp.se
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>sydsvenskan.se<span class="w"> </span>di.se.<span class="w"> </span>fetches<span class="w"> </span>are<span class="w"> </span>async<span class="w"> </span><span class="o">(</span>fallback<span class="w"> </span>label<span class="w"> </span>first,<span class="w"> </span><span class="k">then</span><span class="w"> </span>metadata<span class="o">)</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>prefer<span class="w"> </span>html<span class="w"> </span>metadata<span class="w"> </span>so<span class="w"> </span>generic<span class="w"> </span>titles<span class="w"> </span>like<span class="w"> </span><span class="s2">&quot;search&quot;</span><span class="w"> </span>are<span class="w"> </span>ignored<span class="w"> </span>and<span class="w"> </span>refetched.
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="o">==</span><span class="w"> </span>bluebubbles<span class="w"> </span><span class="nv">setup</span><span class="w"> </span><span class="o">==</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>bluebubbles<span class="w"> </span>must<span class="w"> </span>run<span class="w"> </span>on<span class="w"> </span>a<span class="w"> </span>mac<span class="w"> </span>signed<span class="w"> </span>into<span class="w"> </span>icloud<span class="w"> </span>with<span class="w"> </span>messages<span class="w"> </span>enabled<span class="p">;</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w"> </span>grant<span class="w"> </span>full<span class="w"> </span>disk<span class="w"> </span>access,<span class="w"> </span>accessibility,<span class="w"> </span>and<span class="w"> </span>automation<span class="w"> </span>to<span class="w"> </span>the<span class="w"> </span>server<span class="w"> </span>app.
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>verify<span class="w"> </span>connectivity<span class="p">;</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">  </span>curl<span class="w"> </span>-k<span class="w"> </span><span class="s2">&quot;https://your-server/api/v1/server/info?password=YOUR_PASSWORD&quot;</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">      </span>use<span class="w"> </span>the<span class="w"> </span>same<span class="w"> </span>url<span class="w"> </span>+<span class="w"> </span>password<span class="w"> </span>as<span class="w"> </span>BB_SERVER_URL<span class="w"> </span>and<span class="w"> </span>BB_PASSWORD.
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>== architecture ==
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>main.go    bubble tea program startup
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>api/       bluebubbles http client, contacts, attachments, link previews
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>config/    config loading, credentials, ui/layout/message-cache state
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>models/    chat, message, attachment, link-preview, websocket event types
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>tui/       bubble tea models, split layout, rendering, input, persistence
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>ws/        socket.io/websocket client with reconnect + overflow signals
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="o">==</span><span class="w"> </span>tests<span class="w"> </span>+<span class="w"> </span>release<span class="w"> </span><span class="nv">checks</span><span class="w"> </span><span class="o">==</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>go<span class="w"> </span><span class="nb">test</span><span class="w"> </span>./...<span class="w">        </span><span class="c1"># api shape, de-dup, ordering, tapbacks, layout, previews</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>gofmt<span class="w"> </span>-w<span class="w"> </span><span class="k">$(</span>git<span class="w"> </span>ls-files<span class="w"> </span><span class="s1">&#39;*.go&#39;</span><span class="k">)</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>go<span class="w"> </span>build<span class="w"> </span>./...
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>git<span class="w"> </span>diff<span class="w"> </span>--check
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="o">==</span><span class="w"> </span><span class="nv">troubleshooting</span><span class="w"> </span><span class="o">==</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>*<span class="w"> </span>tls<span class="w"> </span>errors:<span class="w"> </span>verify<span class="w"> </span>server<span class="w"> </span>url,<span class="w"> </span>certificate<span class="w"> </span>trust,<span class="w"> </span>and<span class="w"> </span>password.
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">  </span>certs<span class="w"> </span>are<span class="w"> </span>verified<span class="w"> </span>by<span class="w"> </span>default<span class="p">;</span><span class="w"> </span><span class="k">for</span><span class="w"> </span>a<span class="w"> </span>self-signed<span class="w"> </span>server<span class="w"> </span><span class="nb">set</span><span class="w"> </span><span class="nv">BB_INSECURE_TLS</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="o">(</span>insecure<span class="o">)</span>.
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>*<span class="w"> </span>missing<span class="w"> </span>names:<span class="w"> </span>ensure<span class="w"> </span>contacts<span class="w"> </span>are<span class="w"> </span>available<span class="w"> </span>to<span class="w"> </span>bluebubbles.
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>*<span class="w"> </span>stale<span class="w"> </span>chats:<span class="w"> </span>verify<span class="w"> </span>websocket<span class="w"> </span>connectivity<span class="p">;</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">  </span>polling<span class="w"> </span>reconciles<span class="w"> </span>open<span class="w"> </span>chats<span class="w"> </span>when<span class="w"> </span>enabled.
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>*<span class="w"> </span>build<span class="w"> </span>errors<span class="w"> </span>on<span class="w"> </span>modern<span class="w"> </span>stdlib<span class="w"> </span>packages:<span class="w"> </span>ensure<span class="w"> </span>go<span class="w"> </span><span class="m">1</span>.24+<span class="w"> </span>is<span class="w"> </span>first<span class="w"> </span>on<span class="w"> </span>PATH.
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>last updated: 2026-05-30 (commit a4a5d58)
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.top", "navigation.sections", "content.code.copy", "toc.integrate"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js"></script>
+      
+        <script src="https://stevoo.net/map.js"></script>
+      
+    
+  </body>
+</html>
