@@ -92,6 +92,9 @@ func (m *InputModel) Clear() {
 func (m InputModel) Update(msg tea.Msg) (InputModel, tea.Cmd) {
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
+	if k, ok := msg.(tea.KeyMsg); ok && k.Type == tea.KeyRunes {
+		m.replaceEmoticonAtCursor()
+	}
 	m.reflowHeight()
 	m.refreshAutocomplete()
 	return m, cmd

@@ -104,20 +104,29 @@ func isEmojiNameRune(r rune) bool {
 // token, returns the query (the part after ':'). The logical column is
 // reconstructed from LineInfo so this stays correct even when the line soft
 // wraps.
-func (m *InputModel) currentEmojiQuery() (string, bool) {
+// lineBeforeCursor returns the runes on the current logical line up to the
+// cursor. The logical column is reconstructed from LineInfo so it stays correct
+// even when the line soft wraps.
+func (m *InputModel) lineBeforeCursor() ([]rune, bool) {
 	row := m.textarea.Line()
 	lines := strings.Split(m.textarea.Value(), "\n")
 	if row < 0 || row >= len(lines) {
-		return "", false
+		return nil, false
 	}
-
 	li := m.textarea.LineInfo()
 	col := li.StartColumn + li.ColumnOffset
 	runes := []rune(lines[row])
 	if col < 0 || col > len(runes) {
+		return nil, false
+	}
+	return runes[:col], true
+}
+
+func (m *InputModel) currentEmojiQuery() (string, bool) {
+	before, ok := m.lineBeforeCursor()
+	if !ok {
 		return "", false
 	}
-	before := runes[:col]
 
 	colon := -1
 	for i := len(before) - 1; i >= 0; i-- {
