@@ -20,6 +20,15 @@ import (
 // server can't force an unbounded allocation.
 const wsReadLimit = 16 << 20 // 16 MiB
 
+// Reconnect backoff bounds for the read loop. The wait doubles after each
+// failed dial, starting at reconnectBackoffMin and never exceeding
+// reconnectBackoffMax, so a long server outage polls politely instead of
+// hammering the endpoint or spinning the CPU.
+const (
+	reconnectBackoffMin = 2 * time.Second
+	reconnectBackoffMax = 30 * time.Second
+)
+
 // insecureTLS reports whether the user explicitly opted out of TLS certificate
 // verification (e.g. for a self-signed BlueBubbles server). Secure by default.
 func insecureTLS() bool {
@@ -37,6 +46,11 @@ type Client struct {
 	done       chan struct{}
 	closeOnce  sync.Once
 	mu         sync.Mutex
+
+	// Reconnect backoff bounds. Defaults come from the package constants and
+	// are overridable from tests to keep reconnect timing short.
+	backoffMin time.Duration
+	backoffMax time.Duration
 }
 
 func NewClient(baseURL, password string) *Client {
@@ -48,6 +62,8 @@ func NewClient(baseURL, password string) *Client {
 		Disconnect: make(chan struct{}, 4),
 		Overflow:   make(chan struct{}, 4),
 		done:       make(chan struct{}),
+		backoffMin: reconnectBackoffMin,
+		backoffMax: reconnectBackoffMax,
 	}
 }
 
@@ -99,13 +115,33 @@ func (c *Client) dial() (*websocket.Conn, error) {
 func (c *Client) sendPong() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.conn != nil {
-		c.conn.WriteMessage(websocket.TextMessage, []byte("3"))
+	if c.conn == nil {
+		return
+	}
+	// A stuck peer must not block the read loop forever on the pong write.
+	_ = c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if err := c.conn.WriteMessage(websocket.TextMessage, []byte("3")); err != nil {
+		log.Printf("[WS] pong write failed: %v", err)
+	}
+}
+
+func (c *Client) isClosed() bool {
+	select {
+	case <-c.done:
+		return true
+	default:
+		return false
 	}
 }
 
 func (c *Client) readLoop() {
+	// capped exponential backoff for reconnect attempts
+	backoff := c.backoffMin
 	for {
+		if c.isClosed() {
+			return
+		}
+
 		c.mu.Lock()
 		conn := c.conn
 		c.mu.Unlock()
@@ -116,38 +152,35 @@ func (c *Client) readLoop() {
 
 		_, raw, err := conn.ReadMessage()
 		if err != nil {
-			log.Printf("[WS] Read error: %v, attempting reconnect...", err)
-
-			select {
-			case <-c.done:
-				return
-			default:
-			}
-
-			select {
-			case c.Disconnect <- struct{}{}:
-			default:
-			}
-
-			for attempt := 1; attempt <= 10; attempt++ {
+			if !c.isClosed() {
 				select {
-				case <-c.done:
-					return
+				case c.Disconnect <- struct{}{}:
 				default:
 				}
+			}
 
-				wait := time.Duration(attempt) * 2 * time.Second
-				if wait > 30*time.Second {
-					wait = 30 * time.Second
+			// Reconnect forever with capped exponential backoff. We never go
+			// back to reading the dead connection, so Disconnect is signaled
+			// exactly once per failed connection instead of being spammed on
+			// every re-read.
+			for !c.isClosed() {
+				select {
+				case <-time.After(backoff):
+				case <-c.done:
+					return
 				}
-				time.Sleep(wait)
 
 				newConn, err := c.dial()
 				if err != nil {
-					log.Printf("[WS] Reconnect attempt %d failed: %v", attempt, err)
+					log.Printf("[WS] Reconnect failed (backoff %s): %v", backoff, err)
+					backoff *= 2
+					if backoff > c.backoffMax {
+						backoff = c.backoffMax
+					}
 					continue
 				}
 
+				backoff = c.backoffMin
 				c.mu.Lock()
 				c.conn = newConn
 				c.mu.Unlock()
@@ -159,6 +192,8 @@ func (c *Client) readLoop() {
 			}
 			continue
 		}
+
+		backoff = c.backoffMin
 
 		msg := string(raw)
 

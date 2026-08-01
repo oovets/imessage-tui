@@ -285,19 +285,3 @@ func (m InputModel) AutocompleteView(maxWidth, maxRows int) string {
 		Background(lipgloss.Color("235")).
 		Render(b.String())
 }
-
-// truncateToWidth shortens s to at most width display columns, appending an
-// ellipsis when it had to cut.
-func truncateToWidth(s string, width int) string {
-	if width < 1 {
-		return ""
-	}
-	if lipgloss.Width(s) <= width {
-		return s
-	}
-	runes := []rune(s)
-	for len(runes) > 0 && lipgloss.Width(string(runes))+1 > width {
-		runes = runes[:len(runes)-1]
-	}
-	return string(runes) + "…"
-}

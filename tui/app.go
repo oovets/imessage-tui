@@ -1145,6 +1145,7 @@ func (m AppModel) View() string {
 		}
 		chatPanel = chatListStyle.
 			Width(m.chatListWidth).
+			MaxWidth(m.chatListWidth).
 			Height(panelHeight).
 			MaxHeight(panelHeight).
 			Render(m.chatList.View())
@@ -2110,24 +2111,10 @@ func (m *AppModel) resyncAllChatsCmd() tea.Cmd {
 func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 	switch event.Type {
 	case "new-message":
-		// Parse incoming message
-		var wsMsg struct {
-			models.Message
-			ChatGUID string `json:"chatGuid"`
-			Chats    []struct {
-				GUID string `json:"guid"`
-			} `json:"chats"`
-		}
-		if err := json.Unmarshal(event.Data, &wsMsg); err != nil {
+		msg, err := parseWSMessageEvent(event)
+		if err != nil {
 			log.Printf("new-message unmarshal failed: %v", err)
 			return m, waitForWSEventCmd(m.wsClient)
-		}
-
-		msg := wsMsg.Message
-		if len(wsMsg.Chats) > 0 {
-			msg.ChatGUID = wsMsg.Chats[0].GUID
-		} else if msg.ChatGUID == "" {
-			msg.ChatGUID = wsMsg.ChatGUID
 		}
 
 		if msg.ChatGUID != "" {
@@ -2141,6 +2128,12 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 
 			// Cache the message (ignore duplicate WS events by message identity).
 			if !m.windowManager.CacheMessage(msg.ChatGUID, msg) {
+				// A reaction or a duplicate. A reaction still has to reach the
+				// open windows so tapbacks render immediately; a plain
+				// duplicate is a no-op for AppendMessage.
+				for _, window := range m.windowManager.WindowsShowingChat(msg.ChatGUID) {
+					window.Messages.AppendMessage(msg)
+				}
 				return m, waitForWSEventCmd(m.wsClient)
 			}
 			// Intentionally do NOT refresh messageFetchedAt here. Only real
@@ -2182,6 +2175,25 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case "updated-message":
+		// Reactions/tapbacks (and edited bodies) arrive as updated-message.
+		// Apply the change to the cache and every open window without treating
+		// it as a brand-new message: no unread marker, no chat-list reorder,
+		// no preview, no link-preview fetch.
+		msg, err := parseWSMessageEvent(event)
+		if err != nil {
+			log.Printf("updated-message unmarshal failed: %v", err)
+			return m, waitForWSEventCmd(m.wsClient)
+		}
+		if msg.ChatGUID == "" || len(messageDedupeKeys(msg)) == 0 {
+			return m, waitForWSEventCmd(m.wsClient)
+		}
+		// A reaction folds onto the cached target message; a duplicate is a
+		// no-op. Either way the return value doesn't matter here.
+		m.windowManager.CacheMessage(msg.ChatGUID, msg)
+		for _, window := range m.windowManager.WindowsShowingChat(msg.ChatGUID) {
+			window.Messages.AppendMessage(msg)
+		}
+		m.saveMessageCacheChat(msg.ChatGUID)
 		return m, waitForWSEventCmd(m.wsClient)
 
 	case "chat-read-status-changed":
@@ -2190,6 +2202,30 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 	default:
 		return m, waitForWSEventCmd(m.wsClient)
 	}
+}
+
+// parseWSMessageEvent extracts a Message plus its chat identity from a
+// BlueBubbles WS event. Both new-message and updated-message share this shape:
+// the message fields, with the chat arriving either as chatGuid or a chats array.
+func parseWSMessageEvent(event models.WSEvent) (models.Message, error) {
+	var wsMsg struct {
+		models.Message
+		ChatGUID string `json:"chatGuid"`
+		Chats    []struct {
+			GUID string `json:"guid"`
+		} `json:"chats"`
+	}
+	if err := json.Unmarshal(event.Data, &wsMsg); err != nil {
+		return models.Message{}, err
+	}
+
+	msg := wsMsg.Message
+	if len(wsMsg.Chats) > 0 {
+		msg.ChatGUID = wsMsg.Chats[0].GUID
+	} else if msg.ChatGUID == "" {
+		msg.ChatGUID = wsMsg.ChatGUID
+	}
+	return msg, nil
 }
 
 func (m *AppModel) setAppError(err error) {

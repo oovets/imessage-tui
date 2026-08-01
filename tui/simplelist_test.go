@@ -103,3 +103,36 @@ func TestSimpleListModelGroupPrefixShowsMemberCountWithoutHash(t *testing.T) {
 		t.Fatalf("expected group prefix without hash: %q", view)
 	}
 }
+
+func TestChatListLinesStayInsideWidthWithEmoji(t *testing.T) {
+	const width = 25
+
+	model := NewSimpleListModel()
+	model.SetSize(width, 12)
+	model.SetShowPreview(true)
+	model.SetItems([]models.Chat{
+		{
+			GUID:            "chat-emoji",
+			DisplayName:     "Familjen",
+			LastMessageText: "😂😂😂😂😂😂😂😂😂😂😂😂😂😂😂😂😂😂😂😂 hej",
+			LastMessageTime: 1000,
+		},
+		{
+			GUID:            "chat-clusters",
+			DisplayName:     "Jobb",
+			LastMessageText: "👨‍👩‍👧‍👦👍🏽❤️✅👨‍👩‍👧‍👦👍🏽❤️✅👨‍👩‍👧‍👦👍🏽❤️✅ okej",
+			LastMessageTime: 2000,
+		},
+	})
+
+	// An emoji is two columns wide, so a preview truncated by rune count comes
+	// out twice as wide as its column. lipgloss.JoinHorizontal then sizes the
+	// whole pane to the widest line, which shoves the divider and every pane
+	// right of it sideways.
+	for i, line := range strings.Split(model.View(), "\n") {
+		if w := lipgloss.Width(line); w > width {
+			t.Errorf("chat list line %d is %d columns wide, want at most %d: %q",
+				i, w, width, line)
+		}
+	}
+}

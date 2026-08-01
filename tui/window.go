@@ -217,6 +217,7 @@ func (w *ChatWindow) View() string {
 
 		return style.
 			Width(w.width).
+			MaxWidth(w.width).
 			Height(w.height).
 			Render(placeholder)
 	}
@@ -264,10 +265,14 @@ func (w *ChatWindow) View() string {
 		}
 	}
 
-	// Stack messages, (optional) popup, gap, and input.
+	// Stack messages, (optional) popup, gap, and input. MaxWidth on every
+	// section, not just Width: Width only pads short lines, so one line that
+	// measures wider than the pane would widen the whole block and push the
+	// divider — and every pane right of it — sideways.
 	sections := []string{
 		lipgloss.NewStyle().
 			Width(contentWidth).
+			MaxWidth(contentWidth).
 			Height(messagesHeight).
 			MaxHeight(messagesHeight).
 			Render(messagesView),
@@ -275,17 +280,20 @@ func (w *ChatWindow) View() string {
 	if popupView != "" {
 		sections = append(sections, lipgloss.NewStyle().
 			Width(contentWidth).
+			MaxWidth(contentWidth).
 			MaxHeight(popupHeight).
 			Render(popupView))
 	}
 	sections = append(sections,
 		lipgloss.NewStyle().
 			Width(contentWidth).
+			MaxWidth(contentWidth).
 			Height(gapHeight).
 			MaxHeight(gapHeight).
 			Render(""),
 		lipgloss.NewStyle().
 			Width(contentWidth).
+			MaxWidth(contentWidth).
 			MaxHeight(inputHeight).
 			Render(inputView),
 	)
@@ -293,6 +301,7 @@ func (w *ChatWindow) View() string {
 
 	return style.
 		Width(w.width).
+		MaxWidth(w.width).
 		Height(w.height).
 		Render(content)
 }
@@ -323,11 +332,7 @@ func (w *ChatWindow) paneHeaderLine(width int) string {
 	}
 	line := headerStyle.Render(label)
 	if lipgloss.Width(line) > width {
-		runes := []rune(label)
-		if len(runes) > width-1 {
-			label = string(runes[:width-1]) + "…"
-		}
-		line = headerStyle.Render(label)
+		line = headerStyle.Render(truncateToWidth(label, width))
 	}
 	return line
 }

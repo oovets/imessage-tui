@@ -3,6 +3,9 @@ package tui
 import (
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func formatChatListTime(ms int64) string {
@@ -54,14 +57,30 @@ func truncateDay(t time.Time) time.Time {
 	return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
 }
 
-func truncatePreview(text string, maxRunes int) string {
+func truncatePreview(text string, maxWidth int) string {
 	text = strings.TrimSpace(strings.ReplaceAll(text, "\n", " "))
 	if text == "" {
 		return ""
 	}
-	runes := []rune(text)
-	if len(runes) <= maxRunes {
-		return text
+	return truncateToWidth(text, maxWidth)
+}
+
+// truncateToWidth shortens s to at most width terminal columns, appending an
+// ellipsis when it had to cut.
+//
+// Columns, not runes: an emoji occupies two cells, and a cluster like 👍🏽 or
+// 👨‍👩‍👧‍👦 is several runes rendered as one two-cell glyph. Counting runes let an
+// emoji-heavy chat preview come out twice as wide as its column, which widened
+// the whole pane and dragged the divider and everything right of it sideways.
+// Cutting by runes could also split a cluster and leave a stray modifier
+// behind, shifting the rest of the line by a cell.
+func truncateToWidth(s string, width int) string {
+	if width < 1 {
+		return ""
 	}
-	return string(runes[:maxRunes-1]) + "…"
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+	// ansi.Truncate cuts on grapheme boundaries and reserves room for the tail.
+	return ansi.Truncate(s, width, "…")
 }
