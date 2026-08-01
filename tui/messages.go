@@ -398,6 +398,7 @@ func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg model
 		if msg.Pending {
 			msgStyle = msgStyle.Faint(true)
 		}
+		reopen := styleOpenSequence(msgStyle)
 		wroteLine := false
 		for li, rawLine := range fullLines {
 			for _, line := range messageWrappedLines(rawLine, wrapWidth, fullLineLinks[li] == "") {
@@ -408,7 +409,7 @@ func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg model
 				if padLen := wrapWidth - lipgloss.Width(content); padLen > 0 {
 					sb.WriteString(strings.Repeat(" ", padLen))
 				}
-				sb.WriteString(msgStyle.Render(content))
+				sb.WriteString(msgStyle.Render(reopenAfterResets(content, reopen)))
 				m.lineMessages = append(m.lineMessages, i+1)
 				m.lineLinks = append(m.lineLinks, fullLineLinks[li])
 				wroteLine = true
@@ -420,13 +421,14 @@ func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg model
 		if _, unseen := m.unseenGUIDs[msg.GUID]; unseen {
 			style = style.Reverse(true)
 		}
+		reopen := styleOpenSequence(style)
 		wroteLine := false
 		for li, rawLine := range fullLines {
 			for _, line := range messageWrappedLines(rawLine, wrapWidth, fullLineLinks[li] == "") {
 				if wroteLine {
 					sb.WriteString("\n")
 				}
-				sb.WriteString(style.Width(wrapWidth).Render(line))
+				sb.WriteString(style.Width(wrapWidth).Render(reopenAfterResets(line, reopen)))
 				m.lineMessages = append(m.lineMessages, i+1)
 				m.lineLinks = append(m.lineLinks, fullLineLinks[li])
 				wroteLine = true
@@ -517,6 +519,31 @@ func formatMessageTimestamp(timeStr string) string {
 	// No Faint(): the timestamp color is already muted, and faint on top of it
 	// washes out to near-invisible on a light-background terminal.
 	return TimestampStyle.Render(timeStr)
+}
+
+// ansiReset is the sequence lipgloss emits to close a styled span.
+const ansiReset = "\x1b[0m"
+
+// styleOpenSequence returns the escape sequence style emits ahead of its
+// content, or "" for a style that paints nothing.
+func styleOpenSequence(style lipgloss.Style) string {
+	rendered := style.Render("x")
+	if i := strings.IndexByte(rendered, 'x'); i > 0 {
+		return rendered[:i]
+	}
+	return ""
+}
+
+// reopenAfterResets re-arms open after every reset embedded in s, so a
+// pre-styled fragment inside a line (a link-preview badge, a muted timestamp)
+// does not drop the remainder of that line back to the terminal default.
+// Without this the outgoing blue stopped at the first such fragment and only
+// reappeared on wrapped continuation lines, which carry no prefix.
+func reopenAfterResets(s, open string) string {
+	if open == "" || !strings.Contains(s, ansiReset) {
+		return s
+	}
+	return strings.ReplaceAll(s, ansiReset, ansiReset+open)
 }
 
 func messageRenderLines(prefix, lineNum, sender string, bodyLines, bodyLineLinks []string, showSenderNames bool) ([]string, []string) {

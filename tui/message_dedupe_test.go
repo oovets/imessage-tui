@@ -563,6 +563,67 @@ func TestFormatMessageTimestampKeepsTextAndAddsStyle(t *testing.T) {
 	}
 }
 
+func TestOutgoingMessageKeepsAccentColorOnEveryLine(t *testing.T) {
+	oldProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() {
+		lipgloss.SetColorProfile(oldProfile)
+	})
+
+	model := NewMessagesModel()
+	model.SetShowTimestamps(true)
+	model.SetShowSenderNames(false)
+	model.SetSize(40, 10)
+	model.SetMessages([]models.Message{
+		{
+			GUID:        "message-mine",
+			Text:        "vilken serie fran hayue ville du ha autodownload till plex?",
+			IsFromMe:    true,
+			DateCreated: 1000,
+			ChatGUID:    "chat-a",
+		},
+	})
+
+	accent := styleOpenSequence(MyMessageStyle)
+	timeOnly := regexp.MustCompile(`^\d{2}:\d{2}$`)
+	body := 0
+	for _, line := range strings.Split(model.View(), "\n") {
+		text := strings.TrimSpace(stripANSI(line))
+		if text == "" || strings.Contains(text, "──") {
+			continue
+		}
+		// The timestamp stays muted, but every other span of the line — the
+		// first line and its wrapped continuations alike — must be accent
+		// colored, so the whole message reads as one block.
+		for _, span := range strings.Split(line, ansiReset) {
+			visible := strings.TrimSpace(stripANSI(span))
+			if visible == "" || timeOnly.MatchString(visible) {
+				continue
+			}
+			if color := leadingColorSequence(span); color != accent {
+				t.Fatalf("outgoing text %q rendered with color %q, want accent %q (line %q)",
+					visible, color, accent, line)
+			}
+			body++
+		}
+	}
+	if body < 2 {
+		t.Fatalf("expected a wrapped message with at least two body spans, got %d", body)
+	}
+}
+
+// leadingColorSequence returns the color in effect at the first visible
+// character of span, i.e. the last escape sequence in its leading run of
+// escapes and spaces.
+func leadingColorSequence(span string) string {
+	head := regexp.MustCompile(`^(?:\s|\x1b\[[0-9;]*m)*`).FindString(span)
+	seqs := regexp.MustCompile(`\x1b\[[0-9;]*m`).FindAllString(head, -1)
+	if len(seqs) == 0 {
+		return ""
+	}
+	return seqs[len(seqs)-1]
+}
+
 func TestLinkPreviewAttemptRules(t *testing.T) {
 	rawURL := "https://open.spotify.com/track/example"
 	if messageHasPreviewAttempt(models.Message{
