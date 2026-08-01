@@ -86,8 +86,15 @@ func (wm *WindowManager) FocusedWindow() *ChatWindow {
 
 // SetFocus sets focus to a specific window
 func (wm *WindowManager) SetFocus(id WindowID) {
+	// Carry the composer's focus across with the pane focus. Without this a
+	// fresh split left the new pane marked Focused but its textarea blurred,
+	// so keystrokes fell straight through to the global command table and the
+	// pane could not be typed in at all.
+	wasTyping := false
+
 	// Clear old focus
 	if old, ok := wm.windows[wm.focusedWindow]; ok {
+		wasTyping = old.Input.Focused()
 		old.Focused = false
 		old.Input.Blur()
 	}
@@ -96,6 +103,9 @@ func (wm *WindowManager) SetFocus(id WindowID) {
 	wm.focusedWindow = id
 	if window, ok := wm.windows[id]; ok {
 		window.Focused = true
+		if wasTyping {
+			window.Input.Focus()
+		}
 		window.Messages.ClearIncomingUnseen()
 	}
 }

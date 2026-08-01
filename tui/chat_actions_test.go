@@ -20,14 +20,14 @@ func TestAppModelDeleteChatRequiresConfirm(t *testing.T) {
 
 	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
 	app = model.(AppModel)
-	if !strings.Contains(app.statusBarView(), "Press D to confirm") {
-		t.Fatalf("delete confirmation not shown: %q", app.statusBarView())
+	if !strings.Contains(app.statusLineView(), "Press D to confirm") {
+		t.Fatalf("delete confirmation not shown: %q", app.statusLineView())
 	}
 
 	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	app = model.(AppModel)
-	if strings.Contains(app.statusBarView(), "Press D to confirm") {
-		t.Fatalf("delete confirmation did not cancel: %q", app.statusBarView())
+	if strings.Contains(app.statusLineView(), "Press D to confirm") {
+		t.Fatalf("delete confirmation did not cancel: %q", app.statusLineView())
 	}
 }
 
@@ -45,8 +45,8 @@ func TestAppModelRenamePromptCapturesText(t *testing.T) {
 	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
 	app = model.(AppModel)
 
-	if !strings.Contains(app.statusBarView(), "Rename") || !strings.Contains(app.statusBarView(), "New") {
-		t.Fatalf("rename prompt did not capture text: %q", app.statusBarView())
+	if !strings.Contains(app.statusLineView(), "Rename") || !strings.Contains(app.statusLineView(), "New") {
+		t.Fatalf("rename prompt did not capture text: %q", app.statusLineView())
 	}
 }
 
@@ -58,8 +58,8 @@ func TestAppModelWindowChatActionsUseControlKeys(t *testing.T) {
 
 	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
 	app = model.(AppModel)
-	if !strings.Contains(app.statusBarView(), "Press D to confirm") {
-		t.Fatalf("delete confirmation not shown from pane: %q", app.statusBarView())
+	if !strings.Contains(app.statusLineView(), "Press D to confirm") {
+		t.Fatalf("delete confirmation not shown from pane: %q", app.statusLineView())
 	}
 }
 

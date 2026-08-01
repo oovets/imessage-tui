@@ -503,7 +503,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.showHelp {
 			switch msg.String() {
-			case "f1", "esc", "q", "ctrl+c":
+			case "?", "esc", "q", "ctrl+c":
 				m.showHelp = false
 			}
 			return m, nil
@@ -524,6 +524,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.lastKey = msg.String()
+
+		// While a text field has focus, editing keys belong to the text being
+		// written — not to the global command table. Without this the table
+		// below swallowed them wherever they appeared: "?" opened help, "q"
+		// quit the app mid-message, and the arrow keys jumped between panes
+		// instead of moving the cursor.
+		if m.typingFocus() && keyEditsText(msg) {
+			return m.delegateToFocused(msg)
+		}
+
 		if m.focused == focusChatList && !m.chatList.SearchActive() {
 			switch msg.String() {
 			case "d":
@@ -573,7 +583,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle global keys first
 		switch msg.String() {
-		case "f1":
+		case "?":
 			m.showHelp = !m.showHelp
 			return m, nil
 
@@ -693,8 +703,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		// Arrow keys navigate between panes
-		case "left":
+		// Pane navigation. Plain arrows only reach here when no text field has
+		// focus; shift+←/→ always does, so horizontally split panes stay
+		// reachable mid-message (ctrl+↑/↓ covers the vertical axis).
+		case "left", "shift+left":
 			if m.focused == focusWindow {
 				before := m.windowManager.FocusedWindow()
 				m.windowManager.FocusDirection(DirLeft)
@@ -725,7 +737,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case "right":
+		case "right", "shift+right":
 			if m.focused == focusWindow {
 				before := m.windowManager.FocusedWindow()
 				m.windowManager.FocusDirection(DirRight)
@@ -886,7 +898,44 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Delegate to focused component
+	return m.delegateToFocused(msg)
+}
+
+// keyEditsText reports whether a key is one a focused text field owns: plain
+// characters and unmodified cursor movement.
+//
+// Deliberately excluded so they keep their global meaning while composing:
+// enter (send), tab/esc (focus), pgup/pgdown/end (scroll history), and every
+// ctrl-/alt-modified key, which is what keeps the full command set reachable
+// mid-message. Pane navigation moves to ctrl+↑/↓ and shift+←/→.
+func keyEditsText(msg tea.KeyMsg) bool {
+	if msg.Alt {
+		return false
+	}
+	switch msg.Type {
+	case tea.KeyRunes, tea.KeySpace,
+		tea.KeyLeft, tea.KeyRight, tea.KeyUp, tea.KeyDown:
+		return true
+	}
+	return false
+}
+
+// typingFocus reports whether keystrokes are currently landing in a text field
+// — a chat's message composer or the chat list's search box — and therefore
+// must not be read as global commands.
+func (m AppModel) typingFocus() bool {
+	switch m.focused {
+	case focusChatList:
+		return m.chatList.SearchActive()
+	case focusWindow:
+		window := m.windowManager.FocusedWindow()
+		return window != nil && window.Chat != nil && window.Input.Focused()
+	}
+	return false
+}
+
+// delegateToFocused hands a message straight to the focused component.
+func (m AppModel) delegateToFocused(msg tea.Msg) (AppModel, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.focused {
 	case focusChatList:
@@ -896,7 +945,6 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = window.Update(msg)
 		}
 	}
-
 	return m, cmd
 }
 
@@ -1043,7 +1091,7 @@ func (m AppModel) handleChatActionKey(msg tea.KeyMsg) (AppModel, tea.Cmd) {
 }
 
 func (m *AppModel) updateLayout() {
-	contentHeight := m.height - 1 // reserve one row for status bar
+	contentHeight := m.height
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -1083,16 +1131,15 @@ func (m AppModel) View() string {
 		return helpOverlayView(m.width, m.height)
 	}
 
-	// Render chat list panel. Reserve one row for the status bar so the
-	// total frame height stays at m.height — otherwise the alt-screen
-	// scrolls and the status row gets clipped off the top.
+	// Render chat list panel over the full frame height: there is no status
+	// bar row to reserve any more.
 	chatPanel := ""
 	if m.showChatList {
 		chatListStyle := PanelStyle
 		if m.focused == focusChatList {
 			chatListStyle = ActivePanelStyle
 		}
-		panelHeight := m.height - 1
+		panelHeight := m.height
 		if panelHeight < 1 {
 			panelHeight = 1
 		}
@@ -1116,41 +1163,22 @@ func (m AppModel) View() string {
 		)
 	}
 
-	statusBar := m.statusBarView()
-	return lipgloss.JoinVertical(lipgloss.Left, statusBar, content)
+	if line := m.statusLineView(); line != "" {
+		content = overlayBottomLine(content, line)
+	}
+	return content
 }
 
-func (m AppModel) statusBarView() string {
-	connColor := ColorConnectionDown
-	if m.wsConnected {
-		connColor = ColorConnectionUp
-	}
-	dot := lipgloss.NewStyle().Foreground(connColor).Bold(true).Render("●")
-	parts := []string{dot}
+// statusLineView renders the transient status line, or "" when there is
+// nothing to report. There is no persistent status bar any more, so this only
+// carries things the user must see while they are happening: chat action
+// prompts, errors and toasts. Persistent chrome (connection dot, pane index,
+// help hint) is gone with the bar.
+func (m AppModel) statusLineView() string {
+	var parts []string
 
-	if m.loading {
-		parts = append(parts, "loading chats…")
-	}
 	if actionText := m.chatActionStatusText(); actionText != "" {
 		parts = append(parts, actionText)
-	}
-
-	if window := m.windowManager.FocusedWindow(); m.focused == focusWindow && window != nil && window.Chat != nil {
-		if window.PaneTotal > 1 {
-			parts = append(parts, fmt.Sprintf("pane %d/%d", window.PaneIndex, window.PaneTotal))
-		}
-	}
-
-	newMessageCount := m.chatList.NewMessageCount()
-	if !m.showChatList && newMessageCount > 0 {
-		newDot := lipgloss.NewStyle().
-			Foreground(ColorChatListNewMessage).
-			Render("●")
-		label := "new message"
-		if newMessageCount > 1 {
-			label = "new messages"
-		}
-		parts = append(parts, fmt.Sprintf("%s %d %s", newDot, newMessageCount, label))
 	}
 
 	now := time.Now()
@@ -1159,18 +1187,33 @@ func (m AppModel) statusBarView() string {
 		if len(errText) > 48 {
 			errText = errText[:47] + "…"
 		}
-		parts = append(parts, lipgloss.NewStyle().Foreground(ColorChatListNewMessage).Render("! "+errText))
+		parts = append(parts, "! "+errText)
 	}
 	if m.toastText != "" && !m.toastUntil.IsZero() && now.Before(m.toastUntil) {
 		parts = append(parts, m.toastText)
 	}
 
-	parts = append(parts, "F1 help")
+	if len(parts) == 0 {
+		return ""
+	}
 
-	status := strings.Join(parts, "  ")
-	return StatusBarStyle.
-		Width(m.width).
-		Render(status)
+	style := StatusLineStyle
+	if m.width > 0 {
+		style = style.Width(m.width).MaxWidth(m.width)
+	}
+	return style.Render(strings.Join(parts, "  "))
+}
+
+// overlayBottomLine replaces the last row of view with line instead of
+// appending one, so the frame stays exactly m.height rows tall and the alt
+// screen never scrolls.
+func overlayBottomLine(view, line string) string {
+	rows := strings.Split(view, "\n")
+	if len(rows) == 0 {
+		return line
+	}
+	rows[len(rows)-1] = line
+	return strings.Join(rows, "\n")
 }
 
 func (m AppModel) chatActionStatusText() string {

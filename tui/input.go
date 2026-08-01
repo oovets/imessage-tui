@@ -40,16 +40,29 @@ func NewInputModel() InputModel {
 	ta.SetHeight(InputHeight)
 	ta.Cursor.SetMode(cursor.CursorStatic)
 
-	// Strip all colors/borders from the textarea
-	plain := ta.FocusedStyle
-	plain.Base = lipgloss.NewStyle()
-	plain.CursorLine = lipgloss.NewStyle()
+	// Strip every color and border out of the textarea. The bubbles defaults
+	// hardcode ANSI 7 (white) for the prompt and lean on terminal-background
+	// detection for the text, cursor line and end-of-buffer filler — so the
+	// moment detection guesses "dark" on a light terminal the composer paints
+	// white-on-white and you type blind. Falling back to the terminal's own
+	// foreground is correct on every background.
+	plain := textarea.Style{
+		Base:             lipgloss.NewStyle(),
+		CursorLine:       lipgloss.NewStyle(),
+		CursorLineNumber: lipgloss.NewStyle(),
+		EndOfBuffer:      lipgloss.NewStyle(),
+		LineNumber:       lipgloss.NewStyle(),
+		Placeholder:      lipgloss.NewStyle().Foreground(ColorMuted),
+		Prompt:           lipgloss.NewStyle().Foreground(ColorMuted),
+		Text:             lipgloss.NewStyle(),
+	}
 	ta.FocusedStyle = plain
-
-	blurred := ta.BlurredStyle
-	blurred.Base = lipgloss.NewStyle()
-	blurred.CursorLine = lipgloss.NewStyle()
-	ta.BlurredStyle = blurred
+	ta.BlurredStyle = plain
+	// textarea.New() aims its active style pointer at a local copy of the
+	// defaults rather than at BlurredStyle, so assigning the fields above is
+	// not enough — only Focus()/Blur() repoint it. The model starts unfocused,
+	// so Blur() is the state-preserving way to pick up `plain` right away.
+	ta.Blur()
 
 	m := InputModel{
 		textarea:      ta,

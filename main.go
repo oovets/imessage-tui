@@ -3,8 +3,10 @@ package main
 import (
 	"log"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/oovets/imessage-tui/api"
 	"github.com/oovets/imessage-tui/config"
 	"github.com/oovets/imessage-tui/tui"
@@ -37,6 +39,21 @@ func main() {
 	}
 
 	wsClient := ws.NewClient(cfg.ServerURL, cfg.Password)
+
+	// Resolve the terminal background before Bubble Tea claims stdin in raw
+	// mode: auto-detection queries the terminal over stdin, and done any
+	// later Bubble Tea's own input reader races it for the response. Under
+	// multiplexers (tmux/screen) the query is frequently answered by the
+	// multiplexer itself rather than forwarded, so detection isn't
+	// trustworthy there either — cfg.Theme lets it be forced explicitly.
+	switch strings.ToLower(cfg.Theme) {
+	case "light":
+		lipgloss.SetHasDarkBackground(false)
+	case "dark":
+		lipgloss.SetHasDarkBackground(true)
+	default:
+		lipgloss.HasDarkBackground()
+	}
 
 	p := tea.NewProgram(tui.NewAppModelWithConfig(apiClient, wsClient, cfg), tea.WithAltScreen(), tea.WithMouseAllMotion())
 	if _, err := p.Run(); err != nil {

@@ -18,6 +18,11 @@ type Config struct {
 	MaxPreviewsPerMessage int
 	PreviewProxyURL       string
 	OEmbedEndpoint        string
+	// Theme is "auto" (detect terminal background), "light", or "dark".
+	// Detection queries the terminal over stdin and is unreliable under
+	// multiplexers like tmux/screen, which often answer the query
+	// themselves instead of forwarding it to the real terminal.
+	Theme string
 }
 
 const (
@@ -178,6 +183,7 @@ func newViper() *viper.Viper {
 	v.BindEnv("max_previews_per_message", "BB_MAX_PREVIEWS_PER_MESSAGE")
 	v.BindEnv("preview_proxy_url", "BB_PREVIEW_PROXY_URL")
 	v.BindEnv("oembed_endpoint", "BB_OEMBED_ENDPOINT")
+	v.BindEnv("theme", "BB_THEME")
 
 	v.SetDefault("poll_interval_sec", 10)
 	v.SetDefault("message_limit", 50)
@@ -186,6 +192,7 @@ func newViper() *viper.Viper {
 	v.SetDefault("max_previews_per_message", 2)
 	v.SetDefault("preview_proxy_url", "")
 	v.SetDefault("oembed_endpoint", "https://noembed.com/embed")
+	v.SetDefault("theme", "auto")
 
 	return v
 }
@@ -208,6 +215,7 @@ func newLegacyViper() *viper.Viper {
 	v.BindEnv("max_previews_per_message", "BB_MAX_PREVIEWS_PER_MESSAGE")
 	v.BindEnv("preview_proxy_url", "BB_PREVIEW_PROXY_URL")
 	v.BindEnv("oembed_endpoint", "BB_OEMBED_ENDPOINT")
+	v.BindEnv("theme", "BB_THEME")
 
 	v.SetDefault("poll_interval_sec", 10)
 	v.SetDefault("message_limit", 50)
@@ -216,6 +224,7 @@ func newLegacyViper() *viper.Viper {
 	v.SetDefault("max_previews_per_message", 2)
 	v.SetDefault("preview_proxy_url", "")
 	v.SetDefault("oembed_endpoint", "https://noembed.com/embed")
+	v.SetDefault("theme", "auto")
 
 	return v
 }
@@ -231,5 +240,6 @@ func loadFromViper(v *viper.Viper) *Config {
 		MaxPreviewsPerMessage: v.GetInt("max_previews_per_message"),
 		PreviewProxyURL:       v.GetString("preview_proxy_url"),
 		OEmbedEndpoint:        v.GetString("oembed_endpoint"),
+		Theme:                 v.GetString("theme"),
 	}
 }

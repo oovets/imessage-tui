@@ -514,7 +514,9 @@ func formatMessageTimestamp(timeStr string) string {
 	if timeStr == "" {
 		return ""
 	}
-	return TimestampStyle.Faint(true).Render(timeStr)
+	// No Faint(): the timestamp color is already muted, and faint on top of it
+	// washes out to near-invisible on a light-background terminal.
+	return TimestampStyle.Render(timeStr)
 }
 
 func messageRenderLines(prefix, lineNum, sender string, bodyLines, bodyLineLinks []string, showSenderNames bool) ([]string, []string) {

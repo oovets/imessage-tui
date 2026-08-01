@@ -317,7 +317,7 @@ func (w *ChatWindow) paneHeaderLine(width int) string {
 	if w.Messages.HasUnseenIncoming() {
 		label += " ●"
 	}
-	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	headerStyle := lipgloss.NewStyle().Foreground(ColorMuted)
 	if w.Focused {
 		headerStyle = headerStyle.Bold(true).Foreground(ColorChatListSelectedBackground)
 	}

@@ -17,15 +17,21 @@ const (
 )
 
 // Shared palette values.
+//
+// Nothing here switches on the terminal background. Detection
+// (lipgloss.HasDarkBackground) queries the terminal over stdin and is wrong
+// often enough to be unusable — multiplexers answer for the terminal, some
+// emulators never reply, and a wrong answer paints unreadable text. Every
+// value below is instead picked to keep usable contrast against *both* a white
+// and a black background, and message body text carries no color at all so it
+// inherits the terminal's own foreground, which is correct by construction.
 const (
-	PaletteBlack    = lipgloss.Color("0")
-	PalettePink     = lipgloss.Color("212")
-	PaletteGray     = lipgloss.Color("242")
-	PaletteDarkGray = lipgloss.Color("240")
-	PaletteRed      = lipgloss.Color("196")
-	PaletteGreen    = lipgloss.Color("46")
-	PaletteStatusFG = lipgloss.Color("241")
-	PaletteStatusBG = lipgloss.Color("235")
+	PaletteBlack = lipgloss.Color("0")
+	PalettePink  = lipgloss.Color("212") // #ff87d7, used behind black text only
+	PaletteBlue  = lipgloss.Color("32")  // #0087d7, ~3.9:1 on white / ~5.4:1 on black
+	PaletteGray  = lipgloss.Color("243") // #767676, ~4.6:1 on white and on black
+	PaletteDim   = lipgloss.Color("242") // #6c6c6c, one step dimmer for dividers
+	PaletteRed   = lipgloss.Color("196")
 )
 
 // Semantic colors by UI area.
@@ -34,17 +40,9 @@ const (
 	ColorChatListSelectedBackground = PalettePink
 	ColorChatListNewMessage         = PaletteRed
 	ColorWindowPlaceholder          = PaletteGray
-	ColorWindowDivider              = PaletteDarkGray
-	ColorConnectionUp               = PaletteGreen
-	ColorConnectionDown             = PaletteRed
-	ColorStatusBarForeground        = PaletteStatusFG
-	ColorStatusBarBackground        = PaletteStatusBG
-	ColorMyMessageDark              = "86"
-	ColorMyMessageLight             = "27"
-	ColorTheirMessageDark           = "252"
-	ColorTheirMessageLight          = "235"
-	ColorTimestampDark              = "242"
-	ColorTimestampLight             = "244"
+	ColorWindowDivider              = PaletteDim
+	ColorMuted                      = PaletteGray
+	ColorAccent                     = PaletteBlue
 )
 
 var (
@@ -70,22 +68,23 @@ var (
 
 	// Message styles
 	MyMessageStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Dark: ColorMyMessageDark, Light: ColorMyMessageLight})
+			Foreground(ColorAccent)
 
-	// Incoming messages use a fixed light gray so they stay readable on a
-	// black background regardless of terminal background detection.
+	// Incoming messages deliberately set no foreground: the terminal's own
+	// default foreground is the only value guaranteed to contrast with the
+	// terminal's own background.
 	TheirMessageStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("250")).
 				Align(lipgloss.Left)
 
 	TimestampStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Dark: ColorTimestampDark, Light: ColorTimestampLight}).
+			Foreground(ColorMuted).
 			PaddingRight(1)
 
-	// Status bar
-	StatusBarStyle = lipgloss.NewStyle().
-			Foreground(ColorStatusBarForeground).
-			Background(ColorStatusBarBackground).
+	// Transient status line. Reverse video inverts whatever the terminal's own
+	// colors are, so the line reads as a bar on light and dark alike without
+	// committing to a foreground/background pair.
+	StatusLineStyle = lipgloss.NewStyle().
+			Reverse(true).
 			Padding(0, 1)
 
 	// Input styles (no border)

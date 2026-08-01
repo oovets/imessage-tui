@@ -20,8 +20,9 @@ func helpOverlayView(width, height int) string {
 			lines: []string{
 				"Tab          Toggle chat list / active pane",
 				"Esc          Focus chat list",
-				"Left/Right   Move between panes (Left from pane → chat list)",
+				"Shift+←/→    Move between panes (Left from pane → chat list)",
 				"Ctrl+Up/Down Move focus between stacked panes",
+				"←/→ ↑/↓      Move the cursor while writing; navigate otherwise",
 				"Up/Down j/k  Navigate chats or (in list) scroll",
 				"g / G        Top / bottom of chat list",
 				"Enter        Open chat / send message",
@@ -43,6 +44,8 @@ func helpOverlayView(width, height int) string {
 			lines: []string{
 				"PgUp/PgDn    Scroll message history",
 				"End / G      Jump to newest messages",
+				"<3 :) ;) 8)  Become emojis as you type",
+				":D :P xD :/  Become emojis once you type a space or send",
 				"/img #N      Open image on message row N",
 				"/h /lol      React to latest message",
 				"/tu /te      Thumbs up / down latest message",
@@ -85,13 +88,22 @@ func helpOverlayView(width, height int) string {
 		}
 		body.WriteString("\n")
 	}
-	body.WriteString(lipgloss.NewStyle().Foreground(ColorWindowPlaceholder).Render("Press F1 or Esc to close"))
+	note := lipgloss.NewStyle().Foreground(ColorWindowPlaceholder)
+	body.WriteString(note.Render("Single-letter shortcuts (? q d r g G /) and the plain arrow keys pause"))
+	body.WriteString("\n")
+	body.WriteString(note.Render("while you are typing in a message or in chat search — there they edit"))
+	body.WriteString("\n")
+	body.WriteString(note.Render("text. Ctrl/Alt shortcuts keep working mid-message."))
+	body.WriteString("\n\n")
+	body.WriteString(note.Render("Press ? or Esc to close"))
 
 	content := lipgloss.NewStyle().Padding(1, 2).Render(body.String())
+	// No explicit background: the help view replaces the whole screen, so it
+	// does not need one, and a hardcoded dark fill would swallow the text on a
+	// light-background terminal.
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorChatListSelectedBackground).
-		Background(lipgloss.Color("235")).
 		Render(content)
 
 	boxWidth := lipgloss.Width(box)

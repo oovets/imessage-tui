@@ -63,11 +63,11 @@ func NewSimpleListModel() SimpleListModel {
 		newMessageStyle: lipgloss.NewStyle().
 			Foreground(ColorChatListNewMessage),
 		previewStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")),
+			Foreground(ColorMuted),
 		timeStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("242")),
+			Foreground(ColorMuted),
 		searchStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("86")).
+			Foreground(ColorAccent).
 			Italic(true),
 	}
 }
