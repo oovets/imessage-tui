@@ -2,6 +2,7 @@ package slack
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -624,4 +625,71 @@ func TestChatNamesCarryTheWorkspaceWhenAsked(t *testing.T) {
 			t.Fatalf("chats = %v, want %v", got, want)
 		}
 	}
+}
+
+// The caller's chat limit means "the N most recent", which Slack's conversation
+// list cannot answer — applying it returned whichever conversations Slack put
+// first, which is how a workspace showed some channels and no DMs at all.
+func TestChatsIgnoreTheCallersLimitAndPageThroughEverything(t *testing.T) {
+	fake := newFakeSlack(t)
+	fake.route("users.list", func(map[string]string) any {
+		return map[string]any{"ok": true, "members": []any{
+			map[string]any{"id": "UANNA", "profile": map[string]any{"display_name": "Anna"}},
+		}}
+	})
+
+	// Three pages, with the DM last — the shape that hid it.
+	pages := map[string]any{
+		"": map[string]any{
+			"ok":                true,
+			"channels":          channelsNamed("a", 60),
+			"response_metadata": map[string]any{"next_cursor": "p2"},
+		},
+		"p2": map[string]any{
+			"ok":                true,
+			"channels":          channelsNamed("b", 60),
+			"response_metadata": map[string]any{"next_cursor": "p3"},
+		},
+		"p3": map[string]any{
+			"ok": true,
+			"channels": []any{
+				map[string]any{"id": "DANNA", "is_im": true, "user": "UANNA"},
+			},
+		},
+	}
+	fake.route("users.conversations", func(form map[string]string) any {
+		return pages[form["cursor"]]
+	})
+
+	p, err := newAgainst(fake, Workspace{ID: "acme", Name: "Acme", Token: "xoxp-test"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// 50 is the app's default chat limit, and what truncated the list.
+	chats, err := p.Chats(50)
+	if err != nil {
+		t.Fatalf("Chats: %v", err)
+	}
+	if len(chats) != 121 {
+		t.Fatalf("got %d chats, want all 121 across three pages", len(chats))
+	}
+	if chats[0].DisplayName != "Anna" {
+		t.Errorf("first chat is %q, want the DM from the last page", chats[0].DisplayName)
+	}
+	if got := fake.callCount("users.conversations"); got != 3 {
+		t.Errorf("fetched %d pages, want 3", got)
+	}
+}
+
+func channelsNamed(prefix string, n int) []any {
+	out := make([]any, 0, n)
+	for i := range n {
+		out = append(out, map[string]any{
+			"id":         fmt.Sprintf("C%s%d", prefix, i),
+			"name":       fmt.Sprintf("%s-%d", prefix, i),
+			"is_channel": true,
+		})
+	}
+	return out
 }

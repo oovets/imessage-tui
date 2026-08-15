@@ -53,6 +53,15 @@ const threadFetchConcurrency = 4
 // user is actually in.
 var conversationTypes = []string{"public_channel", "private_channel", "mpim", "im"}
 
+// conversationPageSize is how many conversations one users.conversations call
+// asks for. Slack allows more, but recommends no more than 200 per page.
+const conversationPageSize = 200
+
+// maxConversations is a runaway guard, not a feature. It is set far above any
+// real membership so that hitting it means something is wrong — and it says so
+// in the log rather than silently returning a partial list.
+const maxConversations = 2000
+
 // tapbacks maps the six iMessage reactions the UI can send onto Slack emoji
 // names. Slack takes any emoji; the UI only offers these.
 var tapbacks = map[string]string{
@@ -162,7 +171,12 @@ func (p *Provider) ShowWorkspaceInNames(show bool) { p.labelWorkspace = show }
 // timestamp — getting one would cost a history call per conversation — so
 // sorting by recency the way iMessage does is not on offer, and a stable
 // alphabetical list beats an arbitrary one.
-func (p *Provider) Chats(limit int) ([]models.Chat, error) {
+//
+// The caller's limit is deliberately ignored. It means "the N most recent
+// chats", which only makes sense against a list ordered by recency; applied
+// here it returns whichever N conversations Slack happened to put first, which
+// is how a workspace ends up showing some channels and no DMs at all.
+func (p *Provider) Chats(_ int) ([]models.Chat, error) {
 	p.users.loadAll()
 
 	var (
@@ -170,17 +184,13 @@ func (p *Provider) Chats(limit int) ([]models.Chat, error) {
 		cursor string
 	)
 	for {
-		page := limit - len(all)
-		if page <= 0 || page > 200 {
-			page = 200
-		}
 		// users.conversations, not conversations.list: the latter returns
 		// every channel in the workspace, including thousands the user has
 		// never joined.
 		channels, next, err := p.api.GetConversationsForUser(&slackapi.GetConversationsForUserParameters{
 			Types:           conversationTypes,
 			ExcludeArchived: true,
-			Limit:           page,
+			Limit:           conversationPageSize,
 			Cursor:          cursor,
 		})
 		if err != nil {
@@ -194,7 +204,11 @@ func (p *Provider) Chats(limit int) ([]models.Chat, error) {
 		}
 		all = append(all, channels...)
 		cursor = next
-		if cursor == "" || (limit > 0 && len(all) >= limit) {
+		if cursor == "" {
+			break
+		}
+		if len(all) >= maxConversations {
+			log.Printf("[slack] %s: stopping at %d conversations, there are more", p.ID(), len(all))
 			break
 		}
 	}
@@ -207,9 +221,11 @@ func (p *Provider) Chats(limit int) ([]models.Chat, error) {
 		kind kind
 	}
 	listed := make([]ranked, 0, len(all))
+	counts := make(map[kind]int, 6)
 	for i := range all {
 		channel := &all[i]
 		conversationKind := p.classify(channel)
+		counts[conversationKind]++
 		if conversationKind == kindBot {
 			// Bots and app DMs are noise in a conversation list; the desktop
 			// client hides them for the same reason.
@@ -233,6 +249,13 @@ func (p *Provider) Chats(limit int) ([]models.Chat, error) {
 		}
 		return strings.ToLower(listed[i].chat.DisplayName) < strings.ToLower(listed[j].chat.DisplayName)
 	})
+
+	// One line per load, so "half my channels are missing" is answerable from
+	// the log instead of from guesswork.
+	log.Printf("[slack] %s: %d conversations — %d dm, %d group, %d public, %d private, %d shared, %d bot (hidden)",
+		p.ID(), len(all),
+		counts[kindDirect], counts[kindGroup], counts[kindPublic],
+		counts[kindPrivate], counts[kindShared], counts[kindBot])
 
 	chats := make([]models.Chat, 0, len(listed))
 	for _, entry := range listed {
