@@ -197,3 +197,21 @@ func TestChatListSearchReceivesShortcutCharacters(t *testing.T) {
 		t.Error("? opened help while searching")
 	}
 }
+
+// The help overlay and the empty-pane placeholder both tell the user to press
+// F1, so it has to work — for a long time only "?" did.
+func TestF1OpensAndClosesHelp(t *testing.T) {
+	app := NewAppModelWithConfig(nil, nil, nil)
+
+	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyF1})
+	app = model.(AppModel)
+	if !app.showHelp {
+		t.Fatal("F1 did not open the help overlay")
+	}
+
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyF1})
+	app = model.(AppModel)
+	if app.showHelp {
+		t.Error("F1 did not close the help overlay")
+	}
+}

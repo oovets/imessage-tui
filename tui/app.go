@@ -520,7 +520,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.showHelp {
 			switch msg.String() {
-			case "?", "esc", "q", "ctrl+c":
+			case "?", "f1", "esc", "q", "ctrl+c":
 				m.showHelp = false
 			}
 			return m, nil
@@ -600,7 +600,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle global keys first
 		switch msg.String() {
-		case "?":
+		case "?", "f1":
+			// The help overlay and the empty-pane hint both advertise F1, so
+			// it has to actually open the thing.
 			m.showHelp = !m.showHelp
 			return m, nil
 
