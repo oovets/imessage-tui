@@ -32,6 +32,7 @@ there, edit the root ones.
 | Path | What lives there |
 |---|---|
 | `main.go` | Config load, API ping, terminal-background resolution, backend wiring, Bubble Tea startup |
+| `emojiset/` | The one shortcode table, generated from the dataset Slack uses; both the composer and the Slack decoder read it |
 | `provider/` | The seam between the UI and the chat backends. `provider/imessage/` adapts `api/` + `ws/` to it; `provider/slack/` is the Slack backend |
 | `api/` | BlueBubbles HTTP client, link-preview fetching |
 | `ws/` | Socket.io/websocket client for live events |
@@ -124,6 +125,12 @@ sender, and threads are cached by reply count so the refresh timer does not
 re-expand them. Both exist because `conversations.history` and
 `conversations.replies` are Tier 3, about fifty calls a minute. `SLACK.md` has
 the rest.
+
+**One emoji table, both directions.** `emojiset` merges the generated Slack set
+with `enescakir/emoji`, and both the composer's autocomplete and the Slack
+mrkdwn decoder read it. Two tables would mean receiving glyphs you cannot type,
+or typing names that render as `:like_this:` at the other end. Regenerate with
+`scripts/generate-emoji-map.py`; never edit `slack_generated.go` by hand.
 
 ## Terminal input
 

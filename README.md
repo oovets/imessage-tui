@@ -304,6 +304,13 @@ max_previews_per_message: 2
     metadata is preferred, so generic titles like "search" are ignored and
     refetched.
 
+  emoji
+    shortcodes are decoded from the same table the composer autocompletes
+    from, generated from the dataset slack itself uses -- so :saluting_face:
+    arrives as an emoji rather than as text, and anything you can receive is
+    something you can type with ":".
+    workspace-custom emoji have no unicode character and stay as their name.
+
   chat management
     delete uses the bluebubbles private api and clears the local cache only
     after the server confirms: d, then D, esc to cancel.
@@ -321,6 +328,7 @@ max_previews_per_message: 2
     provider/            the seam between the ui and the chat backends
     provider/imessage/   adapts api/ and ws/ to it
     provider/slack/      slack web api, socket mode, mrkdwn, guids
+    emojiset/            the shared shortcode table, generated
     api/                 bluebubbles http client, contacts, attachments
     ws/                  socket.io/websocket client, reconnect + overflow
     config/              config, credentials, ui/layout/cache state

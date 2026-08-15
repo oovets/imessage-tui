@@ -62,3 +62,21 @@ func TestEmojiAutocompleteNavigationWraps(t *testing.T) {
 		t.Fatalf("expected wrap to 0, got %d", m.acSelected)
 	}
 }
+
+// The composer and the renderer work from the same table, so a name you can
+// receive is a name you can type. These are Emoji 14 and later, which the
+// general-purpose library alone does not know.
+func TestAutocompleteFindsModernNames(t *testing.T) {
+	for _, name := range []string{"saluting_face", "melting_face", "heart_hands"} {
+		found := false
+		for _, entry := range searchEmoji(name, 8) {
+			if entry.name == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%q is not offered by the composer", name)
+		}
+	}
+}

@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/enescakir/emoji"
+	"github.com/oovets/imessage-tui/emojiset"
 )
 
 // acMaxResults caps how many emoji suggestions we keep for a query. The popup
@@ -25,14 +25,15 @@ type emojiEntry struct {
 }
 
 // emojiIndex is the searchable, alphabetically sorted set of emoji we offer for
-// autocomplete. Built once at startup from the enescakir/emoji shortcode map.
+// autocomplete. Built once at startup from the shared emoji table, which is
+// the same one incoming Slack text is decoded against — so every name you can
+// receive is a name you can type.
 var emojiIndex []emojiEntry
 
 func init() {
-	m := emoji.Map()
-	emojiIndex = make([]emojiEntry, 0, len(m))
-	for code, glyph := range m {
-		name := strings.Trim(code, ":")
+	all := emojiset.All()
+	emojiIndex = make([]emojiEntry, 0, len(all))
+	for name, glyph := range all {
 		if name == "" {
 			continue
 		}

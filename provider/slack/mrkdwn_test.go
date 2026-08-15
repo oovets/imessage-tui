@@ -83,6 +83,13 @@ func TestTextToPlain(t *testing.T) {
 			want: "🤞\U0001F3FB",
 		},
 		{
+			// Emoji 14 and later: the general-purpose library predates these,
+			// so they arrived as literal text until the Slack set was added.
+			name: "modern shortcodes resolve",
+			in:   "bra jobbat :saluting_face: :melting_face:",
+			want: "bra jobbat 🫡 🫠",
+		},
+		{
 			name: "workspace-custom emoji is left alone",
 			in:   "hej :aspace-logo: hej",
 			want: "hej :aspace-logo: hej",

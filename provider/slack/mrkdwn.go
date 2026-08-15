@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/enescakir/emoji"
+	"github.com/oovets/imessage-tui/emojiset"
 )
 
 // Slack does not send the text a human typed. Entities are wrapped in angle
@@ -25,20 +25,9 @@ var (
 	specialMention = regexp.MustCompile(`<!([^>|]+)(?:\|([^>]*))?>`)
 	// Any remaining <url> or <url|label>.
 	link = regexp.MustCompile(`<((?:https?|mailto):[^>|]+)(?:\|([^>]*))?>`)
-	// :skin-tone-2: … :skin-tone-6:, which Slack appends after the base emoji.
-	skinTone = regexp.MustCompile(`:skin-tone-([2-6]):`)
+	// :shortcode: — Slack stores emoji as names, not characters.
+	shortcode = regexp.MustCompile(`:([a-zA-Z0-9_+-]+):`)
 )
-
-// skinTones maps Slack's tone shortcodes to the Unicode modifiers they stand
-// for. Slack sends 🤞 and :skin-tone-2: as separate tokens; the modifier
-// composes with whatever emoji precedes it.
-var skinTones = map[string]string{
-	"2": "\U0001F3FB",
-	"3": "\U0001F3FC",
-	"4": "\U0001F3FD",
-	"5": "\U0001F3FE",
-	"6": "\U0001F3FF",
-}
 
 // TextToPlain turns Slack's mrkdwn into text the message renderer can show.
 //
@@ -109,7 +98,9 @@ func unescapeEntities(text string) string {
 	return strings.ReplaceAll(text, "&amp;", "&")
 }
 
-// replaceShortcodes turns :rotating_light: into 🚨 and composes skin tones.
+// replaceShortcodes turns :rotating_light: into 🚨 and composes skin tones,
+// working from the shared table so the composer and the renderer agree on what
+// an emoji name is.
 //
 // Not cosmetic: a shortcode renders as literal text in the message body, and
 // the composer's own autocomplete works from the same emoji set, so leaving
@@ -117,8 +108,18 @@ func unescapeEntities(text string) string {
 // Workspace-custom emoji (:aspace-logo:) have no Unicode character and are
 // left exactly as they arrived.
 func replaceShortcodes(text string) string {
-	text = skinTone.ReplaceAllStringFunc(text, func(match string) string {
-		return skinTones[skinTone.FindStringSubmatch(match)[1]]
+	return shortcode.ReplaceAllStringFunc(text, func(match string) string {
+		name := strings.Trim(match, ":")
+		// A tone rides directly after the emoji it modifies, so it replaces
+		// itself with the bare modifier rather than a glyph of its own.
+		if tone, ok := emojiset.SkinTone(name); ok {
+			return tone
+		}
+		if glyph, ok := emojiset.Glyph(name); ok {
+			return glyph
+		}
+		// Workspace-custom emoji have no Unicode character. Leaving the name
+		// as written says more than dropping it would.
+		return match
 	})
-	return emoji.Parse(text)
 }
