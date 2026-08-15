@@ -1,14 +1,15 @@
-[![Go](https://img.shields.io/badge/go-1.24%2B-00ADD8.svg)](https://go.dev/)
+[![Go](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg)](https://go.dev/)
 [![Bubble Tea](https://img.shields.io/badge/tui-bubble%20tea-ff69b4.svg)](https://github.com/charmbracelet/bubbletea)
 [![Docs](https://img.shields.io/badge/docs-mkdocs--material-blue.svg)](https://stevoo.net/imessage-tui/)
 
-keyboard-first terminal client for imessage, backed by a bluebubbles-compatible server.
+keyboard-first terminal client for imessage and slack, in one chat list.
+imessage is backed by a bluebubbles-compatible server; slack talks to slack directly.
 
 ```
 == features ==
 
   real-time updates over socket.io/websocket, with api polling as a reconciliation path
-  multi-pane chat layout with horizontal/vertical splits, up to 4 panes per-pane focus
+  multi-pane chat layout with horizontal/vertical splits, up to 8 panes, per-pane focus
   unread msg indicators, layout + message-cache persistence chat list with activity
    ordering, unread markers, timestamps, previews, search, resizable width
   chat delete + rename, with local alias fallback for unsupported server-side renames
@@ -17,14 +18,18 @@ keyboard-first terminal client for imessage, backed by a bluebubbles-compatible 
   youtube / spotify / instagram / news-site link previews via oembed, html metadata,
    or a configurable preview proxy.
   tapbacks render as compact emoji on the original message
+  sender names get a stable colour per person in group chats and slack channels,
+   shown automatically wherever more than one person talks, toggleable per pane
   optimistic outgoing messages with timeout reconciliation
   mouse support: focus, chat-list resize, pane-divider resize, image open, scroll
+  slack in the same list: channels, dms, group dms, threads, files, reactions,
+   realtime over socket mode, several workspaces at once
 ```
 
 ```
 == requirements ==
 
-  go 1.24+
+  go 1.25+
   a running bluebubbles-compatible server
   network access from this client to the bluebubbles http + websocket endpoints
 ```
@@ -46,13 +51,22 @@ keyboard-first terminal client for imessage, backed by a bluebubbles-compatible 
   preview_proxy_url         BB_PREVIEW_PROXY_URL        empty     optional json proxy
   oembed_endpoint           BB_OEMBED_ENDPOINT          noembed   oembed endpoint
   (env only)                BB_INSECURE_TLS             unset     skip tls verify (self-signed; insecure)
+  (env only)                BB_SLACK_TOKEN              unset     slack user token, one workspace
+  (env only)                BB_SLACK_APP_TOKEN          unset     slack app-level token, for realtime
+  (env only)                BB_SLACK_WORKSPACE          slack     label for the env workspace
   theme                     BB_THEME                    auto      auto|light|dark terminal background
 
-  theme: only sets what lipgloss reports for the terminal background. the
-  palette no longer branches on it — every colour is chosen to stay readable
-  on light and dark alike, and message text carries no colour at all so it
-  inherits the terminal's own foreground. leave it on auto unless a plugin or
-  future style needs it pinned.
+  theme: auto keeps a compromise palette — every colour is chosen to stay
+  readable on light and dark alike, and message text carries no colour at all
+  so it inherits the terminal's own foreground. pinning it to dark or light
+  additionally tunes the palette for that background: on dark the accent blue,
+  timestamps and dividers brighten, since they no longer have to survive a
+  white background too. auto never picks the tuned palette — background
+  detection is unreliable and a wrong guess paints unreadable text.
+
+  on a black-background xterm, set theme: dark (or BB_THEME=dark) and make
+  sure TERM is xterm-256color; a TERM without a colour suffix makes lipgloss
+  strip every colour.
 ```
 
 ```yaml
@@ -71,6 +85,49 @@ max_previews_per_message: 2
 go test ./...
 go build -o imessage-tui .
 ./imessage-tui
+```
+
+```
+== slack ==
+
+  slack conversations appear in the same chat list as imessage. nothing is
+  configured in imessage.yaml: slack is on when tokens are present, off when
+  they are not, and the app starts either way. a workspace that fails to
+  connect costs that workspace only.
+
+  two tokens per workspace, because slack needs two:
+    xoxp-…  user token, so the web api acts as you and sees what you see
+    xapp-…  app-level token, which only opens the socket mode connection
+
+  the fastest way in, for one workspace:
+
+    export BB_SLACK_TOKEN=xoxp-…
+    export BB_SLACK_APP_TOKEN=xapp-…
+    export BB_SLACK_WORKSPACE=acme      # optional label
+
+  for several workspaces, or to keep the tokens out of your shell profile,
+  put them in the os keyring. an existing ~/.slack_config.json is imported
+  automatically on first run -- delete that file afterwards, it holds both
+  tokens in plaintext. the log line tells you when the import happened.
+
+  what works: channels, dms, group dms, thread replies inline, files, emoji
+  shortcodes, mentions resolved to names, reactions (the six tapback commands
+  map onto slack emoji), sending, replying in a thread with /r #N, and
+  realtime over socket mode.
+
+  ordering: imessage chats first, then each workspace -- people and group
+  chats before channels, alphabetically. slack's conversation list carries no
+  last-activity timestamp, so recency ordering is not available without a
+  history call per conversation. with more than one workspace connected, chat
+  names are prefixed with the workspace so two "#general" stay apart.
+
+  deleting or renaming a conversation is imessage-only; slack has no
+  equivalent and the app says so rather than pretending.
+
+  marking a conversation read needs a write scope on the user token
+  (channels:write, groups:write, im:write, mpim:write). without it slack
+  answers missing_scope, the app stops asking for that workspace, and
+  everything else keeps working.
 ```
 
 ```
@@ -118,9 +175,9 @@ that use ctrl/alt/shift work everywhere, including mid-message.
 `ctrl+N`
   toggle message line numbers
 `ctrl+B`
-  toggle sender names (show text only when off)
+  toggle sender names in the focused pane only
 `alt+M`
-  toggle sender names (alternative binding)
+  toggle sender names in every pane, and for new ones
 `q` / `ctrl+C`
   quit
 ```
@@ -129,6 +186,22 @@ there is no persistent status bar. prompts you have to act on — delete/rename
 confirmations, errors, toasts — appear on the bottom row while they are live and
 disappear again; unread chats are marked in the chat list and with a ● on pane
 headers.
+
+```
+== composer commands ==
+
+typed into the message box and sent with enter, instead of the message:
+
+  /r #N text     reply to message row N. on slack this posts into that
+                 message's thread -- the only way to answer in a thread
+                 rather than beside it. on imessage it becomes a quoted reply.
+  /img #N        open the image on message row N
+  /h /lol /tu    react to the latest message with ❤️ 😂 👍
+  /te /!! /?     react with 👎 ‼️ ❓
+
+  the #N numbering is the row number shown with ctrl+N. on slack the six
+  reactions map onto :heart: :joy: :+1: :-1: :bangbang: :question:.
+```
 
 ```
 == emoticons ==

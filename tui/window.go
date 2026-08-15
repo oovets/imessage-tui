@@ -62,6 +62,9 @@ func (w *ChatWindow) SetBounds(x, y, width, height int) {
 // SetChat sets the chat displayed in this window.
 // It copies the chat to avoid stale pointer issues when the chat list is reordered.
 func (w *ChatWindow) SetChat(chat *models.Chat) {
+	// A per-pane sender-name choice belongs to the conversation it was made
+	// for, not to the pane forever.
+	w.Messages.ResetSenderNamePin()
 	if chat != nil {
 		chatCopy := *chat
 		w.Chat = &chatCopy
@@ -219,6 +222,7 @@ func (w *ChatWindow) View() string {
 			Width(w.width).
 			MaxWidth(w.width).
 			Height(w.height).
+			MaxHeight(w.height).
 			Render(placeholder)
 	}
 
@@ -299,10 +303,16 @@ func (w *ChatWindow) View() string {
 	)
 	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
 
+	// MaxHeight for the same reason as MaxWidth: Height only pads a short
+	// block, it does not clip a tall one. With many panes each one gets few
+	// rows, and a pane whose composer and message area together exceed its
+	// share would push the whole frame past the bottom of the terminal —
+	// which scrolls the alt screen and eats the top row.
 	return style.
 		Width(w.width).
 		MaxWidth(w.width).
 		Height(w.height).
+		MaxHeight(w.height).
 		Render(content)
 }
 

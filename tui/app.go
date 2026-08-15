@@ -1,13 +1,14 @@
 package tui
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"mime"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -16,10 +17,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
-	"github.com/oovets/imessage-tui/api"
 	"github.com/oovets/imessage-tui/config"
 	"github.com/oovets/imessage-tui/models"
-	"github.com/oovets/imessage-tui/ws"
+	"github.com/oovets/imessage-tui/provider"
 )
 
 const defaultMessageFetchLimit = 50
@@ -70,7 +70,7 @@ type (
 	}
 	sendReactionSuccessMsg struct{}
 	sendReactionErrMsg     struct{ err error }
-	wsEventMsg             models.WSEvent
+	providerEventMsg       provider.Event
 	wsConnectSuccessMsg    struct{}
 	wsConnectFailMsg       struct{ err error }
 	wsReconnectedMsg       struct{}
@@ -126,9 +126,10 @@ type AppModel struct {
 	wsConnected     bool
 	lastRefreshTime time.Time
 
-	// Clients
-	apiClient *api.Client
-	wsClient  *ws.Client
+	// Backends. Which one owns a chat is derived from its GUID, never stored
+	// on the chat, so the two cannot drift — see package provider.
+	providers *provider.Registry
+	stream    provider.Stream
 
 	// Terminal dimensions
 	width  int
@@ -159,10 +160,17 @@ type AppModel struct {
 	readMarkInFlight     map[string]bool
 	linkPreviewInFlight  map[string]bool
 	linkPreviewAttempted map[string]bool
-	disableReadSync      bool
-	savedLayoutState     *config.LayoutState
-	didRestoreLayout     bool
-	chatOverrides        config.ChatOverridesState
+	// Per backend, not global: BlueBubbles without the private API answers 404
+	// to every mark-read, and one shared flag would have silenced Slack's
+	// read receipts too — which do work.
+	disableReadSync  map[string]bool
+	savedLayoutState *config.LayoutState
+	didRestoreLayout bool
+	chatOverrides    config.ChatOverridesState
+
+	// When the terminal's ESC arrived in a read of its own, leaving the rest
+	// of the sequence to be parsed as text. See swallowEscapeSequenceTail.
+	lastEscapeAt time.Time
 
 	showHelp         bool
 	chatAction       chatActionMode
@@ -183,11 +191,14 @@ type AppModel struct {
 	persist *persister
 }
 
-func NewAppModel(client *api.Client, wsClient *ws.Client) AppModel {
-	return NewAppModelWithConfig(client, wsClient, nil)
+func NewAppModel(backend provider.Provider, stream provider.Stream) AppModel {
+	return NewAppModelWithConfig(provider.NewRegistry(backend), stream, nil)
 }
 
-func NewAppModelWithConfig(client *api.Client, wsClient *ws.Client, cfg *config.Config) AppModel {
+// NewAppModelWithConfig builds the app around a registry of backends and one
+// realtime stream — merge several with provider.Merge when more than one
+// backend is connected. A nil registry is a valid unconfigured state.
+func NewAppModelWithConfig(backends *provider.Registry, stream provider.Stream, cfg *config.Config) AppModel {
 	ui := config.LoadUIState()
 	chatOverrides := config.LoadChatOverrides()
 	messageLimit := defaultMessageFetchLimit
@@ -211,10 +222,6 @@ func NewAppModelWithConfig(client *api.Client, wsClient *ws.Client, cfg *config.
 		if cfg.MaxPreviewsPerMessage > 0 {
 			maxPreviewsPerMessage = cfg.MaxPreviewsPerMessage
 		}
-		if client != nil {
-			client.SetPreviewProxyURL(cfg.PreviewProxyURL)
-			client.SetOEmbedEndpoint(cfg.OEmbedEndpoint)
-		}
 	}
 
 	wm := NewWindowManager()
@@ -225,8 +232,8 @@ func NewAppModelWithConfig(client *api.Client, wsClient *ws.Client, cfg *config.
 	app := AppModel{
 		chatList:              NewChatListModel(),
 		windowManager:         wm,
-		apiClient:             client,
-		wsClient:              wsClient,
+		providers:             backends,
+		stream:                stream,
 		focused:               focusChatList,
 		width:                 80,
 		height:                24,
@@ -246,6 +253,7 @@ func NewAppModelWithConfig(client *api.Client, wsClient *ws.Client, cfg *config.
 		messageFetchedAt:      make(map[string]time.Time),
 		pendingOutgoing:       make(map[string][]models.Message),
 		readMarkInFlight:      make(map[string]bool),
+		disableReadSync:       make(map[string]bool),
 		linkPreviewInFlight:   make(map[string]bool),
 		linkPreviewAttempted:  make(map[string]bool),
 		chatOverrides:         chatOverrides,
@@ -262,13 +270,13 @@ func NewAppModelWithConfig(client *api.Client, wsClient *ws.Client, cfg *config.
 
 func (m AppModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{
-		loadChatsCmd(m.apiClient, m.chatLimit),
+		loadChatsCmd(m.providers.All(), m.chatLimit),
 		noticeExpireCmd(),
 	}
 
-	// Try to connect WebSocket for real-time updates
-	if m.wsClient != nil {
-		cmds = append(cmds, connectWSCmd(m.wsClient))
+	// Try to connect the realtime stream for live updates
+	if m.stream != nil {
+		cmds = append(cmds, connectStreamCmd(m.stream))
 	}
 	if m.pollInterval > 0 {
 		cmds = append(cmds, refreshTickCmd(m.pollInterval))
@@ -390,7 +398,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.messageFetchInFlight[msg.chatGUID] = true
-		return m, prefetchMessagesCmd(m.apiClient, msg.chatGUID, m.messageLimit)
+		return m, prefetchMessagesCmd(m.providerFor(msg.chatGUID), msg.chatGUID, m.messageLimit)
 
 	case linkPreviewLoadedMsg:
 		key := linkPreviewKey(msg.messageGUID, msg.url)
@@ -432,20 +440,20 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case wsConnectSuccessMsg:
 		m.wsConnected = true
 		return m, tea.Batch(
-			waitForWSEventCmd(m.wsClient),
-			waitForWSReconnectCmd(m.wsClient),
-			waitForWSDisconnectCmd(m.wsClient),
-			waitForWSOverflowCmd(m.wsClient),
+			m.waitForStreamEvent(),
+			waitForStreamReconnectCmd(m.stream),
+			waitForStreamDisconnectCmd(m.stream),
+			waitForStreamOverflowCmd(m.stream),
 		)
 
 	case wsDisconnectedMsg:
 		m.wsConnected = false
-		return m, waitForWSDisconnectCmd(m.wsClient)
+		return m, waitForStreamDisconnectCmd(m.stream)
 
 	case wsOverflowMsg:
 		// Events buffer overflowed - at least one event was dropped.
 		// Resync every known chat so the missed message surfaces.
-		cmds := []tea.Cmd{waitForWSOverflowCmd(m.wsClient)}
+		cmds := []tea.Cmd{waitForStreamOverflowCmd(m.stream)}
 		if cmd := m.resyncAllChatsCmd(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -456,7 +464,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// were offline are lost. Refetch all chats we know about so the
 		// user never misses incoming messages silently.
 		m.wsConnected = true
-		cmds := []tea.Cmd{waitForWSReconnectCmd(m.wsClient)}
+		cmds := []tea.Cmd{waitForStreamReconnectCmd(m.stream)}
 		if cmd := m.resyncAllChatsCmd(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -474,9 +482,15 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case markReadErrMsg:
 		m.readMarkInFlight[msg.chatGUID] = false
 		low := strings.ToLower(msg.err.Error())
-		if strings.Contains(low, "status 404") || strings.Contains(low, "private api") || strings.Contains(low, "status 501") {
-			m.disableReadSync = true
-			log.Printf("disabling remote read sync: %v", msg.err)
+		// A backend that cannot mark chats read says so the same way every
+		// time: BlueBubbles without the private API helper, Slack with a token
+		// that lacks the write scope. Retrying on every chat you open just
+		// fills the log, so the backend is taken at its word.
+		if strings.Contains(low, "status 404") || strings.Contains(low, "private api") ||
+			strings.Contains(low, "status 501") || strings.Contains(low, "missing_scope") {
+			backend := m.backendIDFor(msg.chatGUID)
+			m.disableReadSync[backend] = true
+			log.Printf("disabling remote read sync for %s: %v", backend, msg.err)
 			return m, nil
 		}
 		log.Printf("mark chat read failed for %s: %v", msg.chatGUID, msg.err)
@@ -490,8 +504,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
-	case wsEventMsg:
-		return m.handleWSEvent(models.WSEvent(msg))
+	case providerEventMsg:
+		return m.handleProviderEvent(provider.Event(msg))
 
 	case errMsg:
 		m.setAppError(msg.err)
@@ -501,6 +515,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouseMsg(msg)
 
 	case tea.KeyMsg:
+		if m.swallowEscapeSequenceTail(msg) {
+			return m, nil
+		}
 		if m.showHelp {
 			switch msg.String() {
 			case "?", "esc", "q", "ctrl+c":
@@ -617,16 +634,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Split operations
 		case "ctrl+f":
-			if !m.windowManager.SplitWindow(SplitHorizontal) {
-				return m, showToastCmd("Max 4 panes (Ctrl+W to close)", 3*time.Second)
+			if err := m.windowManager.SplitWindow(SplitHorizontal); err != nil {
+				return m, showToastCmd(capitalize(err.Error()), 3*time.Second)
 			}
 			m.updateLayout()
 			m.saveLayoutState()
 			return m, nil
 
 		case "ctrl+g":
-			if !m.windowManager.SplitWindow(SplitVertical) {
-				return m, showToastCmd("Max 4 panes (Ctrl+W to close)", 3*time.Second)
+			if err := m.windowManager.SplitWindow(SplitVertical); err != nil {
+				return m, showToastCmd(capitalize(err.Error()), 3*time.Second)
 			}
 			m.updateLayout()
 			m.saveLayoutState()
@@ -671,14 +688,23 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.saveUIState()
 			return m, nil
 
-		case "ctrl+b", "alt+m", "ctrl+m":
-			// Toggle sender names in message rows.
-			// ctrl+m is kept for terminals that can distinguish it from Enter.
-			// When disabled, rows show only IN/OUT direction + text.
+		case "ctrl+b":
+			// Sender names for the focused pane only. Panes hold different
+			// kinds of conversation — a Slack channel needs names, a
+			// two-person iMessage thread does not — so the toggle answers for
+			// the one you are looking at. The choice lasts until that pane
+			// changes conversation.
+			show := m.windowManager.ToggleFocusedSenderNames()
+			return m, showToastCmd(senderNameToast(show, "this pane"), 2*time.Second)
+
+		case "alt+m", "ctrl+m":
+			// The same toggle for every pane, and the default new panes start
+			// from. ctrl+m is kept for terminals that can distinguish it from
+			// Enter.
 			m.showSenderNames = !m.showSenderNames
 			m.windowManager.SetShowSenderNames(m.showSenderNames)
 			m.saveUIState()
-			return m, nil
+			return m, showToastCmd(senderNameToast(m.showSenderNames, "all panes"), 2*time.Second)
 
 		case "ctrl+e":
 			// Toggle pane dividers between split windows.
@@ -693,7 +719,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.saveUIState()
 			return m, nil
 
-		case "escape":
+		case "esc", "escape":
+			// Bubble Tea names this key "esc"; matching only "escape" made this
+			// branch unreachable, so the documented "esc returns to the chat
+			// list" silently did nothing.
 			// Always go to chat list from a window
 			if m.focused == focusWindow && m.showChatList {
 				if window := m.windowManager.FocusedWindow(); window != nil {
@@ -875,7 +904,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						window.Input.Clear()
 						pending := m.addPendingOutgoing(window.Chat.GUID, text)
 						return m, tea.Batch(
-							sendMessageCmd(m.apiClient, window.Chat.GUID, text, window.ID, pending.GUID),
+							sendMessageCmd(m.providerFor(window.Chat.GUID), window.Chat.GUID, text, "", window.ID, pending.GUID),
 							pendingTimeoutCmd(window.Chat.GUID, pending.GUID),
 						)
 					}
@@ -1059,7 +1088,7 @@ func (m AppModel) handleChatActionKey(msg tea.KeyMsg) (AppModel, tea.Cmd) {
 		case "D":
 			chatGUID := m.actionChatGUID
 			m.clearChatAction()
-			return m, deleteChatCmd(m.apiClient, chatGUID)
+			return m, deleteChatCmd(m.providerFor(chatGUID), chatGUID)
 		default:
 			return m, nil
 		}
@@ -1078,7 +1107,7 @@ func (m AppModel) handleChatActionKey(msg tea.KeyMsg) (AppModel, tea.Cmd) {
 			chatGUID := m.actionChatGUID
 			displayName := strings.TrimSpace(m.renameText)
 			m.clearChatAction()
-			return m, renameChatCmd(m.apiClient, chatGUID, displayName)
+			return m, renameChatCmd(m.providerFor(chatGUID), chatGUID, displayName)
 		default:
 			if len(msg.Runes) > 0 {
 				m.renameText += string(msg.Runes)
@@ -1230,19 +1259,168 @@ func (m AppModel) chatActionStatusText() string {
 
 // Command constructors
 
-func loadChatsCmd(client *api.Client, limit int) tea.Cmd {
-	return func() tea.Msg {
-		chats, err := client.GetChats(limit)
-		if err != nil {
-			return errMsg{err: fmt.Errorf("failed to load chats: %v", err)}
-		}
-		return chatsLoadedMsg(chats)
+// escapeTailWindow is how long after a torn escape sequence its remainder is
+// still expected.
+//
+// Generous on purpose. The split happens when the app is busy, so the two
+// halves can be a whole render apart — eight panes of history is well over the
+// 60ms this first used. Still far shorter than the gap between a keypress and
+// someone typing a plausible sequence by hand.
+const escapeTailWindow = 250 * time.Millisecond
+
+// mouseReportTail matches what is left of an SGR mouse report: "<35;15;33M",
+// "[<0;4;7m". Terminals emit these constantly while the mouse moves, so they
+// are by far the most common thing to arrive torn — and nothing a person types
+// looks like one, so this needs no timing guard at all.
+var mouseReportTail = regexp.MustCompile(`^\[?<[0-9;]+[Mm]$`)
+
+// escapeSequenceTail matches the remainder of a CSI or SS3 sequence, with or
+// without its introducer: "[1;6C", "1;6C", "[27;5;9~", "Oc".
+var escapeSequenceTail = regexp.MustCompile(`^[\[O]?[0-9;:<=>?]*[ -/]*[@-~]$`)
+
+// escapeSequencePartialTail matches the same thing cut short again, for a
+// sequence that arrived in more than two pieces.
+var escapeSequencePartialTail = regexp.MustCompile(`^[\[O]?[0-9;:<=>?]+$`)
+
+// swallowEscapeSequenceTail drops the text left over when a key's escape
+// sequence was torn apart before it reached us.
+//
+// Bubble Tea's input reader assumes a read shorter than its buffer ends on an
+// event boundary (bubbletea key.go, readAnsiInputs: `canHaveMoreData :=
+// numBytes == len(buf)`). A terminal does not promise that. When the app is
+// busy — a pane switch is the most expensive frame it draws — the kernel hands
+// over part of the sequence and the rest on the next read, and the parser has
+// already committed. "\x1b[1;6C" then arrives as either a lone Escape or an
+// alt+[ , followed by ordinary runes: the literal text "[1;6C" typed into
+// whichever composer had focus, which is the pane being switched away from.
+//
+// Only the leftovers are dropped. Requiring a torn start within the last few
+// milliseconds is what keeps this from eating text that merely looks like a
+// sequence.
+func (m *AppModel) swallowEscapeSequenceTail(msg tea.KeyMsg) bool {
+	// A mouse report is unmistakable, and by the time one is torn the app has
+	// usually been busy long enough for any timing window to have closed.
+	if msg.Type == tea.KeyRunes && !msg.Alt && mouseReportTail.MatchString(string(msg.Runes)) {
+		m.lastEscapeAt = time.Time{}
+		return true
+	}
+	if isTornSequenceStart(msg) {
+		m.lastEscapeAt = time.Now()
+		// alt+[ carries the introducer as text and would otherwise be typed;
+		// a bare Escape is a real key and still has to reach the handlers.
+		return msg.Type == tea.KeyRunes
+	}
+	if msg.Type != tea.KeyRunes || msg.Alt || m.lastEscapeAt.IsZero() {
+		return false
+	}
+	if time.Since(m.lastEscapeAt) > escapeTailWindow {
+		m.lastEscapeAt = time.Time{}
+		return false
+	}
+
+	runes := string(msg.Runes)
+	switch {
+	case escapeSequenceTail.MatchString(runes):
+		m.lastEscapeAt = time.Time{}
+		return true
+	case escapeSequencePartialTail.MatchString(runes):
+		// Still mid-sequence: keep the window open for the remaining pieces.
+		m.lastEscapeAt = time.Now()
+		return true
+	default:
+		m.lastEscapeAt = time.Time{}
+		return false
 	}
 }
 
-func loadMessagesCmd(client *api.Client, chatGUID string, limit int) tea.Cmd {
+// isTornSequenceStart reports whether a key looks like the head of an escape
+// sequence that lost the rest of itself: a bare Escape, or the introducer
+// delivered as alt+[ / alt+O.
+func isTornSequenceStart(msg tea.KeyMsg) bool {
+	if msg.Type == tea.KeyEscape && !msg.Alt {
+		return true
+	}
+	return msg.Type == tea.KeyRunes && msg.Alt && len(msg.Runes) == 1 &&
+		(msg.Runes[0] == '[' || msg.Runes[0] == 'O')
+}
+
+// senderNameToast says what a sender-name toggle just did. Without it the
+// per-pane and all-panes bindings look identical from the outside.
+func senderNameToast(show bool, scope string) string {
+	if show {
+		return "Sender names on (" + scope + ")"
+	}
+	return "Sender names off (" + scope + ")"
+}
+
+// capitalize upper-cases the first letter, so an error written as a Go error
+// string reads as a sentence in a toast.
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// windowChatGUID is the GUID of the chat a pane shows, or "" for an empty
+// pane — which routes to the default backend, the same one an unprefixed GUID
+// would reach.
+func windowChatGUID(window *ChatWindow) string {
+	if window == nil || window.Chat == nil {
+		return ""
+	}
+	return window.Chat.GUID
+}
+
+// backendIDFor names the backend owning a chat, for state that is per backend
+// rather than per chat. Chats with no backend share one bucket, which is where
+// they belong: there is nothing to talk to for any of them.
+func (m AppModel) backendIDFor(chatGUID string) string {
+	if backend := m.providerFor(chatGUID); backend != nil {
+		return backend.ID()
+	}
+	return ""
+}
+
+// providerFor returns the backend owning chatGUID, or nil when none is
+// configured. Every call that talks to a backend goes through here.
+func (m AppModel) providerFor(chatGUID string) provider.Provider {
+	return m.providers.For(chatGUID)
+}
+
+// loadChatsCmd fans out over every configured backend and concatenates the
+// result. One backend being down must not blank the list, so it is only an
+// error when nothing loaded at all.
+func loadChatsCmd(backends []provider.Provider, limit int) tea.Cmd {
 	return func() tea.Msg {
-		messages, err := client.GetMessages(chatGUID, limit)
+		var (
+			all  []models.Chat
+			errs []error
+		)
+		for _, backend := range backends {
+			chats, err := backend.Chats(limit)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", backend.ID(), err))
+				continue
+			}
+			all = append(all, chats...)
+		}
+		if len(all) == 0 && len(errs) > 0 {
+			return errMsg{err: fmt.Errorf("failed to load chats: %v", errors.Join(errs...))}
+		}
+		for _, err := range errs {
+			log.Printf("chat load failed: %v", err)
+		}
+		return chatsLoadedMsg(all)
+	}
+}
+
+func loadMessagesCmd(backend provider.Provider, chatGUID string, limit int) tea.Cmd {
+	return func() tea.Msg {
+		if backend == nil {
+			return loadMessagesErrMsg{chatGUID: chatGUID, err: fmt.Errorf("no backend for chat %s", chatGUID), report: true}
+		}
+		messages, err := backend.Messages(chatGUID, limit)
 		if err != nil {
 			return loadMessagesErrMsg{chatGUID: chatGUID, err: fmt.Errorf("failed to load messages: %v", err), report: true}
 		}
@@ -1250,9 +1428,12 @@ func loadMessagesCmd(client *api.Client, chatGUID string, limit int) tea.Cmd {
 	}
 }
 
-func prefetchMessagesCmd(client *api.Client, chatGUID string, limit int) tea.Cmd {
+func prefetchMessagesCmd(backend provider.Provider, chatGUID string, limit int) tea.Cmd {
 	return func() tea.Msg {
-		messages, err := client.GetMessages(chatGUID, limit)
+		if backend == nil {
+			return loadMessagesErrMsg{chatGUID: chatGUID, err: fmt.Errorf("no backend for chat %s", chatGUID), report: false}
+		}
+		messages, err := backend.Messages(chatGUID, limit)
 		if err != nil {
 			return loadMessagesErrMsg{chatGUID: chatGUID, err: fmt.Errorf("failed to prefetch messages: %v", err), report: false}
 		}
@@ -1277,7 +1458,7 @@ func (m *AppModel) selectChat(chat *models.Chat, window *ChatWindow) tea.Cmd {
 	if m.shouldRefreshMessages(chat.GUID) {
 		m.messageFetchInFlight[chat.GUID] = true
 		window.Messages.SetLoading(true)
-		cmds = append(cmds, loadMessagesCmd(m.apiClient, chat.GUID, m.messageLimit))
+		cmds = append(cmds, loadMessagesCmd(m.providerFor(chat.GUID), chat.GUID, m.messageLimit))
 	}
 	if cmd := m.markChatReadIfNeeded(chat.GUID); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -1621,11 +1802,11 @@ func (m *AppModel) clearFocusedWindowNewMessageIndicator() tea.Cmd {
 
 func (m *AppModel) markChatReadIfNeeded(chatGUID string) tea.Cmd {
 	chatGUID = strings.TrimSpace(chatGUID)
-	if chatGUID == "" || m.disableReadSync || m.readMarkInFlight[chatGUID] {
+	if chatGUID == "" || m.disableReadSync[m.backendIDFor(chatGUID)] || m.readMarkInFlight[chatGUID] {
 		return nil
 	}
 	m.readMarkInFlight[chatGUID] = true
-	return markChatReadCmd(m.apiClient, chatGUID)
+	return markChatReadCmd(m.providerFor(chatGUID), chatGUID)
 }
 
 func (m *AppModel) prefetchTopChatsCmd(chats []models.Chat, skipGUID string) tea.Cmd {
@@ -1648,7 +1829,7 @@ func (m *AppModel) prefetchTopChatsCmd(chats []models.Chat, skipGUID string) tea
 			continue
 		}
 		m.messageFetchInFlight[chatGUID] = true
-		cmds = append(cmds, prefetchMessagesCmd(m.apiClient, chatGUID, m.messageLimit))
+		cmds = append(cmds, prefetchMessagesCmd(m.providerFor(chatGUID), chatGUID, m.messageLimit))
 	}
 
 	if len(cmds) == 0 {
@@ -1658,61 +1839,82 @@ func (m *AppModel) prefetchTopChatsCmd(chats []models.Chat, skipGUID string) tea
 	return tea.Batch(cmds...)
 }
 
-func sendMessageCmd(client *api.Client, chatGUID, text string, windowID WindowID, pendingGUID string) tea.Cmd {
+// sendMessageCmd delivers text, optionally as a reply to replyToGUID — a
+// threaded reply on Slack, a quoted reply on iMessage.
+func sendMessageCmd(backend provider.Provider, chatGUID, text, replyToGUID string, windowID WindowID, pendingGUID string) tea.Cmd {
 	return func() tea.Msg {
-		if err := client.SendMessageWithTempGUID(chatGUID, text, "", pendingGUID); err != nil {
+		if backend == nil {
+			return sendErrMsg{err: errNoBackend(chatGUID), chatGUID: chatGUID, pendingGUID: pendingGUID}
+		}
+		if err := backend.Send(chatGUID, text, replyToGUID, pendingGUID); err != nil {
 			return sendErrMsg{err: err, chatGUID: chatGUID, pendingGUID: pendingGUID}
 		}
 		return sendSuccessMsg{windowID: windowID}
 	}
 }
 
-func sendReactionCmd(client *api.Client, chatGUID, messageGUID, reaction string) tea.Cmd {
+func sendReactionCmd(backend provider.Provider, chatGUID, messageGUID, reaction string) tea.Cmd {
 	return func() tea.Msg {
-		if client == nil {
-			return sendReactionErrMsg{err: fmt.Errorf("api client not configured")}
+		if backend == nil {
+			return sendReactionErrMsg{err: errNoBackend(chatGUID)}
 		}
-		if err := client.SendReaction(chatGUID, messageGUID, reaction, 0); err != nil {
+		if err := backend.React(chatGUID, messageGUID, reaction); err != nil {
 			return sendReactionErrMsg{err: err}
 		}
 		return sendReactionSuccessMsg{}
 	}
 }
 
-func markChatReadCmd(client *api.Client, chatGUID string) tea.Cmd {
+func markChatReadCmd(backend provider.Provider, chatGUID string) tea.Cmd {
 	return func() tea.Msg {
-		if client == nil {
-			return markReadErrMsg{chatGUID: chatGUID, err: fmt.Errorf("api client not configured")}
+		if backend == nil {
+			return markReadErrMsg{chatGUID: chatGUID, err: errNoBackend(chatGUID)}
 		}
-		if err := client.MarkChatRead(chatGUID); err != nil {
+		if err := backend.MarkRead(chatGUID); err != nil {
 			return markReadErrMsg{chatGUID: chatGUID, err: err}
 		}
 		return markReadSuccessMsg{chatGUID: chatGUID}
 	}
 }
 
-func deleteChatCmd(client *api.Client, chatGUID string) tea.Cmd {
+// deleteChatCmd and renameChatCmd need a backend that edits conversations.
+// Slack has no equivalent, so the capability is asked for rather than assumed;
+// a backend without it reports the same error as one that failed.
+func deleteChatCmd(backend provider.Provider, chatGUID string) tea.Cmd {
 	return func() tea.Msg {
-		if client == nil {
-			return deleteChatErrMsg{chatGUID: chatGUID, err: fmt.Errorf("api client not configured")}
+		editor, ok := backend.(provider.ChatEditor)
+		if !ok {
+			return deleteChatErrMsg{chatGUID: chatGUID, err: errNoCapability(backend, "delete chats")}
 		}
-		if err := client.DeleteChat(chatGUID); err != nil {
+		if err := editor.DeleteChat(chatGUID); err != nil {
 			return deleteChatErrMsg{chatGUID: chatGUID, err: err}
 		}
 		return deleteChatSuccessMsg{chatGUID: chatGUID}
 	}
 }
 
-func renameChatCmd(client *api.Client, chatGUID, displayName string) tea.Cmd {
+func renameChatCmd(backend provider.Provider, chatGUID, displayName string) tea.Cmd {
 	return func() tea.Msg {
-		if client == nil {
-			return renameChatErrMsg{chatGUID: chatGUID, displayName: displayName, err: fmt.Errorf("api client not configured")}
+		editor, ok := backend.(provider.ChatEditor)
+		if !ok {
+			return renameChatErrMsg{chatGUID: chatGUID, displayName: displayName, err: errNoCapability(backend, "rename chats")}
 		}
-		if err := client.RenameChat(chatGUID, displayName); err != nil {
+		if err := editor.RenameChat(chatGUID, displayName); err != nil {
 			return renameChatErrMsg{chatGUID: chatGUID, displayName: displayName, err: err}
 		}
 		return renameChatSuccessMsg{chatGUID: chatGUID, displayName: displayName}
 	}
+}
+
+func errNoBackend(chatGUID string) error {
+	return fmt.Errorf("no backend configured for chat %s", chatGUID)
+}
+
+func errNoCapability(backend provider.Provider, what string) error {
+	if backend == nil {
+		return fmt.Errorf("no backend configured")
+	}
+	return fmt.Errorf("%s cannot %s", backend.ID(), what)
 }
 
 func (m *AppModel) addPendingOutgoing(chatGUID, text string) models.Message {
@@ -1819,7 +2021,25 @@ func (m *AppModel) handleLocalInputCommand(window *ChatWindow, raw string) (tea.
 			return nil, true
 		}
 		window.Input.Clear()
-		return sendReactionCmd(m.apiClient, window.Chat.GUID, targetGUID, reaction), true
+		return sendReactionCmd(m.providerFor(window.Chat.GUID), window.Chat.GUID, targetGUID, reaction), true
+	}
+
+	if replyTo, text, handled, err := parseReplyCommand(raw); handled {
+		if err != nil {
+			m.setAppError(err)
+			return nil, true
+		}
+		targetGUID, ok := window.Messages.MessageGUIDByNumber(replyTo)
+		if !ok {
+			m.setAppError(fmt.Errorf("no message #%d in this pane", replyTo))
+			return nil, true
+		}
+		window.Input.Clear()
+		pending := m.addPendingOutgoing(window.Chat.GUID, text)
+		return tea.Batch(
+			sendMessageCmd(m.providerFor(window.Chat.GUID), window.Chat.GUID, text, targetGUID, window.ID, pending.GUID),
+			pendingTimeoutCmd(window.Chat.GUID, pending.GUID),
+		), true
 	}
 
 	msgNum, handled, err := parseImgCommand(raw)
@@ -1838,7 +2058,7 @@ func (m *AppModel) handleLocalInputCommand(window *ChatWindow, raw string) (tea.
 	}
 
 	window.Input.Clear()
-	return openImageAttachmentCmd(m.apiClient, att), true
+	return openImageAttachmentCmd(m.providerFor(windowChatGUID(window)), att), true
 }
 
 func parseReactionCommand(raw string) (string, bool) {
@@ -1864,6 +2084,36 @@ func parseReactionCommand(raw string) (string, bool) {
 	}
 }
 
+// parseReplyCommand reads "/r #3 text goes here".
+//
+// On Slack this posts into the thread on message #3, which is the only way to
+// answer in a thread rather than beside it; on iMessage it becomes a quoted
+// reply. The #N numbering is the one already on screen with /img.
+func parseReplyCommand(raw string) (target int, text string, handled bool, err error) {
+	s := strings.TrimSpace(raw)
+	if !strings.HasPrefix(s, "/r") {
+		return 0, "", false, nil
+	}
+	parts := strings.Fields(s)
+	if len(parts) == 0 || parts[0] != "/r" {
+		return 0, "", false, nil
+	}
+	if len(parts) < 3 {
+		return 0, "", true, fmt.Errorf("usage: /r #<message-number> <text>")
+	}
+	n, convErr := strconv.Atoi(strings.TrimPrefix(parts[1], "#"))
+	if convErr != nil || n < 1 {
+		return 0, "", true, fmt.Errorf("invalid message number: %s", parts[1])
+	}
+	// Everything after the number is the message, kept verbatim so its own
+	// spacing survives.
+	body := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(s, "/r")), parts[1]))
+	if body == "" {
+		return 0, "", true, fmt.Errorf("usage: /r #<message-number> <text>")
+	}
+	return n, body, true, nil
+}
+
 func parseImgCommand(raw string) (int, bool, error) {
 	s := strings.TrimSpace(raw)
 	if !strings.HasPrefix(s, "/img") {
@@ -1884,14 +2134,15 @@ func parseImgCommand(raw string) (int, bool, error) {
 	return n, true, nil
 }
 
-func openImageAttachmentCmd(client *api.Client, att models.Attachment) tea.Cmd {
+func openImageAttachmentCmd(backend provider.Provider, att models.Attachment) tea.Cmd {
 	return func() tea.Msg {
 		target := attachmentOpenTarget(att)
 		if target == "" {
-			if client == nil || strings.TrimSpace(att.GUID) == "" {
+			store, ok := backend.(provider.AttachmentStore)
+			if !ok || strings.TrimSpace(att.GUID) == "" {
 				return errMsg{err: fmt.Errorf("image has no openable target")}
 			}
-			path, err := downloadAttachmentToTemp(client, att)
+			path, err := downloadAttachmentToTemp(store, att)
 			if err != nil {
 				return errMsg{err: fmt.Errorf("failed to download image: %v", err)}
 			}
@@ -1918,8 +2169,8 @@ func attachmentOpenTarget(att models.Attachment) string {
 	return ""
 }
 
-func downloadAttachmentToTemp(client *api.Client, att models.Attachment) (string, error) {
-	data, mimeType, err := client.DownloadAttachment(att.GUID)
+func downloadAttachmentToTemp(store provider.AttachmentStore, att models.Attachment) (string, error) {
+	data, mimeType, err := store.DownloadAttachment(att)
 	if err != nil {
 		return "", err
 	}
@@ -1981,28 +2232,37 @@ func openCommand(target string) (string, []string) {
 	}
 }
 
-func connectWSCmd(wsClient *ws.Client) tea.Cmd {
+func connectStreamCmd(stream provider.Stream) tea.Cmd {
 	return func() tea.Msg {
-		if err := wsClient.Connect(); err != nil {
-			return wsConnectFailMsg{err: fmt.Errorf("websocket connection failed: %v", err)}
+		if err := stream.Connect(); err != nil {
+			return wsConnectFailMsg{err: fmt.Errorf("realtime connection failed: %v", err)}
 		}
 		return wsConnectSuccessMsg{}
 	}
 }
 
-func waitForWSEventCmd(wsClient *ws.Client) tea.Cmd {
+// waitForStreamEvent blocks for the next realtime event. It yields no command
+// when no stream is configured — the state every test runs in.
+func (m AppModel) waitForStreamEvent() tea.Cmd {
+	if m.stream == nil {
+		return nil
+	}
+	return waitForStreamEventCmd(m.stream)
+}
+
+func waitForStreamEventCmd(stream provider.Stream) tea.Cmd {
 	return func() tea.Msg {
-		event, ok := <-wsClient.Events
+		event, ok := <-stream.Events()
 		if !ok {
-			return errMsg{err: fmt.Errorf("websocket connection closed")}
+			return errMsg{err: fmt.Errorf("realtime connection closed")}
 		}
-		return wsEventMsg(event)
+		return providerEventMsg(event)
 	}
 }
 
-func waitForWSReconnectCmd(wsClient *ws.Client) tea.Cmd {
+func waitForStreamReconnectCmd(stream provider.Stream) tea.Cmd {
 	return func() tea.Msg {
-		_, ok := <-wsClient.Reconnect
+		_, ok := <-stream.Reconnected()
 		if !ok {
 			return nil
 		}
@@ -2010,9 +2270,9 @@ func waitForWSReconnectCmd(wsClient *ws.Client) tea.Cmd {
 	}
 }
 
-func waitForWSDisconnectCmd(wsClient *ws.Client) tea.Cmd {
+func waitForStreamDisconnectCmd(stream provider.Stream) tea.Cmd {
 	return func() tea.Msg {
-		_, ok := <-wsClient.Disconnect
+		_, ok := <-stream.Disconnected()
 		if !ok {
 			return nil
 		}
@@ -2020,9 +2280,9 @@ func waitForWSDisconnectCmd(wsClient *ws.Client) tea.Cmd {
 	}
 }
 
-func waitForWSOverflowCmd(wsClient *ws.Client) tea.Cmd {
+func waitForStreamOverflowCmd(stream provider.Stream) tea.Cmd {
 	return func() tea.Msg {
-		_, ok := <-wsClient.Overflow
+		_, ok := <-stream.Overflowed()
 		if !ok {
 			return nil
 		}
@@ -2059,7 +2319,7 @@ func (m *AppModel) refreshOpenChatsCmd() tea.Cmd {
 			continue
 		}
 		m.messageFetchInFlight[chatGUID] = true
-		cmds = append(cmds, prefetchMessagesCmd(m.apiClient, chatGUID, m.messageLimit))
+		cmds = append(cmds, prefetchMessagesCmd(m.providerFor(chatGUID), chatGUID, m.messageLimit))
 	}
 
 	if len(cmds) == 0 {
@@ -2089,7 +2349,7 @@ func (m *AppModel) resyncAllChatsCmd() tea.Cmd {
 		}
 		// Force through the TTL gate - this is a resync, not a cache read.
 		m.messageFetchInFlight[chatGUID] = true
-		cmds = append(cmds, prefetchMessagesCmd(m.apiClient, chatGUID, m.messageLimit))
+		cmds = append(cmds, prefetchMessagesCmd(m.providerFor(chatGUID), chatGUID, m.messageLimit))
 	}
 
 	for _, window := range m.windowManager.AllWindows() {
@@ -2107,26 +2367,24 @@ func (m *AppModel) resyncAllChatsCmd() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// handleWSEvent processes incoming WebSocket events
-func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
-	switch event.Type {
-	case "new-message":
-		msg, err := parseWSMessageEvent(event)
-		if err != nil {
-			log.Printf("new-message unmarshal failed: %v", err)
-			return m, waitForWSEventCmd(m.wsClient)
-		}
+// handleProviderEvent processes a realtime update from any backend. The event
+// is already normalized — parsing the backend's wire format happens in the
+// provider, not here.
+func (m *AppModel) handleProviderEvent(event provider.Event) (tea.Model, tea.Cmd) {
+	switch event.Kind {
+	case provider.EventNewMessage:
+		msg := event.Message
 
 		if msg.ChatGUID != "" {
 			if len(messageDedupeKeys(msg)) == 0 {
-				log.Printf("ignoring websocket new-message without usable identity for chat %s", msg.ChatGUID)
-				return m, waitForWSEventCmd(m.wsClient)
+				log.Printf("ignoring realtime new message without usable identity for chat %s", msg.ChatGUID)
+				return m, m.waitForStreamEvent()
 			}
 
 			// Replace a local optimistic echo with the server-confirmed message.
 			m.matchAndRemovePendingOutgoing(msg)
 
-			// Cache the message (ignore duplicate WS events by message identity).
+			// Cache the message (ignore duplicate realtime events by message identity).
 			if !m.windowManager.CacheMessage(msg.ChatGUID, msg) {
 				// A reaction or a duplicate. A reaction still has to reach the
 				// open windows so tapbacks render immediately; a plain
@@ -2134,7 +2392,7 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 				for _, window := range m.windowManager.WindowsShowingChat(msg.ChatGUID) {
 					window.Messages.AppendMessage(msg)
 				}
-				return m, waitForWSEventCmd(m.wsClient)
+				return m, m.waitForStreamEvent()
 			}
 			// Intentionally do NOT refresh messageFetchedAt here. Only real
 			// API fetches bump it so the TTL in shouldRefreshMessages can
@@ -2168,24 +2426,20 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 			m.chatList.UpdateChatPreview(msg.ChatGUID, preview, msg.DateCreated)
 		}
 
-		cmds := []tea.Cmd{waitForWSEventCmd(m.wsClient)}
+		cmds := []tea.Cmd{m.waitForStreamEvent()}
 		if cmd := m.linkPreviewCmdsForMessages(msg.ChatGUID, []models.Message{msg}); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		return m, tea.Batch(cmds...)
 
-	case "updated-message":
-		// Reactions/tapbacks (and edited bodies) arrive as updated-message.
-		// Apply the change to the cache and every open window without treating
-		// it as a brand-new message: no unread marker, no chat-list reorder,
-		// no preview, no link-preview fetch.
-		msg, err := parseWSMessageEvent(event)
-		if err != nil {
-			log.Printf("updated-message unmarshal failed: %v", err)
-			return m, waitForWSEventCmd(m.wsClient)
-		}
+	case provider.EventUpdatedMessage:
+		// Reactions/tapbacks and edited bodies arrive as an update. Apply the
+		// change to the cache and every open window without treating it as a
+		// brand-new message: no unread marker, no chat-list reorder, no
+		// preview, no link-preview fetch.
+		msg := event.Message
 		if msg.ChatGUID == "" || len(messageDedupeKeys(msg)) == 0 {
-			return m, waitForWSEventCmd(m.wsClient)
+			return m, m.waitForStreamEvent()
 		}
 		// A reaction folds onto the cached target message; a duplicate is a
 		// no-op. Either way the return value doesn't matter here.
@@ -2194,38 +2448,11 @@ func (m *AppModel) handleWSEvent(event models.WSEvent) (tea.Model, tea.Cmd) {
 			window.Messages.AppendMessage(msg)
 		}
 		m.saveMessageCacheChat(msg.ChatGUID)
-		return m, waitForWSEventCmd(m.wsClient)
-
-	case "chat-read-status-changed":
-		return m, waitForWSEventCmd(m.wsClient)
+		return m, m.waitForStreamEvent()
 
 	default:
-		return m, waitForWSEventCmd(m.wsClient)
+		return m, m.waitForStreamEvent()
 	}
-}
-
-// parseWSMessageEvent extracts a Message plus its chat identity from a
-// BlueBubbles WS event. Both new-message and updated-message share this shape:
-// the message fields, with the chat arriving either as chatGuid or a chats array.
-func parseWSMessageEvent(event models.WSEvent) (models.Message, error) {
-	var wsMsg struct {
-		models.Message
-		ChatGUID string `json:"chatGuid"`
-		Chats    []struct {
-			GUID string `json:"guid"`
-		} `json:"chats"`
-	}
-	if err := json.Unmarshal(event.Data, &wsMsg); err != nil {
-		return models.Message{}, err
-	}
-
-	msg := wsMsg.Message
-	if len(wsMsg.Chats) > 0 {
-		msg.ChatGUID = wsMsg.Chats[0].GUID
-	} else if msg.ChatGUID == "" {
-		msg.ChatGUID = wsMsg.ChatGUID
-	}
-	return msg, nil
 }
 
 func (m *AppModel) setAppError(err error) {
@@ -2352,7 +2579,7 @@ func (m AppModel) handleMouseMsg(msg tea.MouseMsg) (AppModel, tea.Cmd) {
 			cmd := m.clearFocusedWindowNewMessageIndicator()
 			m.saveLayoutState()
 			if att, ok := window.FirstImageAttachmentAtContentY(localY); ok {
-				return m, tea.Batch(cmd, openImageAttachmentCmd(m.apiClient, att))
+				return m, tea.Batch(cmd, openImageAttachmentCmd(m.providerFor(windowChatGUID(window)), att))
 			}
 			if rawURL, ok := window.LinkAtContentY(localY); ok {
 				return m, tea.Batch(cmd, openURLCmd(rawURL))
@@ -2387,7 +2614,13 @@ func showToastCmd(text string, duration time.Duration) tea.Cmd {
 }
 
 func (m *AppModel) linkPreviewCmdsForMessages(chatGUID string, messages []models.Message) tea.Cmd {
-	if !m.enableLinkPreviews || m.apiClient == nil || m.maxPreviewsPerMessage <= 0 {
+	if !m.enableLinkPreviews || m.maxPreviewsPerMessage <= 0 {
+		return nil
+	}
+	// Asked once for the whole batch: a backend that cannot resolve previews
+	// should fetch nothing, not mark every link unavailable.
+	previewer, ok := m.providerFor(chatGUID).(provider.LinkPreviewer)
+	if !ok {
 		return nil
 	}
 
@@ -2412,7 +2645,7 @@ func (m *AppModel) linkPreviewCmdsForMessages(chatGUID string, messages []models
 				m.linkPreviewInFlight = make(map[string]bool)
 			}
 			m.linkPreviewInFlight[key] = true
-			cmds = append(cmds, loadLinkPreviewCmd(m.apiClient, chatGUID, messageGUID, rawURL))
+			cmds = append(cmds, loadLinkPreviewCmd(previewer, chatGUID, messageGUID, rawURL))
 		}
 	}
 	if len(cmds) == 0 {
@@ -2425,9 +2658,9 @@ func linkPreviewKey(messageGUID, rawURL string) string {
 	return messageGUID + "\x00" + rawURL
 }
 
-func loadLinkPreviewCmd(client *api.Client, chatGUID, messageGUID, rawURL string) tea.Cmd {
+func loadLinkPreviewCmd(previewer provider.LinkPreviewer, chatGUID, messageGUID, rawURL string) tea.Cmd {
 	return func() tea.Msg {
-		preview, err := client.GetLinkPreview(rawURL)
+		preview, err := previewer.LinkPreview(rawURL)
 		if err != nil {
 			return linkPreviewLoadedMsg{
 				chatGUID:    chatGUID,
@@ -2445,14 +2678,7 @@ func loadLinkPreviewCmd(client *api.Client, chatGUID, messageGUID, rawURL string
 			chatGUID:    chatGUID,
 			messageGUID: messageGUID,
 			url:         rawURL,
-			preview: models.LinkPreview{
-				URL:         rawURL,
-				Title:       preview.Title,
-				AuthorName:  preview.AuthorName,
-				Description: preview.Description,
-				SiteName:    preview.SiteName,
-				ImageURL:    preview.ImageURL,
-			},
+			preview:     preview,
 		}
 	}
 }

@@ -2,8 +2,10 @@ package tui
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/cursor"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -102,7 +104,52 @@ func (m *InputModel) Clear() {
 	m.dismissAutocomplete()
 }
 
+// wordBackwardWouldHang reports whether handing this key to the textarea would
+// hang the program.
+//
+// bubbles v1.0.0 textarea.wordLeft loops characterLeft until the cursor lands
+// on a non-space character — but characterLeft stops moving at column 0, so
+// with nothing but spaces to the left, or in an empty composer, the loop never
+// ends and pegs a core. Both keys bound to WordBackward (alt+left and alt+b)
+// reach it, and the app is then unrecoverable short of killing it.
+//
+// The sibling deleteWordLeft guards the same walk correctly, which is what
+// makes this an upstream oversight rather than a design.
+func (m InputModel) wordBackwardWouldHang(msg tea.KeyMsg) bool {
+	if !key.Matches(msg, m.textarea.KeyMap.WordBackward) {
+		return false
+	}
+
+	lines := strings.Split(m.textarea.Value(), "\n")
+	row := m.textarea.Line()
+	if row < 0 || row >= len(lines) {
+		// Cannot tell where the cursor is; refusing the key costs one
+		// keystroke, guessing wrong costs the session.
+		return true
+	}
+
+	info := m.textarea.LineInfo()
+	column := info.StartColumn + info.ColumnOffset
+	runes := []rune(lines[row])
+	if column > len(runes) {
+		column = len(runes)
+	}
+	for _, r := range runes[:column] {
+		if !unicode.IsSpace(r) {
+			// There is a word to move to, so the loop terminates.
+			return false
+		}
+	}
+	return true
+}
+
 func (m InputModel) Update(msg tea.Msg) (InputModel, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && m.wordBackwardWouldHang(keyMsg) {
+		// Nothing to move to anyway: the correct behaviour and the safe one
+		// are the same key press.
+		return m, nil
+	}
+
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
 	if k, ok := msg.(tea.KeyMsg); ok && k.Type == tea.KeyRunes {

@@ -1,6 +1,11 @@
 module github.com/oovets/imessage-tui
 
-go 1.24.2
+go 1.25
+
+// slack-go/slack requires go >= 1.25; pinned to a patch release that is
+// actually fetchable rather than the bare "go 1.25" line, which resolves to a
+// toolchain that was never published.
+toolchain go1.25.13
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
@@ -39,6 +44,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
+	github.com/slack-go/slack v0.29.0 // indirect
 	github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect

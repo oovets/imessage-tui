@@ -1,12 +1,30 @@
 package tui
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/oovets/imessage-tui/models"
+	"github.com/oovets/imessage-tui/provider"
 )
+
+// tapbackEvent is the normalized form of the BlueBubbles "updated-message" a
+// tapback arrives as. Turning the wire JSON into this is the provider's job and
+// is tested there; what matters here is what the app does with it.
+func tapbackEvent() providerEventMsg {
+	return providerEventMsg(provider.Event{
+		Kind:     provider.EventUpdatedMessage,
+		ChatGUID: "chat-a",
+		Message: models.Message{
+			GUID:                  "reaction-a",
+			Text:                  "Alice reacted with thumbs up",
+			DateCreated:           2000,
+			AssociatedMessageGUID: "message-a",
+			AssociatedMessageType: "like",
+			ChatGUID:              "chat-a",
+		},
+	})
+}
 
 func TestAppModelUpdatedMessageFoldsTapbackInRealTime(t *testing.T) {
 	app := NewAppModelWithConfig(nil, nil, nil)
@@ -20,17 +38,7 @@ func TestAppModelUpdatedMessageFoldsTapbackInRealTime(t *testing.T) {
 		{GUID: "message-a", Text: "hello", DateCreated: 1000},
 	})
 
-	model, _ := app.Update(wsEventMsg(models.WSEvent{
-		Type: "updated-message",
-		Data: json.RawMessage(`{
-			"guid": "reaction-a",
-			"text": "Alice reacted with thumbs up",
-			"dateCreated": 2000,
-			"associatedMessageGuid": "message-a",
-			"associatedMessageType": "like",
-			"chatGuid": "chat-a"
-		}`),
-	}))
+	model, _ := app.Update(tapbackEvent())
 	app = *model.(*AppModel)
 
 	// The reaction must render on the original message without adding a row.
@@ -67,17 +75,7 @@ func TestAppModelUpdatedMessageSkipsNewMessageIndicators(t *testing.T) {
 		{GUID: "message-a", Text: "hello", DateCreated: 1000},
 	})
 
-	model, _ := app.Update(wsEventMsg(models.WSEvent{
-		Type: "updated-message",
-		Data: json.RawMessage(`{
-			"guid": "reaction-a",
-			"text": "Alice reacted with thumbs up",
-			"dateCreated": 2000,
-			"associatedMessageGuid": "message-a",
-			"associatedMessageType": "like",
-			"chatGuid": "chat-a"
-		}`),
-	}))
+	model, _ := app.Update(tapbackEvent())
 	app = *model.(*AppModel)
 
 	if got := app.chatList.NewMessageCount(); got != 0 {

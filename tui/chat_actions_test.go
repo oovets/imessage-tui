@@ -11,6 +11,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/oovets/imessage-tui/api"
 	"github.com/oovets/imessage-tui/models"
+	"github.com/oovets/imessage-tui/provider"
+	"github.com/oovets/imessage-tui/provider/imessage"
 )
 
 func TestAppModelDeleteChatRequiresConfirm(t *testing.T) {
@@ -124,7 +126,7 @@ func TestAppModelSlashReactionSendsToLatestActiveChatMessage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	app := NewAppModelWithConfig(api.NewClient(server.URL, "secret"), nil, nil)
+	app := NewAppModelWithConfig(provider.NewRegistry(imessage.New(api.NewClient(server.URL, "secret"))), nil, nil)
 	chat := models.Chat{GUID: "chat-a", DisplayName: "Family"}
 	window := app.windowManager.FocusedWindow()
 	window.SetChat(&chat)

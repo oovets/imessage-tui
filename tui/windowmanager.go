@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -43,7 +44,7 @@ func NewWindowManager() *WindowManager {
 	wm := &WindowManager{
 		windows:          make(map[WindowID]*ChatWindow),
 		nextID:           1,
-		maxWindows:       4,
+		maxWindows:       maxPanes,
 		messageCache:     make(map[string][]models.Message),
 		messageCacheKeys: make(map[string]map[string]struct{}),
 		showTimestamps:   true,
@@ -147,12 +148,23 @@ func (wm *WindowManager) CycleFocus() bool {
 	return false
 }
 
-// SplitWindow splits the focused window in the given direction
-// Returns true if split was successful
-func (wm *WindowManager) SplitWindow(direction SplitDirection) bool {
-	// Check max windows
+// maxPanes is how many panes may be open at once.
+//
+// No minimum pane size is enforced alongside it. Splitting always halves the
+// focused pane, so a guard generous enough to keep panes readable would refuse
+// splits that work today — and how narrow is too narrow is the user's call,
+// not ours. The layout clamps every pane to at least one column, and the frame
+// stays inside the terminal at any pane count.
+const maxPanes = 8
+
+// ErrTooManyPanes is why a split is refused.
+var ErrTooManyPanes = fmt.Errorf("max %d panes (ctrl+w to close one)", maxPanes)
+
+// SplitWindow splits the focused window in the given direction, returning nil
+// on success.
+func (wm *WindowManager) SplitWindow(direction SplitDirection) error {
 	if len(wm.windows) >= wm.maxWindows {
-		return false
+		return ErrTooManyPanes
 	}
 
 	// Create new window
@@ -182,7 +194,7 @@ func (wm *WindowManager) SplitWindow(direction SplitDirection) bool {
 	// Focus new window
 	wm.SetFocus(newWindow.ID)
 
-	return true
+	return nil
 }
 
 // AdjustFocusedSplit changes the split ratio of the focused pane's parent.
@@ -520,13 +532,23 @@ func (wm *WindowManager) SetShowLineNumbers(show bool) {
 
 // SetShowSenderNames toggles sender names for all windows.
 func (wm *WindowManager) SetShowSenderNames(show bool) {
-	if wm.showSenderNames == show {
-		return
-	}
 	wm.showSenderNames = show
 	for _, w := range wm.windows {
 		w.Messages.SetShowSenderNames(show)
 	}
+}
+
+// ToggleFocusedSenderNames flips sender names for the focused pane only, and
+// returns what that pane now does. The choice sticks to the pane until it
+// changes conversation.
+func (wm *WindowManager) ToggleFocusedSenderNames() bool {
+	window, ok := wm.windows[wm.focusedWindow]
+	if !ok {
+		return wm.showSenderNames
+	}
+	show := !window.Messages.ShowingSenderNames()
+	window.Messages.PinShowSenderNames(show)
+	return show
 }
 
 // SetShowPaneDividers toggles whether dividers are drawn between split panes.

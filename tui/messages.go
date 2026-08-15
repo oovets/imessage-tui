@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"hash/fnv"
 	"sort"
 	"strings"
 
@@ -22,11 +23,23 @@ type MessagesModel struct {
 	showTimestamps  bool
 	showLineNumbers bool
 	showSenderNames bool
-	stickToBottom   bool
-	loading         bool
-	showHeader      bool
-	lineMessages    []int
-	lineLinks       []string
+
+	// defaultSenderNames is the app-wide setting this pane falls back to, and
+	// senderNamesPinned records that the user answered for this pane by hand.
+	// A pinned pane ignores the global toggle until it changes conversation.
+	defaultSenderNames bool
+	senderNamesPinned  bool
+
+	// Distinct incoming senders seen in this pane, and whether that is more
+	// than one. Colouring a name in a one-to-one chat would be decoration;
+	// in a group it is the fastest way to see who is talking.
+	senders       map[string]struct{}
+	colorSenders  bool
+	stickToBottom bool
+	loading       bool
+	showHeader    bool
+	lineMessages  []int
+	lineLinks     []string
 
 	// Cached render so a single appended message doesn't re-render the whole
 	// history. renderedBody is the full viewport content; lastRenderedDay is
@@ -43,14 +56,15 @@ func NewMessagesModel() MessagesModel {
 	vp.MouseWheelEnabled = true
 
 	return MessagesModel{
-		viewport:        vp,
-		messageKeys:     make(map[string]struct{}),
-		unseenGUIDs:     make(map[string]struct{}),
-		showTimestamps:  true,
-		showLineNumbers: true,
-		showSenderNames: true,
-		stickToBottom:   true,
-		showHeader:      true,
+		viewport:           vp,
+		messageKeys:        make(map[string]struct{}),
+		unseenGUIDs:        make(map[string]struct{}),
+		showTimestamps:     true,
+		showLineNumbers:    true,
+		showSenderNames:    true,
+		defaultSenderNames: true,
+		stickToBottom:      true,
+		showHeader:         true,
 	}
 }
 
@@ -66,6 +80,7 @@ func (m *MessagesModel) SetMessages(messages []models.Message) {
 	})
 	m.messages = messages
 	m.rebuildMessageIndex()
+	m.rebuildSenders()
 	m.unseenGUIDs = make(map[string]struct{})
 	for _, msg := range messages {
 		if msg.GUID == "" {
@@ -110,12 +125,17 @@ func (m *MessagesModel) AppendMessage(msg models.Message) {
 		m.messages[pos] = msg
 	}
 
+	// A second distinct sender turns nick colouring on for the whole pane, so
+	// the messages already rendered without it have to be drawn again. This
+	// happens once per conversation, on the message that makes it a group.
+	becameGroup := m.noteSender(msg)
+
 	// Appending at the end can't change any earlier line (line numbers count
 	// up, day separators only ever precede the new block), so render just the
 	// new message and tack it onto the cached body instead of re-rendering the
 	// whole history. Anything else (sorted insert, no prior render) falls back
 	// to a full render.
-	if endAppend && m.contentRendered {
+	if endAppend && m.contentRendered && !becameGroup {
 		var sb strings.Builder
 		i := len(m.messages) - 1
 		m.lastRenderedDay = m.renderMessageBlock(&sb, i, msg, m.lastRenderedDay, m.wrapWidth())
@@ -194,7 +214,37 @@ func (m *MessagesModel) SetShowLineNumbers(show bool) {
 	m.renderContent()
 }
 
+// SetShowSenderNames applies the app-wide default to this pane. A pane the
+// user has answered for by hand keeps its own answer.
 func (m *MessagesModel) SetShowSenderNames(show bool) {
+	m.defaultSenderNames = show
+	if m.senderNamesPinned {
+		return
+	}
+	// A conversation with several people talking keeps its names either way:
+	// that is the case the setting exists for, and it is what makes a Slack
+	// channel readable without turning names back on by hand every time.
+	m.applySenderNames(show || m.colorSenders)
+}
+
+// PinShowSenderNames records an explicit choice for this pane, which then wins
+// over both the global default and the several-people rule.
+func (m *MessagesModel) PinShowSenderNames(show bool) {
+	m.senderNamesPinned = true
+	m.applySenderNames(show)
+}
+
+// ShowingSenderNames reports what this pane currently does.
+func (m *MessagesModel) ShowingSenderNames() bool { return m.showSenderNames }
+
+// ResetSenderNamePin drops the pane's own answer. Called when the pane changes
+// conversation: a choice made for a two-person chat should not silently carry
+// into the channel opened next.
+func (m *MessagesModel) ResetSenderNamePin() {
+	m.senderNamesPinned = false
+}
+
+func (m *MessagesModel) applySenderNames(show bool) {
 	if m.showSenderNames == show {
 		return
 	}
@@ -235,6 +285,16 @@ func (m *MessagesModel) FirstImageAttachmentByNumber(n int) (models.Attachment, 
 		}
 	}
 	return models.Attachment{}, false
+}
+
+// MessageGUIDByNumber returns the GUID of message #N, 1-based against the
+// rendered list — the same numbering /img uses.
+func (m *MessagesModel) MessageGUIDByNumber(n int) (string, bool) {
+	if n < 1 || n > len(m.messages) {
+		return "", false
+	}
+	guid := strings.TrimSpace(m.messages[n-1].GUID)
+	return guid, guid != ""
 }
 
 func (m *MessagesModel) FirstImageAttachmentAtViewportY(y int) (models.Attachment, bool) {
@@ -333,15 +393,9 @@ func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg model
 
 	timeStr := msgTime.Format("15:04")
 
-	var sender string
-	if msg.IsFromMe {
-		sender = "You"
-	} else if msg.Handle != nil && msg.Handle.DisplayName != "" {
-		sender = stripEmojis(msg.Handle.DisplayName)
-	} else if msg.Handle != nil {
-		sender = msg.Handle.Address
-	} else {
-		sender = "Unknown"
+	sender := senderName(msg)
+	if m.colorSenders && !msg.IsFromMe {
+		sender = nickStyle(sender).Render(sender)
 	}
 
 	prefix := ""
@@ -544,6 +598,71 @@ func reopenAfterResets(s, open string) string {
 		return s
 	}
 	return strings.ReplaceAll(s, ansiReset, ansiReset+open)
+}
+
+// rebuildSenders recounts the distinct incoming senders in the pane.
+func (m *MessagesModel) rebuildSenders() {
+	m.senders = make(map[string]struct{})
+	m.colorSenders = false
+	if !m.senderNamesPinned {
+		// Back to the default before counting, so a pane that used to hold a
+		// group chat does not keep its names after loading a two-person one.
+		m.showSenderNames = m.defaultSenderNames
+	}
+	for _, msg := range m.messages {
+		m.noteSender(msg)
+	}
+}
+
+// noteSender records an incoming sender and reports whether the pane just
+// became a multi-party conversation, which is when colouring starts.
+func (m *MessagesModel) noteSender(msg models.Message) bool {
+	if msg.IsFromMe {
+		return false
+	}
+	if m.senders == nil {
+		m.senders = make(map[string]struct{})
+	}
+	name := strings.ToLower(strings.TrimSpace(senderName(msg)))
+	if name == "" {
+		return false
+	}
+	before := m.colorSenders
+	m.senders[name] = struct{}{}
+	m.colorSenders = len(m.senders) > 1
+	if m.colorSenders && !m.senderNamesPinned {
+		// Several people talking: show who, unless the user answered otherwise
+		// for this pane. Callers re-render, so this only sets the flag.
+		m.showSenderNames = true
+	}
+	return m.colorSenders != before
+}
+
+// senderName is who a message is from, as shown on its first line.
+func senderName(msg models.Message) string {
+	switch {
+	case msg.IsFromMe:
+		return "You"
+	case msg.Handle != nil && msg.Handle.DisplayName != "":
+		return stripEmojis(msg.Handle.DisplayName)
+	case msg.Handle != nil:
+		return msg.Handle.Address
+	default:
+		return "Unknown"
+	}
+}
+
+// nickStyle picks a stable colour for a name.
+//
+// Stable across restarts and across panes showing the same conversation, which
+// rules out anything derived from map iteration or arrival order: the same
+// person must keep the same colour or the colour tells you nothing. Matching is
+// case-insensitive so a handle that arrives capitalised differently does not
+// become a second person.
+func nickStyle(name string) lipgloss.Style {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(strings.ToLower(strings.TrimSpace(name))))
+	return lipgloss.NewStyle().Foreground(NickPalette[int(hash.Sum32()%uint32(len(NickPalette)))])
 }
 
 func messageRenderLines(prefix, lineNum, sender string, bodyLines, bodyLineLinks []string, showSenderNames bool) ([]string, []string) {

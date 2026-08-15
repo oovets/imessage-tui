@@ -117,7 +117,7 @@ func (m *Message) ParsedTime() time.Time {
 	return time.UnixMilli(m.DateCreated)
 }
 
-// Attachment for future image/file support
+// Attachment for image/file support
 type Attachment struct {
 	GUID       string `json:"guid"`
 	MimeType   string `json:"mimeType"`
@@ -125,6 +125,12 @@ type Attachment struct {
 	URL        string `json:"url"`
 	Path       string `json:"path"`
 	PathOnDisk string `json:"originalPath"`
+
+	// SourceURL is where the owning backend fetches the bytes, when that is
+	// not something the system opener could do itself. Slack file URLs need
+	// the workspace token, so they live here and never in URL — URL is handed
+	// straight to the browser.
+	SourceURL string `json:"sourceUrl,omitempty"`
 }
 
 // WSEvent is the envelope for WebSocket frames from BlueBubbles

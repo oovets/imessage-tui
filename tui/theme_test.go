@@ -119,3 +119,30 @@ func TestHelpOverlayHasNoHardcodedBackground(t *testing.T) {
 		}
 	}
 }
+
+// A pinned dark theme must reach every surface, not just the message body.
+// The styles here are built when a model is constructed, not when it renders,
+// so a palette value that is baked into a package-level style stays stale
+// unless rebuildStyles knows about it — that is the failure this catches.
+func TestDarkThemeBrightensWholeView(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+	t.Cleanup(func() { ApplyTheme(false) })
+
+	ApplyTheme(false)
+	if light := newRenderedApp(t, 80, 12).View(); !strings.Contains(light, "38;5;32m") {
+		t.Fatal("default palette no longer uses the compromise blue; update this test")
+	}
+
+	ApplyTheme(true)
+	view := newRenderedApp(t, 80, 12).View()
+
+	for _, want := range []string{"38;5;39m", "38;5;245m"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("dark theme missing %q", want)
+		}
+	}
+	if strings.Contains(view, "38;5;32m") {
+		t.Error("dark theme still renders the compromise blue (38;5;32)")
+	}
+}

@@ -301,8 +301,8 @@ func TestMessagesModelFindsImageAttachmentAtVisibleRow(t *testing.T) {
 
 func TestWindowManagerFindsAndResizesDivider(t *testing.T) {
 	wm := NewWindowManager()
-	if !wm.SplitWindow(SplitHorizontal) {
-		t.Fatal("split failed")
+	if err := wm.SplitWindow(SplitHorizontal); err != nil {
+		t.Fatalf("split failed: %v", err)
 	}
 	wm.SetSize(100, 20)
 
@@ -319,8 +319,8 @@ func TestWindowManagerFindsAndResizesDivider(t *testing.T) {
 
 func TestAppModelArrowUpDownMoveVerticalPaneFocus(t *testing.T) {
 	wm := NewWindowManager()
-	if !wm.SplitWindow(SplitVertical) {
-		t.Fatal("split failed")
+	if err := wm.SplitWindow(SplitVertical); err != nil {
+		t.Fatalf("split failed: %v", err)
 	}
 	wm.SetSize(80, 20)
 
