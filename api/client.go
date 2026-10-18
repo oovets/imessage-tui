@@ -64,7 +64,84 @@ func (c *Client) addAuth(u *url.URL) {
 	u.RawQuery = q.Encode()
 }
 
+// chatScanLimit is how many chats one query asks BlueBubbles for. The list
+// shows fewer, but the server cannot leave out what GetChats drops — chats
+// with no messages left, unknown senders past their own share — so it has to
+// be asked for all of them.
+const chatScanLimit = 1000
+
+// GetChats returns the most recently active chats: up to limit from known
+// senders, and up to as many again from unknown senders (the chats Messages
+// files under Unknown Senders — banks, delivery notices, one-time codes),
+// which the chat list keeps out of the way.
+//
+// Chats without a single message are dropped. That is what a conversation
+// deleted on the phone looks like here: its messages move to Recently
+// Deleted, but the chat row itself stays in chat.db.
 func (c *Client) GetChats(limit int) ([]models.Chat, error) {
+	chats, err := c.queryChats(map[string]interface{}{
+		"with":  []string{"lastmessage"},
+		"sort":  "lastmessage",
+		"limit": chatScanLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	c.applyContactNames(chats)
+
+	if len(chats) > 0 && !slices.ContainsFunc(chats, func(chat models.Chat) bool { return chat.LastMessage != nil }) {
+		// A server that ignores "with: lastmessage" sends no last message
+		// at all; find each chat's activity the slow way instead.
+		return c.chatsByActivity(chats, limit), nil
+	}
+	return selectChats(chats, limit), nil
+}
+
+// selectChats keeps the newest chats with messages: up to limit from known
+// senders and up to limit from unknown ones, so a burst of codes and receipts
+// cannot push the people out of the list.
+func selectChats(chats []models.Chat, limit int) []models.Chat {
+	withMessages := make([]models.Chat, 0, len(chats))
+	for _, chat := range chats {
+		if chat.LastMessage == nil {
+			continue
+		}
+		chat.LastMessageText = chat.LastMessage.Text
+		chat.LastMessageTime = chat.LastMessage.DateCreated
+		withMessages = append(withMessages, chat)
+	}
+	// The server sorts already; sorting again keeps the order right if it
+	// ever does not, and is stable so equal times keep the server's order.
+	slices.SortStableFunc(withMessages, func(a, b models.Chat) int {
+		switch {
+		case a.LastMessageTime > b.LastMessageTime:
+			return -1
+		case a.LastMessageTime < b.LastMessageTime:
+			return 1
+		}
+		return 0
+	})
+
+	out := make([]models.Chat, 0, min(len(withMessages), 2*limit))
+	known, unknown := 0, 0
+	for _, chat := range withMessages {
+		if chat.UnknownSender {
+			if unknown >= limit {
+				continue
+			}
+			unknown++
+		} else {
+			if known >= limit {
+				continue
+			}
+			known++
+		}
+		out = append(out, chat)
+	}
+	return out
+}
+
+func (c *Client) queryChats(payload map[string]interface{}) ([]models.Chat, error) {
 	u, err := url.Parse(fmt.Sprintf("%s/api/v1/chat/query", c.baseURL))
 	if err != nil {
 		return nil, err
@@ -74,7 +151,6 @@ func (c *Client) GetChats(limit int) ([]models.Chat, error) {
 	q.Set("guid", c.password)
 	u.RawQuery = q.Encode()
 
-	payload := map[string]interface{}{}
 	body, _ := json.Marshal(payload)
 
 	resp, err := c.httpClient.Post(u.String(), "application/json", bytes.NewReader(body))
@@ -104,17 +180,11 @@ func (c *Client) GetChats(limit int) ([]models.Chat, error) {
 	if err := json.Unmarshal([]byte(result.Raw), &chats); err != nil {
 		return nil, fmt.Errorf("failed to parse chats: %v", err)
 	}
+	return chats, nil
+}
 
-	type chatWithActivity struct {
-		chat         models.Chat
-		lastMsgTime  int64
-		messageCount int
-	}
-
-	chatActivities := make([]chatWithActivity, len(chats))
-
+func (c *Client) applyContactNames(chats []models.Chat) {
 	contactMap, _ := c.GetContacts()
-
 	for i := range chats {
 		for j := range chats[i].Participants {
 			if chats[i].Participants[j].DisplayName == "" {
@@ -124,6 +194,18 @@ func (c *Client) GetChats(limit int) ([]models.Chat, error) {
 			}
 		}
 	}
+}
+
+// chatsByActivity is the fallback for servers that send no last message:
+// one message lookup per chat, five at a time, then newest first.
+func (c *Client) chatsByActivity(chats []models.Chat, limit int) []models.Chat {
+	type chatWithActivity struct {
+		chat         models.Chat
+		lastMsgTime  int64
+		messageCount int
+	}
+
+	chatActivities := make([]chatWithActivity, len(chats))
 
 	type activityResult struct {
 		index        int
@@ -180,7 +262,7 @@ func (c *Client) GetChats(limit int) ([]models.Chat, error) {
 		resultChats = resultChats[:limit]
 	}
 
-	return resultChats, nil
+	return resultChats
 }
 
 func (c *Client) GetMessages(chatGUID string, limit int) ([]models.Message, error) {

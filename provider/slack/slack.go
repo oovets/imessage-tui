@@ -107,6 +107,7 @@ type cachedThread struct {
 var (
 	_ provider.Provider        = (*Provider)(nil)
 	_ provider.AttachmentStore = (*Provider)(nil)
+	_ provider.Labeler         = (*Provider)(nil)
 )
 
 // New connects to a workspace and verifies the token. It is a network call:
@@ -149,6 +150,14 @@ func newProvider(ws Workspace, api *slackapi.Client, selfID string) *Provider {
 
 // ID identifies this backend in logs and errors.
 func (p *Provider) ID() string { return "slack:" + p.ws.ID }
+
+// Label is what the chat list calls this workspace.
+func (p *Provider) Label() string {
+	if p.ws.Name == "" {
+		return "Slack"
+	}
+	return "Slack · " + p.ws.Name
+}
 
 // GUIDPrefix is what this workspace's conversations are registered under.
 func (p *Provider) GUIDPrefix() string { return Prefix + p.ws.ID + sep }

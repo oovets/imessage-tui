@@ -264,6 +264,11 @@ func NewAppModelWithConfig(backends *provider.Registry, stream provider.Stream, 
 		app.savedLayoutState = &layoutState
 	}
 	app.chatList.SetShowPreview(app.showChatPreview)
+	app.chatList.SetNetworks(backends.Label, backends.Labels())
+	app.chatList.SetNetwork(ui.ChatListNetwork)
+	app.chatList.SetGroupByNetwork(ui.ChatListSort == config.ChatListSortNetwork)
+	app.chatList.SetPinned(chatOverrides.Pinned)
+	app.chatList.SetIgnored(chatOverrides.Ignored)
 	app.restoreMessageCache()
 	return app
 }
@@ -561,10 +566,88 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.beginRenameChatAction() {
 					return m, nil
 				}
+			case "n", "N":
+				step := 1
+				if msg.String() == "N" {
+					step = -1
+				}
+				network, ok := m.chatList.CycleNetwork(step)
+				if !ok {
+					return m, showToastCmd("Only one network in the list", 2*time.Second)
+				}
+				m.saveUIState()
+				if network == "" {
+					network = "all"
+				}
+				return m, showToastCmd("Network: "+network, 2*time.Second)
+			case "p":
+				if chat := m.chatList.SelectedChat(); chat != nil {
+					return m, m.togglePin(chat)
+				}
+			case "x":
+				if chat := m.chatList.SelectedChat(); chat != nil {
+					name := chat.GetDisplayName()
+					toast := "No longer ignoring " + name
+					if m.chatList.ToggleIgnore(chat.GUID) {
+						toast = "Ignored " + name + " — I shows ignored chats"
+					}
+					m.savePins()
+					return m, showToastCmd(toast, 3*time.Second)
+				}
+			case "I":
+				show := !m.chatList.ShowIgnored()
+				m.chatList.SetShowIgnored(show)
+				toast := "Ignored chats hidden"
+				if show {
+					toast = "Showing ignored chats — x on one stops ignoring it"
+					if len(m.chatList.Ignored()) == 0 {
+						toast = "No ignored chats"
+					}
+				}
+				return m, showToastCmd(toast, 3*time.Second)
+			case "U":
+				show := !m.chatList.ShowUnknown()
+				m.chatList.SetShowUnknown(show)
+				toast := "Unknown senders hidden"
+				if show {
+					toast = "Showing " + itoa(m.chatList.UnknownCount()) + " chats from unknown senders"
+				}
+				return m, showToastCmd(toast, 3*time.Second)
+			case "K", "J":
+				if chat := m.chatList.SelectedChat(); chat != nil {
+					if !m.chatList.IsPinned(chat.GUID) {
+						return m, showToastCmd("Only pinned chats can be moved — p pins", 2*time.Second)
+					}
+					step := 1
+					if msg.String() == "K" {
+						step = -1
+					}
+					if m.chatList.MovePin(chat.GUID, step) {
+						m.savePins()
+					}
+					return m, nil
+				}
+			case "s":
+				group := !m.chatList.GroupByNetwork()
+				m.chatList.SetGroupByNetwork(group)
+				m.saveUIState()
+				toast := "Sort: recent"
+				if group {
+					toast = "Sort: by network"
+					if m.chatList.NetworkCount() < 2 {
+						toast += " (only one network for now)"
+					}
+				}
+				return m, showToastCmd(toast, 2*time.Second)
 			}
 		}
 		if m.focused == focusWindow {
 			switch msg.String() {
+			case "ctrl+o":
+				if window := m.windowManager.FocusedWindow(); window != nil && window.Chat != nil {
+					return m, m.togglePin(window.Chat)
+				}
+				return m, nil
 			case "ctrl+d":
 				if m.beginDeleteChatAction() {
 					return m, nil
@@ -988,7 +1071,16 @@ func (m *AppModel) saveUIState() {
 		ShowPaneDividers: m.showPaneDividers,
 		ShowChatPreview:  m.showChatPreview,
 		ChatListWidth:    m.chatListWidth,
+		ChatListNetwork:  m.chatList.Network(),
+		ChatListSort:     chatListSort(m.chatList.GroupByNetwork()),
 	})
+}
+
+func chatListSort(groupByNetwork bool) string {
+	if groupByNetwork {
+		return config.ChatListSortNetwork
+	}
+	return config.ChatListSortRecent
 }
 
 func clampChatListWidth(w int) int {
@@ -1058,6 +1150,31 @@ func (m *AppModel) removeChatLocalState(chatGUID string) {
 	delete(m.pendingOutgoing, chatGUID)
 	delete(m.readMarkInFlight, chatGUID)
 	delete(m.chatOverrides.Aliases, chatGUID)
+	if m.chatList.IsPinned(chatGUID) {
+		m.chatList.TogglePin(chatGUID)
+	}
+	if m.chatList.IsIgnored(chatGUID) {
+		m.chatList.ToggleIgnore(chatGUID)
+	}
+	m.savePins()
+}
+
+// togglePin pins or unpins a chat, saves the pins and says which it did.
+func (m *AppModel) togglePin(chat *models.Chat) tea.Cmd {
+	name := chat.GetDisplayName()
+	toast := "Unpinned " + name
+	if m.chatList.TogglePin(chat.GUID) {
+		toast = "Pinned " + name
+	}
+	m.savePins()
+	return showToastCmd(toast, 2*time.Second)
+}
+
+// savePins writes the chat list's pins and ignores. Both live beside the
+// aliases in chat_overrides.json, and ignoring a chat can unpin it.
+func (m *AppModel) savePins() {
+	m.chatOverrides.Pinned = m.chatList.Pinned()
+	m.chatOverrides.Ignored = m.chatList.Ignored()
 	_ = config.SaveChatOverrides(m.chatOverrides)
 }
 
@@ -2550,6 +2667,13 @@ func (m AppModel) handleMouseMsg(msg tea.MouseMsg) (AppModel, tea.Cmd) {
 
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
 		if m.showChatList && msg.X < m.chatListWidth {
+			// Content starts after the panel's padding, and after its left
+			// border too when the list was already the focused panel — the
+			// layout the click landed on, not the one about to be drawn.
+			contentX := msg.X - 1
+			if m.focused == focusChatList {
+				contentX--
+			}
 			if m.focused == focusWindow {
 				if window := m.windowManager.FocusedWindow(); window != nil {
 					window.Input.textarea.Blur()
@@ -2557,7 +2681,12 @@ func (m AppModel) handleMouseMsg(msg tea.MouseMsg) (AppModel, tea.Cmd) {
 			}
 			m.focused = focusChatList
 			m.updateLayout()
-			m.chatList.ClickAt(contentY)
+			// The list is drawn from the top row, so it takes the screen row
+			// as it is. contentY is a row too high: every click landed on the
+			// chat above the one under the pointer.
+			if m.chatList.ClickAt(contentX, msg.Y) {
+				m.saveUIState()
+			}
 			return m, nil
 		}
 

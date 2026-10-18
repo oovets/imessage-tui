@@ -102,6 +102,13 @@ never something you have to think about.
   chat_limit applies to imessage only. it means "the most recent N", which
   needs a list ordered by recency; slack's is not, so every slack
   conversation is fetched rather than an arbitrary slice of them.
+
+  for imessage it counts known senders: the N most recent chats with people,
+  plus up to N more from unknown senders (what messages files under Unknown
+  Senders -- banks, deliveries, one-time codes), which the list keeps out of
+  the way. chats with no messages left are not listed: that is what a
+  conversation deleted on the phone looks like to bluebubbles, since its
+  messages move to Recently Deleted but the chat itself stays.
 ```
 
 ```yaml
@@ -207,6 +214,14 @@ max_previews_per_message: 2
                            end both jump to the newest message
     pgup / pgdown          scroll the focused pane
     /                      search the chat list
+    n / N                  filter the chat list to the next / previous
+                           network: all, imessage, each slack workspace
+    s                      group the chat list by network, or back to recent
+    p                      pin or unpin the selected chat
+    K / J                  move a pinned chat up / down in Pinned
+    x                      ignore the selected chat, or stop ignoring it
+    I                      show or hide ignored chats
+    U                      show or hide chats from unknown senders
     enter                  open the selected chat, or send the composer
     shift+enter            newline in the composer
     ? / F1                 help
@@ -234,9 +249,11 @@ max_previews_per_message: 2
     d, then D              delete the selected chat, esc cancels
     r                      rename the selected chat
     ctrl+d / ctrl+r        the same two, from a pane
+    ctrl+o                 pin or unpin the chat in the focused pane
 
   mouse
-    click to focus a pane or open an image, scroll to move through history,
+    click to focus a pane or open an image, click a network tab to filter the
+    chat list, scroll to move through history,
     drag the chat list edge or a pane divider to resize.
 ```
 
@@ -270,6 +287,35 @@ max_previews_per_message: 2
 
   unread chats are marked in the chat list and with a dot on pane headers.
   a pane you are looking at clears its own marker.
+
+  with more than one network connected, a row of tabs under the title --
+  All, iMessage, each slack workspace -- picks which the list shows: click
+  one, or step through them with n and N. a tab with unread chats shows how
+  many. clicking a network's header in the grouped list filters to it too. s
+  groups the list under a header per network, imessage first, then slack
+  workspaces in config order; within a group a chat with a new message still
+  moves to the top. filter and grouping combine with / search, and both are
+  remembered across restarts.
+
+  p pins the selected chat to a Pinned section at the top of the list, in
+  both sort orders, and ctrl+o does the same from a pane. pinned chats keep
+  the order you give them -- new pins go last, K and J move one -- rather than
+  moving with each new message, and still answer to the network filter and
+  search. pins live in chat_overrides.json beside the local aliases.
+
+  x ignores the selected chat: it leaves the list, the Pinned section and
+  every unread count, and stays gone when new messages arrive. this is local
+  to the app -- nothing is deleted or muted on the phone. I shows ignored
+  chats in an Ignored section at the bottom, where x on one brings it back.
+  ignores are kept in chat_overrides.json too.
+
+  chats from unknown senders are hidden unless they have a new message, which
+  lists them among the others so a code that just arrived can be found. U
+  shows all of them in an Unknown senders section near the bottom; pin one
+  to keep it in view.
+
+  deleting a chat with d needs the bluebubbles private api. without it the
+  delete fails and the chat comes back; x is the way to get rid of it here.
 ```
 
 ---

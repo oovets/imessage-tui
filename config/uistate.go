@@ -14,7 +14,17 @@ type UIState struct {
 	ShowPaneDividers bool `json:"show_pane_dividers"`
 	ShowChatPreview  bool `json:"show_chat_preview"`
 	ChatListWidth    int  `json:"chat_list_width"`
+	// ChatListNetwork is the network the chat list is filtered to, by label;
+	// empty shows every network.
+	ChatListNetwork string `json:"chat_list_network,omitempty"`
+	// ChatListSort is "recent" or "network".
+	ChatListSort string `json:"chat_list_sort,omitempty"`
 }
+
+const (
+	ChatListSortRecent  = "recent"
+	ChatListSortNetwork = "network"
+)
 
 func uiStatePath() (string, error) {
 	home, err := os.UserHomeDir()

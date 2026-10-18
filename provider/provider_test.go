@@ -94,3 +94,45 @@ func TestRegistryIgnoresNilAndEmptyRegistrations(t *testing.T) {
 		t.Errorf("All() has %d providers, want 1", got)
 	}
 }
+
+type labeled struct {
+	stub
+	label string
+}
+
+func (l labeled) Label() string { return l.label }
+
+// The chat list groups by these labels, so a backend without a Labeler must
+// still land somewhere stable, and the order must follow registration.
+func TestRegistryLabelsFollowRegistrationOrder(t *testing.T) {
+	reg := NewRegistry(labeled{stub{id: "imessage"}, "iMessage"})
+	reg.Register("sl:acme:", labeled{stub{id: "slack:acme"}, "Slack · Acme"})
+	reg.Register("x:", stub{id: "other"})
+
+	cases := map[string]string{
+		"chat-a":       "iMessage",
+		"sl:acme:C123": "Slack · Acme",
+		"x:1":          "other",
+	}
+	for guid, want := range cases {
+		if got := reg.Label(guid); got != want {
+			t.Errorf("Label(%q) = %q, want %q", guid, got, want)
+		}
+	}
+
+	got := reg.Labels()
+	want := []string{"iMessage", "Slack · Acme", "other"}
+	if len(got) != len(want) {
+		t.Fatalf("Labels() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Labels() = %v, want %v", got, want)
+		}
+	}
+
+	var unconfigured *Registry
+	if got := unconfigured.Label("chat-a"); got != "" {
+		t.Errorf("nil registry Label = %q, want empty", got)
+	}
+}

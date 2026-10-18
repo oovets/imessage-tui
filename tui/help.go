@@ -33,9 +33,18 @@ func helpOverlayView(width, height int) string {
 			title: "Chat list",
 			lines: []string{
 				"/            Filter chats (Esc to clear)",
+				"n / N        Next / previous network (all → each network)",
+				"Click        A network tab or header: show only that network",
+				"s            Sort by recent / group by network",
+				"p            Pin / unpin selected chat",
+				"K / J        Move a pinned chat up / down",
+				"x            Ignore / stop ignoring selected chat",
+				"I            Show / hide ignored chats",
+				"U            Show / hide chats from unknown senders",
 				"d / D        Delete selected chat / confirm delete",
 				"r            Rename selected chat",
 				"Ctrl+D/R     Delete / rename active pane chat",
+				"Ctrl+O       Pin / unpin active pane chat",
 				"Ctrl+Left/Right  Resize chat list",
 			},
 		},
@@ -91,7 +100,7 @@ func helpOverlayView(width, height int) string {
 		body.WriteString("\n")
 	}
 	note := lipgloss.NewStyle().Foreground(ColorWindowPlaceholder)
-	body.WriteString(note.Render("Single-letter shortcuts (? q d r g G /) and the plain arrow keys pause"))
+	body.WriteString(note.Render("Single-letter shortcuts (? q d r n s p K J x I U g G /) and the plain arrow keys pause"))
 	body.WriteString("\n")
 	body.WriteString(note.Render("while you are typing in a message or in chat search — there they edit"))
 	body.WriteString("\n")

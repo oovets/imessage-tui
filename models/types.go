@@ -9,16 +9,20 @@ import (
 
 // Chat represents a conversation thread (1:1 or group)
 type Chat struct {
-	GUID             string   `json:"guid"`
-	DisplayName      string   `json:"displayName"`
-	ChatIdentifier   string   `json:"chatIdentifier"` // phone number, email, or group ID
-	Participants     []Handle `json:"participants"`
-	LastMessage      *Message `json:"lastMessage"`
-	UnreadCount      int      `json:"unreadCount"`
-	HasNewMessage    bool     `json:"-"` // Set when a new WS message arrives for this chat
-	LastMessageText  string   `json:"-"` // Preview of latest message (not from API)
-	LastMessageTime  int64    `json:"-"` // Milliseconds epoch of latest message preview
-	LocalDisplayName string   `json:"-"` // local user alias
+	GUID           string   `json:"guid"`
+	DisplayName    string   `json:"displayName"`
+	ChatIdentifier string   `json:"chatIdentifier"` // phone number, email, or group ID
+	Participants   []Handle `json:"participants"`
+	LastMessage    *Message `json:"lastMessage"`
+	UnreadCount    int      `json:"unreadCount"`
+	// UnknownSender marks a chat Messages files under Unknown Senders —
+	// someone not in contacts, which in practice is mostly banks, delivery
+	// notices and one-time codes. BlueBubbles calls it isFiltered.
+	UnknownSender    bool   `json:"isFiltered"`
+	HasNewMessage    bool   `json:"-"` // Set when a new WS message arrives for this chat
+	LastMessageText  string `json:"-"` // Preview of latest message (not from API)
+	LastMessageTime  int64  `json:"-"` // Milliseconds epoch of latest message preview
+	LocalDisplayName string `json:"-"` // local user alias
 }
 
 // IsGroup returns true when the chat has more than one participant (group chat).

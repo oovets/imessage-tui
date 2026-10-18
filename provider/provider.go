@@ -62,6 +62,13 @@ type LinkPreviewer interface {
 	LinkPreview(rawURL string) (models.LinkPreview, error)
 }
 
+// Labeler is implemented by backends that can name themselves for the user —
+// the chat list groups and filters conversations by this label. A backend
+// without it is shown under its ID.
+type Labeler interface {
+	Label() string
+}
+
 // EventKind is what happened to a message, normalized across backends.
 type EventKind int
 
@@ -148,6 +155,35 @@ func (r *Registry) For(chatGUID string) Provider {
 		}
 	}
 	return r.fallback
+}
+
+// Label names the backend owning chatGUID for the user: its Labeler label, or
+// its ID when it has none. Empty when no backend owns the GUID.
+func (r *Registry) Label(chatGUID string) string {
+	return labelOf(r.For(chatGUID))
+}
+
+// Labels returns every backend's label in registry order, fallback first, so
+// a list grouped by backend is ordered the same way on every load.
+func (r *Registry) Labels() []string {
+	all := r.All()
+	labels := make([]string, 0, len(all))
+	for _, p := range all {
+		labels = append(labels, labelOf(p))
+	}
+	return labels
+}
+
+func labelOf(p Provider) string {
+	if p == nil {
+		return ""
+	}
+	if l, ok := p.(Labeler); ok {
+		if label := strings.TrimSpace(l.Label()); label != "" {
+			return label
+		}
+	}
+	return p.ID()
 }
 
 // All returns every registered backend, fallback first. Used for the fan-out

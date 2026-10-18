@@ -8,6 +8,11 @@ import (
 
 type ChatOverridesState struct {
 	Aliases map[string]string `json:"aliases"`
+	// Pinned lists favourite chats by GUID, in the order the chat list's
+	// Pinned section shows them.
+	Pinned []string `json:"pinned,omitempty"`
+	// Ignored lists chats by GUID that the chat list never shows.
+	Ignored []string `json:"ignored,omitempty"`
 }
 
 func chatOverridesPath() (string, error) {

@@ -76,6 +76,90 @@ func (m *ChatListModel) SetShowPreview(show bool) {
 	m.list.SetShowPreview(show)
 }
 
+func (m *ChatListModel) SetNetworks(networkOf func(chatGUID string) string, order []string) {
+	m.list.SetNetworks(networkOf, order)
+}
+
+func (m *ChatListModel) SetNetwork(network string) {
+	m.list.SetNetwork(network)
+}
+
+func (m *ChatListModel) Network() string {
+	return m.list.Network()
+}
+
+func (m *ChatListModel) CycleNetwork(step int) (string, bool) {
+	return m.list.CycleNetwork(step)
+}
+
+func (m *ChatListModel) SetGroupByNetwork(group bool) {
+	m.list.SetGroupByNetwork(group)
+}
+
+func (m *ChatListModel) GroupByNetwork() bool {
+	return m.list.GroupByNetwork()
+}
+
+func (m *ChatListModel) NetworkCount() int {
+	return m.list.NetworkCount()
+}
+
+func (m *ChatListModel) SetPinned(guids []string) {
+	m.list.SetPinned(guids)
+}
+
+func (m *ChatListModel) Pinned() []string {
+	return m.list.Pinned()
+}
+
+func (m *ChatListModel) IsPinned(chatGUID string) bool {
+	return m.list.IsPinned(chatGUID)
+}
+
+func (m *ChatListModel) TogglePin(chatGUID string) bool {
+	return m.list.TogglePin(chatGUID)
+}
+
+func (m *ChatListModel) MovePin(chatGUID string, step int) bool {
+	return m.list.MovePin(chatGUID, step)
+}
+
+func (m *ChatListModel) SetIgnored(guids []string) {
+	m.list.SetIgnored(guids)
+}
+
+func (m *ChatListModel) Ignored() []string {
+	return m.list.Ignored()
+}
+
+func (m *ChatListModel) IsIgnored(chatGUID string) bool {
+	return m.list.IsIgnored(chatGUID)
+}
+
+func (m *ChatListModel) ToggleIgnore(chatGUID string) bool {
+	return m.list.ToggleIgnore(chatGUID)
+}
+
+func (m *ChatListModel) SetShowIgnored(show bool) {
+	m.list.SetShowIgnored(show)
+}
+
+func (m *ChatListModel) ShowIgnored() bool {
+	return m.list.ShowIgnored()
+}
+
+func (m *ChatListModel) SetShowUnknown(show bool) {
+	m.list.SetShowUnknown(show)
+}
+
+func (m *ChatListModel) ShowUnknown() bool {
+	return m.list.ShowUnknown()
+}
+
+func (m *ChatListModel) UnknownCount() int {
+	return m.list.UnknownCount()
+}
+
 func (m *ChatListModel) StartSearch() {
 	m.list.StartSearch()
 }
@@ -100,8 +184,9 @@ func (m *ChatListModel) MarkNewMessage(chatGUID string) {
 	m.list.MarkNewMessage(chatGUID)
 }
 
-func (m *ChatListModel) ClickAt(y int) {
-	m.list.ClickAt(y)
+// ClickAt reports whether the click changed the network filter.
+func (m *ChatListModel) ClickAt(x, y int) bool {
+	return m.list.ClickAt(x, y)
 }
 
 func (m *ChatListModel) ClearNewMessage(chatGUID string) {

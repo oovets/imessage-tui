@@ -28,6 +28,7 @@ var (
 	_ provider.ChatEditor      = (*Provider)(nil)
 	_ provider.AttachmentStore = (*Provider)(nil)
 	_ provider.LinkPreviewer   = (*Provider)(nil)
+	_ provider.Labeler         = (*Provider)(nil)
 )
 
 // New returns a provider backed by client. A nil client yields a nil provider
@@ -40,6 +41,9 @@ func New(client *api.Client) *Provider {
 }
 
 func (p *Provider) ID() string { return "imessage" }
+
+// Label is what the chat list calls this backend.
+func (p *Provider) Label() string { return "iMessage" }
 
 func (p *Provider) Chats(limit int) ([]models.Chat, error) {
 	return p.api.GetChats(limit)
