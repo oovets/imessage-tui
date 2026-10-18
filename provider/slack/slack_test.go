@@ -11,6 +11,7 @@ import (
 
 	"github.com/oovets/imessage-tui/models"
 	slackapi "github.com/slack-go/slack"
+	"github.com/slack-go/slack/slackevents"
 )
 
 // fakeSlack is a Slack API stand-in. Routes are registered per test; anything
@@ -423,6 +424,72 @@ func TestSendRepliesInThreadWhenGivenAMessageGUID(t *testing.T) {
 	}
 	if got := fake.formFor("chat.postMessage")["thread_ts"]; got != "1700000100.000100" {
 		t.Errorf("thread_ts = %q, want the replied-to timestamp", got)
+	}
+}
+
+func TestSendToAThreadReplyPostsUnderItsRoot(t *testing.T) {
+	const root, reply = "1700000100.000100", "1700000150.000100"
+	tests := []struct {
+		name string
+		// learn shows the provider the reply the way it reaches the UI.
+		learn func(t *testing.T, fake *fakeSlack, p *Provider)
+	}{
+		{"reply loaded with the history", func(t *testing.T, fake *fakeSlack, p *Provider) {
+			fake.route("conversations.history", func(map[string]string) any {
+				return map[string]any{"ok": true, "messages": []any{
+					map[string]any{"type": "message", "user": "UANNA", "text": "rot",
+						"ts": root, "reply_count": 1, "thread_ts": root},
+				}}
+			})
+			fake.route("conversations.replies", func(map[string]string) any {
+				return map[string]any{"ok": true, "messages": []any{
+					map[string]any{"type": "message", "user": "UANNA", "text": "rot",
+						"ts": root, "thread_ts": root},
+					map[string]any{"type": "message", "user": "UANNA", "text": "svar i tråd",
+						"ts": reply, "thread_ts": root},
+				}}
+			})
+			if _, err := p.Messages("sl:acme:C1", 50); err != nil {
+				t.Fatalf("Messages: %v", err)
+			}
+		}},
+		{"reply arriving live", func(t *testing.T, _ *fakeSlack, p *Provider) {
+			stream := newTestStream(t, p)
+			stream.handleEventsAPI(eventsAPI(&slackevents.MessageEvent{
+				Type:            "message",
+				Channel:         "C1",
+				User:            "UANNA",
+				Text:            "svar i tråd",
+				TimeStamp:       reply,
+				ThreadTimeStamp: root,
+			}), nil)
+			<-stream.Events()
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := newFakeSlack(t)
+			fake.route("users.list", func(map[string]string) any {
+				return map[string]any{"ok": true, "members": []any{
+					map[string]any{"id": "UANNA", "profile": map[string]any{"display_name": "Anna"}},
+				}}
+			})
+			fake.route("chat.postMessage", func(map[string]string) any {
+				return map[string]any{"ok": true, "channel": "C1", "ts": "1700000300.000100"}
+			})
+			p, err := newAgainst(fake, Workspace{ID: "acme", Name: "Acme", Token: "xoxp-test"})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			tt.learn(t, fake, p)
+
+			if err := p.Send("sl:acme:C1", "svar på svaret", "sl:acme:C1:"+reply, ""); err != nil {
+				t.Fatalf("Send: %v", err)
+			}
+			if got := fake.formFor("chat.postMessage")["thread_ts"]; got != root {
+				t.Errorf("thread_ts = %q, want the thread root %q", got, root)
+			}
+		})
 	}
 }
 

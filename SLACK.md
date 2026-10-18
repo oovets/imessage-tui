@@ -111,8 +111,9 @@ credentials; `main.go` registers one provider per workspace.
 | History | `slack.go` `Messages` | `conversations.history`, oldest-first, mrkdwn converted |
 | App messages | `content.go` | Block Kit blocks and legacy attachments drawn as text |
 | Threads | `slack.go` `threadReplies` | `conversations.replies`, inline, marked `↳` |
-| Sending | `slack.go` `Send` | `chat.postMessage`, threaded when given a message GUID |
-| Replying in a thread | `tui/app.go` `/r #N` | The only way to answer *in* a thread rather than beside it |
+| Reading a thread | `slack.go` `Thread`, `threadMessages`; `tui/app.go` `/t #N` | The thread as a conversation of its own, in a pane beside the channel |
+| Sending | `slack.go` `Send` | `chat.postMessage`, threaded when given a message GUID or sent to a thread |
+| Replying in a thread | `tui/app.go` `/r #N` | Posts under the root, also when row N is itself a reply |
 | Reactions | `slack.go` `React` | The six tapbacks map onto Slack emoji names |
 | Files | `slack.go` `DownloadAttachment` | Fetched with the token, never handed to the system opener |
 | Read state | `slack.go` `MarkRead` | `conversations.mark` up to the newest ts this client has seen |
@@ -127,6 +128,25 @@ threads are cached by reply count (`cachedThread`): the count arrives free with
 the history, and an unchanged thread costs no call at all. Names come from one
 `users.list` rather than a `users.info` per sender, which would otherwise be
 thirty calls for one busy channel.
+
+**A thread is a conversation, addressed by its root.** Inline, replies sort by
+time among everything else, so a channel with several live threads cannot be
+read as threads at all. `/t #N` asks the provider (`provider.Threader`) for the
+thread's conversation and opens it in a pane like any other chat. Its GUID is
+the root message's, `sl:<workspace>:<channel>:<root ts>`, so the same thread is
+reached from the root or from any reply, and a restored layout gets it back
+from the GUID alone — the chat list never holds threads. `Messages`, `Send` and
+`MarkRead` all take it: one `conversations.replies` call per load, replies
+without the `↳` marker, posts under the root, and no read marking, since the
+Web API has none for threads.
+
+Two costs keep that bounded. The refresh timer loads a thread pane like any
+other, and the reply-count cache cannot help there — the count comes with the
+channel's history, which a thread pane never fetches — so each open thread pane
+is one Tier 3 call per poll interval. And realtime replies reach a thread's
+GUID only for threads that have been loaded that way (`watched`): publishing
+every live reply under its thread too would make each one a chat the UI
+caches, persists and resyncs after every reconnect.
 
 **Deletions are not applied.** There is no "remove one message" path in the UI,
 and adding one for a single backend would mean a delete iMessage can never

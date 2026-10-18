@@ -58,6 +58,7 @@ backend owns a conversation is never something you have to think about.
     tapbacks, slack and telegram reactions render as compact emoji on the
     message
     thread replies, quoted replies, image attachments, link previews
+    slack threads inline in the channel, or in a pane of their own with /t
     urls open with a click on the url itself, or with /open
 
   layout
@@ -179,7 +180,11 @@ max_previews_per_message: 2
 
   what works
     channels, private channels, dms, group dms
-    thread replies, shown inline and marked, and /r #N to answer in a thread
+    threads. the replies to the ten newest are shown inline in the channel,
+    marked ↳, in time order among everything else. /t #N opens a thread in
+    a pane beside the channel -- the root, then every reply in order --
+    where anything you send posts in the thread. /r #N answers in a thread
+    from the channel itself
     files, opened with /img #N or a click
     reactions, mentions resolved to names, emoji shortcodes
     messages from apps -- alertmanager, linear, ci bots: their attachments
@@ -198,6 +203,8 @@ max_previews_per_message: 2
     else keeps working
     channels you have not joined, archived channels, closed dms. the list is
     your membership, the same thing slack's own sidebar shows
+    a thread's read state. slack's web api has no call for it, so a thread
+    pane marks nothing read
     an app's buttons, menus and inputs, which only do something inside
     slack. a button that opens a url shows as that link; the rest are left
     out. tables and slack's link-unfurl cards are not drawn
@@ -332,8 +339,11 @@ max_previews_per_message: 2
   the #N is the row number shown by ctrl+n.
 
     /r #N text    reply to row N. on slack this posts into that message's
-                  thread, the only way to answer in a thread rather than
-                  beside it. on imessage it becomes a quoted reply
+                  thread -- the same thread when row N is itself a reply.
+                  on imessage it becomes a quoted reply
+    /t #N         open the thread on row N in a pane beside this one, or
+                  focus the pane already showing it. slack only; anything
+                  sent in that pane posts in the thread
     /img #N       open the image on row N
     /open         open the newest link in the pane
     /open #N [K]  open link K on row N, counted in the order they are

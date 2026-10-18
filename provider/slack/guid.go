@@ -28,6 +28,23 @@ func MessageGUID(workspaceID, channelID, ts string) string {
 	return ChatGUID(workspaceID, channelID) + sep + ts
 }
 
+// ThreadGUID is the conversation a thread is read in on its own: the GUID of
+// the message that started it, sl:<workspace>:<channel>:<root ts>. Addressing
+// a thread by its root means opening it from any of its messages, and
+// restoring a pane that showed it, arrive at the same conversation.
+func ThreadGUID(workspaceID, channelID, rootTS string) string {
+	return MessageGUID(workspaceID, channelID, rootTS)
+}
+
+// threadOf is the root ts when chatGUID is a thread rather than a whole
+// conversation, and "" when it is not.
+func threadOf(chatGUID string) string {
+	if _, _, ts, ok := ParseMessageGUID(chatGUID); ok {
+		return ts
+	}
+	return ""
+}
+
 // FileGUID is slfile:<workspace>:<file id>. Slack file URLs need the workspace
 // token, so attachments are never handed to the system opener as URLs — they
 // route back through the provider, which is what this GUID addresses.

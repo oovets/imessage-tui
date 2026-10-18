@@ -62,6 +62,19 @@ type LinkPreviewer interface {
 	LinkPreview(rawURL string) (models.LinkPreview, error)
 }
 
+// Threader is implemented by backends whose messages can carry a thread that
+// is read apart from the conversation it was posted in. Slack's can.
+//
+// A thread is a conversation of its own: the chat returned here goes in a
+// pane like any other, and Messages, Send and MarkRead take its GUID.
+type Threader interface {
+	// Thread returns the conversation for the thread that messageGUID starts
+	// or replies in. Any message can start one, so a message without replies
+	// opens an empty thread. A thread's own GUID resolves to that thread,
+	// which is how a pane showing one comes back after a restart.
+	Thread(messageGUID string) (models.Chat, error)
+}
+
 // Labeler is implemented by backends that can name themselves for the user —
 // the chat list groups and filters conversations by this label. A backend
 // without it is shown under its ID.

@@ -30,7 +30,17 @@ type card struct {
 // stretches that came from attachments marked so the renderer can draw their
 // bars. Each part is converted on its own: TextToPlain changes lengths, so the
 // offsets can only be taken once a part is in its final form.
+//
+// A thread reply is marked as one. That is for the channel view, where replies
+// sit among everything else; a thread read in its own pane uses threadContent.
 func messageContent(msg *slackapi.Msg, userNames map[string]string) (string, []models.Accent) {
+	text, accents := threadContent(msg, userNames)
+	return markReply(msg, text, accents)
+}
+
+// threadContent is messageContent without the reply marker: in a thread's own
+// pane every message is in the thread, so the marker would only be noise.
+func threadContent(msg *slackapi.Msg, userNames map[string]string) (string, []models.Accent) {
 	text := strings.TrimSpace(TextToPlain(messageBody(msg), userNames))
 	var accents []models.Accent
 	for _, c := range messageCards(msg) {
@@ -44,20 +54,24 @@ func messageContent(msg *slackapi.Msg, userNames map[string]string) (string, []m
 		accents = append(accents, models.Accent{Start: len(text), End: len(text) + len(cardText), Color: c.color})
 		text += cardText
 	}
+	return text, accents
+}
 
-	// A reply carries no visual link to its root in a flat message list, so
-	// it gets a marker instead of a thread pane. When the reply is all
-	// attachment, the marker joins the first bar rather than sitting on a
-	// line of its own.
-	if msg.ThreadTimestamp != "" && msg.ThreadTimestamp != msg.Timestamp {
-		text = replyMarker + text
-		for i := range accents {
-			accents[i].Start += len(replyMarker)
-			accents[i].End += len(replyMarker)
-		}
-		if len(accents) > 0 && accents[0].Start == len(replyMarker) {
-			accents[0].Start = 0
-		}
+// markReply prefixes a thread reply with the reply marker. A reply carries no
+// visual link to its root in a flat message list, so it gets a marker there.
+// When the reply is all attachment, the marker joins the first bar rather than
+// sitting on a line of its own.
+func markReply(msg *slackapi.Msg, text string, accents []models.Accent) (string, []models.Accent) {
+	if msg.ThreadTimestamp == "" || msg.ThreadTimestamp == msg.Timestamp {
+		return text, accents
+	}
+	text = replyMarker + text
+	for i := range accents {
+		accents[i].Start += len(replyMarker)
+		accents[i].End += len(replyMarker)
+	}
+	if len(accents) > 0 && accents[0].Start == len(replyMarker) {
+		accents[0].Start = 0
 	}
 	return text, accents
 }

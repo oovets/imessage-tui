@@ -150,14 +150,25 @@ func (s *Stream) publish(kind provider.EventKind, channelID string, msg slackapi
 	names := s.provider.resolveSenders([]slackapi.Msg{msg})
 	converted := s.provider.toMessage(chatGUID, channelID, &msg, names)
 	s.provider.rememberLatest(channelID, []models.Message{converted})
+	s.provider.rememberRoots(channelID, []slackapi.Msg{msg})
+	s.emit(provider.Event{Kind: kind, ChatGUID: chatGUID, Message: converted})
 
-	event := provider.Event{Kind: kind, ChatGUID: chatGUID, Message: converted}
+	// A message in a thread open in its own pane is news there too, as a
+	// message of that conversation.
+	if rootTS := msg.ThreadTimestamp; rootTS != "" && s.provider.watching(channelID, rootTS) {
+		threadGUID := ThreadGUID(s.provider.ws.ID, channelID, rootTS)
+		inThread := s.provider.toMessage(threadGUID, channelID, &msg, names)
+		s.emit(provider.Event{Kind: kind, ChatGUID: threadGUID, Message: inThread})
+	}
+}
+
+func (s *Stream) emit(event provider.Event) {
 	select {
 	case s.events <- event:
 	default:
 		// Dropping the event and saying so beats blocking the socket reader:
 		// the UI resyncs every open chat when it sees this.
-		log.Printf("[slack] %s: event buffer full, dropped %s", s.provider.ID(), converted.GUID)
+		log.Printf("[slack] %s: event buffer full, dropped %s", s.provider.ID(), event.Message.GUID)
 		s.signal(s.overflowed)
 	}
 }

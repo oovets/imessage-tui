@@ -49,6 +49,14 @@ const maxThreadRoots = 10
 // when a pane opens, without burst-tripping the rate limiter.
 const threadFetchConcurrency = 4
 
+// threadPageSize and maxThreadPages bound one load of a thread read in its own
+// pane. Almost every thread fits on the first page; the cap only stops a
+// runaway one from spending the minute's conversations.replies budget.
+const (
+	threadPageSize = 200
+	maxThreadPages = 5
+)
+
 // conversationTypes is what users.conversations is asked for: everything the
 // user is actually in.
 var conversationTypes = []string{"public_channel", "private_channel", "mpim", "im"}
@@ -89,6 +97,18 @@ type Provider struct {
 	latest map[string]string
 	// threads caches expanded threads by "channel\x00root ts".
 	threads map[string]cachedThread
+	// roots maps a thread reply, by "channel\x00reply ts", to its thread's
+	// root ts. A reply's GUID carries only its own ts, and replying to it has
+	// to post under the root.
+	roots map[string]string
+	// names are the conversations' display names by channel id, from the
+	// last Chats, which is where a thread's pane gets its title.
+	names map[string]string
+	// watched are the threads, by "channel\x00root ts", that have been loaded
+	// as conversations of their own. Only these get realtime events under
+	// their thread GUID: every live reply in every channel would otherwise
+	// become a chat the UI caches, persists and resyncs.
+	watched map[string]struct{}
 }
 
 // cachedThread is a thread as last fetched, kept so the refresh loop does not
@@ -108,6 +128,7 @@ var (
 	_ provider.Provider        = (*Provider)(nil)
 	_ provider.AttachmentStore = (*Provider)(nil)
 	_ provider.Labeler         = (*Provider)(nil)
+	_ provider.Threader        = (*Provider)(nil)
 )
 
 // New connects to a workspace and verifies the token. It is a network call:
@@ -145,6 +166,9 @@ func newProvider(ws Workspace, api *slackapi.Client, selfID string) *Provider {
 		selfID:  selfID,
 		latest:  make(map[string]string),
 		threads: make(map[string]cachedThread),
+		roots:   make(map[string]string),
+		names:   make(map[string]string),
+		watched: make(map[string]struct{}),
 	}
 }
 
@@ -231,6 +255,7 @@ func (p *Provider) Chats(_ int) ([]models.Chat, error) {
 	}
 	listed := make([]ranked, 0, len(all))
 	counts := make(map[kind]int, 6)
+	names := make(map[string]string, len(all))
 	for i := range all {
 		channel := &all[i]
 		conversationKind := p.classify(channel)
@@ -240,16 +265,23 @@ func (p *Provider) Chats(_ int) ([]models.Chat, error) {
 			// client hides them for the same reason.
 			continue
 		}
+		name := p.chatName(channel, conversationKind)
+		names[channel.ID] = name
 		listed = append(listed, ranked{
 			kind: conversationKind,
 			chat: models.Chat{
 				GUID:           ChatGUID(p.ws.ID, channel.ID),
-				DisplayName:    p.chatName(channel, conversationKind),
+				DisplayName:    name,
 				ChatIdentifier: channel.ID,
 				UnreadCount:    channel.UnreadCount,
 			},
 		})
 	}
+	p.mu.Lock()
+	for id, name := range names {
+		p.names[id] = name
+	}
+	p.mu.Unlock()
 
 	sort.SliceStable(listed, func(i, j int) bool {
 		left, right := kindRank(listed[i].kind), kindRank(listed[j].kind)
@@ -287,11 +319,14 @@ func kindRank(k kind) int {
 }
 
 // Messages returns a channel's recent history, oldest first, with threads
-// expanded inline.
+// expanded inline. For a thread's GUID it returns that thread.
 func (p *Provider) Messages(chatGUID string, limit int) ([]models.Message, error) {
 	channelID, err := p.channelOf(chatGUID)
 	if err != nil {
 		return nil, err
+	}
+	if rootTS := threadOf(chatGUID); rootTS != "" {
+		return p.threadMessages(chatGUID, channelID, rootTS, limit)
 	}
 	// One users.list beats a users.info per sender; after the first call this
 	// is free. A pane can open before the chat list has ever loaded.
@@ -311,6 +346,7 @@ func (p *Provider) Messages(chatGUID string, limit int) ([]models.Message, error
 		raw = append(raw, history.Messages[i].Msg)
 	}
 	raw = append(raw, p.threadReplies(channelID, raw)...)
+	p.rememberRoots(channelID, raw)
 
 	names := p.resolveSenders(raw)
 	out := make([]models.Message, 0, len(raw))
@@ -392,6 +428,99 @@ func (p *Provider) threadReplies(channelID string, history []slackapi.Msg) []sla
 	return replies
 }
 
+// threadMessages is a thread read in its own pane: the root, then the newest
+// limit-1 replies, oldest first.
+//
+// It is one conversations.replies call per load, and the UI's refresh timer
+// loads every open pane. The reply-count cache cannot spare that call the way
+// it does for the channel view: the count arrives with the channel's history,
+// which this pane never fetches.
+func (p *Provider) threadMessages(chatGUID, channelID, rootTS string, limit int) ([]models.Message, error) {
+	p.users.loadAll()
+
+	var (
+		raw    []slackapi.Msg
+		seen   = make(map[string]bool)
+		cursor string
+	)
+	for page := 0; page < maxThreadPages; page++ {
+		msgs, more, next, err := p.api.GetConversationReplies(&slackapi.GetConversationRepliesParameters{
+			ChannelID: channelID,
+			Timestamp: rootTS,
+			Limit:     threadPageSize,
+			Cursor:    cursor,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("slack thread %s in %s: %w", rootTS, channelID, err)
+		}
+		for i := range msgs {
+			// Every page may lead with the root again.
+			if ts := msgs[i].Timestamp; ts != "" && !seen[ts] {
+				seen[ts] = true
+				raw = append(raw, msgs[i].Msg)
+			}
+		}
+		if !more || next == "" {
+			break
+		}
+		cursor = next
+	}
+	if limit > 1 && len(raw) > limit {
+		// Keep the root: it is what the thread is about.
+		raw = append(raw[:1], raw[len(raw)-(limit-1):]...)
+	}
+
+	p.rememberRoots(channelID, raw)
+	p.mu.Lock()
+	p.watched[threadKey(channelID, rootTS)] = struct{}{}
+	p.mu.Unlock()
+
+	names := p.resolveSenders(raw)
+	out := make([]models.Message, 0, len(raw))
+	for i := range raw {
+		out = append(out, p.toMessage(chatGUID, channelID, &raw[i], names))
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].DateCreated < out[j].DateCreated })
+	return out, nil
+}
+
+// watching reports whether the thread rooted at rootTS is open as a
+// conversation of its own.
+func (p *Provider) watching(channelID, rootTS string) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	_, ok := p.watched[threadKey(channelID, rootTS)]
+	return ok
+}
+
+// Thread returns the conversation for the thread messageGUID starts or replies
+// in. It costs no call: a reply's root is known from when the reply was
+// loaded, and the title comes from the last Chats.
+func (p *Provider) Thread(messageGUID string) (models.Chat, error) {
+	channelID, err := p.channelOf(messageGUID)
+	if err != nil {
+		return models.Chat{}, err
+	}
+	ts := threadOf(messageGUID)
+	if ts == "" {
+		return models.Chat{}, fmt.Errorf("%q is not a slack message", messageGUID)
+	}
+	rootTS := p.threadRoot(channelID, ts)
+
+	p.mu.RLock()
+	name := p.names[channelID]
+	p.mu.RUnlock()
+	title := "thread"
+	if name != "" {
+		title = name + " › thread"
+	}
+	return models.Chat{
+		GUID:           ThreadGUID(p.ws.ID, channelID, rootTS),
+		DisplayName:    title,
+		ChatIdentifier: channelID,
+	}, nil
+}
+
 // cachedThread returns the stored replies when the thread still has the same
 // number of them. A changed count is the signal that it needs refetching.
 func (p *Provider) cachedThread(channelID, rootTS string, replyCount int) ([]slackapi.Msg, bool) {
@@ -412,6 +541,30 @@ func (p *Provider) rememberThread(channelID, rootTS string, replyCount int, repl
 
 func threadKey(channelID, rootTS string) string { return channelID + "\x00" + rootTS }
 
+// rememberRoots records which thread each reply in msgs belongs to, so a
+// reply to a reply lands in the same thread.
+func (p *Provider) rememberRoots(channelID string, msgs []slackapi.Msg) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i := range msgs {
+		if root := msgs[i].ThreadTimestamp; root != "" && root != msgs[i].Timestamp {
+			p.roots[threadKey(channelID, msgs[i].Timestamp)] = root
+		}
+	}
+}
+
+// threadRoot is the ts to post under when replying to the message at ts:
+// its thread's root when it is itself a reply, otherwise ts. chat.postMessage
+// asks for the root's ts as thread_ts, never a reply's.
+func (p *Provider) threadRoot(channelID, ts string) string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if root, ok := p.roots[threadKey(channelID, ts)]; ok {
+		return root
+	}
+	return ts
+}
+
 // resolveSenders warms the name cache for everyone in a batch before any
 // message is rendered, so the mention map is complete when mrkdwn runs.
 func (p *Provider) resolveSenders(msgs []slackapi.Msg) map[string]string {
@@ -424,7 +577,11 @@ func (p *Provider) resolveSenders(msgs []slackapi.Msg) map[string]string {
 }
 
 func (p *Provider) toMessage(chatGUID, channelID string, msg *slackapi.Msg, names map[string]string) models.Message {
-	text, accents := messageContent(msg, names)
+	content := messageContent
+	if threadOf(chatGUID) != "" {
+		content = threadContent
+	}
+	text, accents := content(msg, names)
 	out := models.Message{
 		GUID:        MessageGUID(p.ws.ID, channelID, msg.Timestamp),
 		Text:        text,
@@ -502,7 +659,8 @@ func reactionCounts(msg *slackapi.Msg) map[string]int {
 }
 
 // Send posts to a channel. replyToGUID, when it names a Slack message, makes
-// this a threaded reply to it.
+// this a threaded reply to it. Sent to a thread's GUID, it always posts in
+// that thread.
 func (p *Provider) Send(chatGUID, text, replyToGUID, _ string) error {
 	channelID, err := p.channelOf(chatGUID)
 	if err != nil {
@@ -513,8 +671,12 @@ func (p *Provider) Send(chatGUID, text, replyToGUID, _ string) error {
 		slackapi.MsgOptionText(text, false),
 		slackapi.MsgOptionAsUser(true),
 	}
-	if _, _, ts, ok := ParseMessageGUID(replyToGUID); ok {
-		options = append(options, slackapi.MsgOptionTS(ts))
+	threadTS := threadOf(chatGUID)
+	if _, _, ts, ok := ParseMessageGUID(replyToGUID); ok && threadTS == "" {
+		threadTS = p.threadRoot(channelID, ts)
+	}
+	if threadTS != "" {
+		options = append(options, slackapi.MsgOptionTS(threadTS))
 	}
 
 	if _, _, err := p.api.PostMessage(channelID, options...); err != nil {
@@ -547,10 +709,17 @@ func (p *Provider) React(chatGUID, messageGUID, reaction string) error {
 // MarkRead marks a conversation read up to the newest message this client has
 // seen. Slack marks by timestamp, so a conversation whose history was never
 // loaded has nothing to mark and is left alone.
+//
+// A thread is left alone too. Slack's Web API has no call for a thread's read
+// state, and marking the channel from a thread pane would mark messages read
+// that the pane never showed.
 func (p *Provider) MarkRead(chatGUID string) error {
 	channelID, err := p.channelOf(chatGUID)
 	if err != nil {
 		return err
+	}
+	if threadOf(chatGUID) != "" {
+		return nil
 	}
 	p.mu.RLock()
 	ts := p.latest[channelID]

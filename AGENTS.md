@@ -131,8 +131,10 @@ under `sl:<workspace>:`. Two things there are load-bearing and easy to undo by
 accident: names come from one `users.list` rather than a `users.info` per
 sender, and threads are cached by reply count so the refresh timer does not
 re-expand them. Both exist because `conversations.history` and
-`conversations.replies` are Tier 3, about fifty calls a minute. A message's
-body is assembled in `content.go` from its text, Block Kit blocks and legacy
+`conversations.replies` are Tier 3, about fifty calls a minute. For the same
+reason the stream publishes a reply under its thread's own GUID only for
+threads opened with `/t` (`Provider.watched`), never for every thread. A
+message's body is assembled in `content.go` from its text, Block Kit blocks and legacy
 attachments, as mrkdwn, and `TextToPlain` runs over each part before the
 attachments' `Accents` offsets are taken — it changes lengths. Every typed
 message also carries a `rich_text` block saying what its text says, so the

@@ -1850,6 +1850,9 @@ func (m *AppModel) restoreLayoutFromState(chats []models.Chat) bool {
 		chatGUID := strings.TrimSpace(m.savedLayoutState.LeafChatGUIDs[i])
 		chat, ok := chatByGUID[chatGUID]
 		if !ok {
+			chat, ok = m.threadChat(chatGUID)
+		}
+		if !ok {
 			continue
 		}
 		wm.ShowChat(window, chat)
@@ -2184,6 +2187,14 @@ func (m *AppModel) handleLocalInputCommand(window *ChatWindow, raw string) (tea.
 		), true
 	}
 
+	if target, handled, err := parseThreadCommand(raw); handled {
+		if err != nil {
+			m.setAppError(err)
+			return nil, true
+		}
+		return m.openThread(window, target), true
+	}
+
 	if msgNum, linkNum, handled, err := parseOpenCommand(raw); handled {
 		if err != nil {
 			m.setAppError(err)
@@ -2215,6 +2226,53 @@ func (m *AppModel) handleLocalInputCommand(window *ChatWindow, raw string) (tea.
 
 	window.Input.Clear()
 	return openImageAttachmentCmd(m.providerFor(windowChatGUID(window)), att), true
+}
+
+// openThread shows the thread of message row n in a pane beside window. A
+// thread already open in a pane is focused there instead of opened twice.
+func (m *AppModel) openThread(window *ChatWindow, n int) tea.Cmd {
+	messageGUID, ok := window.Messages.MessageGUIDByNumber(n)
+	if !ok {
+		m.setAppError(fmt.Errorf("no message #%d in this pane", n))
+		return nil
+	}
+	backend := m.providerFor(window.Chat.GUID)
+	threader, ok := backend.(provider.Threader)
+	if !ok {
+		m.setAppError(errNoCapability(backend, "open threads"))
+		return nil
+	}
+	thread, err := threader.Thread(messageGUID)
+	if err != nil {
+		m.setAppError(err)
+		return nil
+	}
+	window.Input.Clear()
+
+	if showing := m.windowManager.WindowsShowingChat(thread.GUID); len(showing) > 0 {
+		m.windowManager.SetFocus(showing[0].ID)
+		m.saveLayoutState()
+		return m.clearFocusedWindowNewMessageIndicator()
+	}
+	if err := m.windowManager.SplitWindow(SplitHorizontal); err != nil {
+		return showToastCmd(capitalize(err.Error()), 3*time.Second)
+	}
+	m.updateLayout()
+	return m.selectChat(&thread, m.windowManager.FocusedWindow())
+}
+
+// threadChat resolves a GUID the chat list does not have into the thread it
+// names, so a pane that showed a thread shows it again after a restart.
+func (m *AppModel) threadChat(chatGUID string) (*models.Chat, bool) {
+	threader, ok := m.providerFor(chatGUID).(provider.Threader)
+	if !ok {
+		return nil, false
+	}
+	thread, err := threader.Thread(chatGUID)
+	if err != nil || thread.GUID != chatGUID {
+		return nil, false
+	}
+	return &thread, true
 }
 
 func parseReactionCommand(raw string) (string, bool) {
@@ -2268,6 +2326,23 @@ func parseReplyCommand(raw string) (target int, text string, handled bool, err e
 		return 0, "", true, fmt.Errorf("usage: /r #<message-number> <text>")
 	}
 	return n, body, true, nil
+}
+
+// parseThreadCommand reads "/t #3": open the thread on message #3 in a pane of
+// its own. The #N numbering is the one /r and /img use.
+func parseThreadCommand(raw string) (target int, handled bool, err error) {
+	parts := strings.Fields(strings.TrimSpace(raw))
+	if len(parts) == 0 || parts[0] != "/t" {
+		return 0, false, nil
+	}
+	if len(parts) != 2 {
+		return 0, true, fmt.Errorf("usage: /t #<message-number>")
+	}
+	n, convErr := strconv.Atoi(strings.TrimPrefix(parts[1], "#"))
+	if convErr != nil || n < 1 {
+		return 0, true, fmt.Errorf("invalid message number: %s", parts[1])
+	}
+	return n, true, nil
 }
 
 // parseOpenCommand reads "/open", "/open #3" and "/open #3 2". Without a
