@@ -16,7 +16,7 @@ go test ./tui -run TestName -v  # one test
 gofmt -l .                      # must print nothing
 go vet ./...
 golangci-lint run ./...         # advisory; the tree is not clean yet
-go run .                        # needs BB_SERVER_URL + BB_PASSWORD
+go run .                        # needs one network: BB_SERVER_URL + BB_PASSWORD, a Slack token, or a Telegram login
 ```
 
 `gofmt`, `go vet` and `go test ./...` must all pass before a change is done.
@@ -33,7 +33,9 @@ there, edit the root ones.
 |---|---|
 | `main.go` | Config load, API ping, terminal-background resolution, backend wiring, Bubble Tea startup |
 | `emojiset/` | The one shortcode table, generated from the dataset Slack uses; both the composer and the Slack decoder read it |
-| `provider/` | The seam between the UI and the chat backends. `provider/imessage/` adapts `api/` + `ws/` to it; `provider/slack/` is the Slack backend |
+| `provider/` | The seam between the UI and the chat backends. `provider/imessage/` adapts `api/` + `ws/` to it; `provider/slack/` and `provider/telegram/` are the Slack and Telegram backends |
+| `commands.go` | The `telegram login/logout/accounts` subcommands, which run instead of the TUI |
+| `termqr/` | QR codes as half-block text, for logins that a phone scans |
 | `api/` | BlueBubbles HTTP client, link-preview fetching |
 | `ws/` | Socket.io/websocket client for live events |
 | `models/` | Wire types: `Chat`, `Message`, `Attachment`, `Handle` |
@@ -125,6 +127,23 @@ sender, and threads are cached by reply count so the refresh timer does not
 re-expand them. Both exist because `conversations.history` and
 `conversations.replies` are Tier 3, about fifty calls a minute. `SLACK.md` has
 the rest.
+
+Telegram lives in `provider/telegram/` — one `Provider` per logged-in account,
+registered under `tg:<user id>:`, on `gotd/td`. Three things there are easy to
+break. gotd's `Client.Run` *is* the connection, so it runs for the provider's
+lifetime in its own goroutine and every call goes through it while it runs.
+Users and channels need an `access_hash` that only arrives as a side effect of
+other responses: everything carrying users or chats goes through the peer
+table's `apply`, and a "min" object's hash must never replace a real one.
+`Messages` serves a per-chat history cache only while the realtime feed is
+up, and any update for a chat drops its entry — the UI's refresh timer would
+otherwise turn into a FLOOD_WAIT. Read optional TL fields directly
+(`msg.Media != nil`), not through the generated `Get…` accessors: those check
+flag bits that only decoding sets, so they lie about objects built in tests.
+`TELEGRAM.md` has the rest; `SIGNAL.md` is the plan for Signal.
+
+Logins run as subcommands (`commands.go`) before Bubble Tea starts, which is
+the one place the program may print to stdout.
 
 **One emoji table, both directions.** `emojiset` merges the generated Slack set
 with `enescakir/emoji`, and both the composer's autocomplete and the Slack

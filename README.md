@@ -2,11 +2,12 @@
 [![Bubble Tea](https://img.shields.io/badge/tui-bubble%20tea-ff69b4.svg)](https://github.com/charmbracelet/bubbletea)
 [![Docs](https://img.shields.io/badge/docs-mkdocs--material-blue.svg)](https://stevoo.net/imessage-tui/)
 
-keyboard-first terminal client for imessage and slack, in one chat list.
+keyboard-first terminal client for imessage, slack and telegram, in one chat
+list.
 
-imessage goes through a bluebubbles-compatible server; slack talks to slack
-directly. both render the same way, and which backend owns a conversation is
-never something you have to think about.
+imessage goes through a bluebubbles-compatible server; slack and telegram talk
+to their own servers directly. all of them render the same way, and which
+backend owns a conversation is never something you have to think about.
 
 ```
 == contents ==
@@ -14,6 +15,7 @@ never something you have to think about.
   quick start          get it running
   configuration        settings, env vars, theme
   slack                tokens, what works, what does not
+  telegram             logging in, what works, what does not
   using it             keys, composer commands, chat list
   behaviour            link previews, emoticons, chat management
   development          layout, checks, troubleshooting
@@ -28,10 +30,12 @@ never something you have to think about.
     go 1.25 or newer
     for imessage: a bluebubbles-compatible server, over http and websocket
     slack tokens, if you want slack -- optional, see below
+    a telegram login, if you want telegram -- optional, see below
 
   every network is optional; the app needs one. a bluebubbles server that
   is configured but unreachable at startup is reported in the status line
-  and left out until the next start, so it never keeps slack from loading.
+  and left out until the next start, so it never keeps slack or telegram
+  from loading.
   with nothing configured at all, the app says so on stderr and exits.
 
   build and run
@@ -49,9 +53,10 @@ never something you have to think about.
 == features ==
 
   chat
-    imessage and slack in one list, searchable, with unread markers
+    imessage, slack and telegram in one list, searchable, with unread markers
     optimistic sending: your message appears at once and reconciles later
-    tapbacks and slack reactions render as compact emoji on the message
+    tapbacks, slack and telegram reactions render as compact emoji on the
+    message
     thread replies, quoted replies, image attachments, link previews
 
   layout
@@ -66,7 +71,8 @@ never something you have to think about.
     optional timestamps, line numbers, sender names, pane dividers, previews
 
   connection
-    realtime over websocket (imessage) and socket mode (slack)
+    realtime over websocket (imessage), socket mode (slack) and mtproto
+    updates with gap recovery (telegram)
     api polling reconciles anything the realtime feed missed
     a backend that is down costs only itself
 ```
@@ -101,9 +107,10 @@ never something you have to think about.
   BB_SLACK_APP_TOKEN        unset     slack app-level token, for realtime
   BB_SLACK_WORKSPACE        slack     label for the env workspace
 
-  chat_limit applies to imessage only. it means "the most recent N", which
-  needs a list ordered by recency; slack's is not, so every slack
-  conversation is fetched rather than an arbitrary slice of them.
+  chat_limit applies to imessage and telegram (at most 100 there, one page
+  of dialogs). it means "the most recent N", which needs a list ordered by
+  recency; slack's is not, so every slack conversation is fetched rather
+  than an arbitrary slice of them.
 
   for imessage it counts known senders: the N most recent chats with people,
   plus up to N more from unknown senders (what messages files under Unknown
@@ -196,6 +203,54 @@ max_previews_per_message: 2
 
   if conversations are missing, the log says what was fetched
     grep "conversations" ~/.imessage-tui.log
+```
+
+---
+
+```
+== telegram ==
+
+  telegram chats appear in the same list, most recently active first, as in
+  telegram itself. like slack it needs nothing in imessage.yaml: it is on for
+  every account that is logged in.
+
+  log in once, before starting the app
+    imessage-tui telegram login           scan the qr code: telegram on the
+                                          phone → settings → devices → link
+                                          desktop device
+    imessage-tui telegram login --phone   a code to the telegram app or sms
+                                          instead
+  a two-step verification password is asked for when the account has one.
+
+  telegram wants an api id and hash of your own, from https://my.telegram.org
+  → api development tools. login reads BB_TELEGRAM_API_ID and
+  BB_TELEGRAM_API_HASH (or TG_API_ID / TG_API_HASH, as the desktop app
+  does), asks for them otherwise, and stores them with the session. after
+  that a normal start needs no environment.
+
+  the session is the login itself -- whoever has it is you -- so it lives in
+  the os keyring, never in a file. it shows up in telegram's device list as
+  imessage-tui.
+
+    imessage-tui telegram accounts        what is logged in
+    imessage-tui telegram logout [<id>]   end the session on telegram's side
+                                          too, and forget it
+
+  what works
+    private chats, groups, supergroups, channels, saved messages
+    replies (/r #N), reactions, photos and files (/img #N), stickers as their
+    emoji, unread counts, marking read
+    realtime with gap recovery, several accounts at once
+
+  what does not
+    secret chats. they are end-to-end encrypted to one device and do not
+    exist for a second client
+    deleting or renaming a chat, sending files. edits made elsewhere do show
+    formatting: bold, italics and labelled links arrive beside the text and
+    are drawn plain
+
+  reactions: telegram has no ‼️ or ❓, so emphasize and question send 🔥
+  and 🤔. a chat can restrict reactions further; the error says so.
 ```
 
 ---
@@ -377,6 +432,8 @@ max_previews_per_message: 2
     provider/            the seam between the ui and the chat backends
     provider/imessage/   adapts api/ and ws/ to it
     provider/slack/      slack web api, socket mode, mrkdwn, guids
+    provider/telegram/   telegram over mtproto (gotd/td), login, updates
+    termqr/              qr codes drawn in the terminal, for logins
     emojiset/            the shared shortcode table, generated
     api/                 bluebubbles http client, contacts, attachments
     ws/                  socket.io/websocket client, reconnect + overflow
@@ -385,8 +442,8 @@ max_previews_per_message: 2
     tui/                 models, split layout, rendering, input, persistence
 
     conversations are addressed by guid, and which backend owns one is
-    derived from its prefix: unprefixed is imessage, sl: is slack. nothing
-    outside provider/ parses a guid.
+    derived from its prefix: unprefixed is imessage, sl: is slack, tg: is
+    telegram. nothing outside provider/ parses a guid.
 
   checks
     go test ./...
@@ -398,7 +455,8 @@ max_previews_per_message: 2
     the root *.md files are the source of truth. scripts/docs.sh stages them
     into docs/ for mkdocs, and docs/*.md is gitignored, so never edit there.
     AGENTS.md has the rules that are easy to get wrong in this codebase.
-    SLACK.md has the slack design and its known limits.
+    SLACK.md has the slack design and its known limits; TELEGRAM.md and
+    SIGNAL.md do the same for telegram and for signal, which is planned.
 ```
 
 ```
@@ -433,6 +491,10 @@ max_previews_per_message: 2
   slack conversations missing
     grep "conversations" ~/.imessage-tui.log for what was actually fetched.
     0 dm usually means the token lacks im:read.
+
+  telegram missing
+    grep telegram ~/.imessage-tui.log. "no longer authorized" means the
+    session was ended from another device: log in again.
 
   anything else
     ~/.imessage-tui.log has it. the tui never writes to the terminal.

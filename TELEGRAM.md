@@ -34,7 +34,9 @@ Rust code relies on:
 
 The module also carries voice-call code (pion/webrtc) in its `go.mod`. Go only
 links the packages that are imported, so that never reaches the binary — but
-`go.sum` gets longer.
+`go.sum` gets longer. What does reach it is the generated TL schema: the binary
+goes from 16.5 MB to 31 MB. That is the price of a pure-Go MTProto client;
+`-ldflags="-s -w"` takes a third of it back for a release build.
 
 ## Credentials
 
@@ -146,23 +148,65 @@ timer re-reads every open pane every `poll_interval_sec`, and a reconnect
 resyncs every cached chat — fine against BlueBubbles on the LAN, a flood risk
 against Telegram. So `Messages` serves from a per-chat history cache while the
 realtime feed is up and nothing has arrived for that chat; an event for the
-chat, or the feed dropping, invalidates it. The cache is what the feed keeps
-honest, not a TTL guess.
+chat, or the feed dropping, invalidates it. The feed is what keeps the cache
+honest; a two-minute ceiling only bounds changes the server never pushes, such
+as someone else's reaction in a large group.
 
-## Plan
+Short waits are slept through by a middleware (`floodWait` in
+`connection.go`) — up to 15 seconds, twice — so a resync slows down instead of
+failing chat by chat. Longer waits come back as errors: a pane that silently
+waits a minute reads as a hung app.
 
-1. **iMessage optional.** `main.go` refuses to start without BlueBubbles; it
-   must start with any one backend configured, the way a dead Slack token
-   already does not stop the app.
-2. `config/telegram.go` — accounts in the keyring, `api_id`/`api_hash` from env.
-3. `imessage-tui telegram login | logout` with the shared terminal QR.
-4. `provider/telegram/` — GUIDs, peer table, `Chats`, `Messages`, `Send`,
-   `React`, `MarkRead`.
-5. Realtime stream + the history cache.
-6. Attachments.
-7. Edits and deletions, replies shown as quotes.
+## What is built
 
-## Known limits (expected)
+| Capability | Where | Notes |
+|---|---|---|
+| Optional iMessage | `main.go` `connectIMessage` | Any one network is enough to start |
+| Accounts, sessions | `config/telegram.go` | One keyring entry; a session written after logout does not resurrect the account |
+| Login, logout | `commands.go`, `provider/telegram/login.go` | QR or phone code, then 2FA; the session is built in memory and stored only on success |
+| Terminal QR | `termqr/` | Shared with Signal's linking |
+| GUIDs | `provider/telegram/guid.go` | `tg:` / `tgfile:` as above |
+| Peer table | `provider/telegram/peers.go` | In memory; one dialogs reload for an unseen peer, at most every 10 s |
+| Chats | `telegram.go` `Chats` | Dialogs in Telegram's order, unread counts, previews; the archive folder is skipped |
+| History | `telegram.go` `Messages` | Service messages skipped, stickers as `[sticker 😀]`, other media as a bracketed label |
+| Sending, replies | `telegram.go` `Send` | A reply target in another chat is ignored, not sent across |
+| Reactions | `telegram.go` `React` | Tapback mapping above |
+| Read state | `telegram.go` `MarkRead` | `channels.readHistory` for channels, `messages.readHistory` otherwise |
+| Photos, files | `telegram.go` `DownloadAttachment` | Message re-read for a fresh file reference; largest photo size |
+| Realtime | `stream.go`, `connection.go` | New and edited messages as events; reactions and deletions drop the cache |
+| Several accounts | `main.go` `connectTelegram` | Names and the network label carry the owner's name when more than one is logged in |
+
+### Decisions worth knowing
+
+**Own sends come back through the updates manager.** Telegram does not push a
+session's own messages back to it; they arrive only in the call's result.
+`handleOwnUpdates` hands that result to the manager, which keeps its sequence
+numbers straight and dispatches the message like any other — which is what
+replaces the optimistic copy in the pane.
+
+**A reaction only drops the cache.** `UpdateMessageReactions` carries the
+counts and nothing else, and the UI ignores an updated message whose GUID a
+pane already shows — for every backend, Slack's edits included. So a reaction
+drops the chat's cached history, and the next refresh, at most
+`poll_interval_sec` later, brings the new counts. Edits are published as
+`EventUpdatedMessage` like Slack's, so they apply as soon as the UI does.
+
+**Replies carry no marker.** Slack marks thread replies with `↳` because they
+live outside the channel's flow. A Telegram reply sits in order where it was
+sent, and a marker would also break the optimistic echo, which matches on
+text.
+
+**Startup waits for each account**, up to 20 seconds, the way it waits for
+each Slack workspace: the chat list is loaded once and needs the peers.
+
+## Still to do
+
+1. Map formatting entities, so labelled links keep their URL.
+2. Show where a reply points (the quoted message), not just the reply.
+3. Persist the peer table if restored panes turn out to race the chat list.
+4. Connect accounts and workspaces in parallel at startup.
+
+## Known limits
 
 - Secret chats are device-bound end-to-end encrypted chats; they do not exist
   for a second client and will not appear.

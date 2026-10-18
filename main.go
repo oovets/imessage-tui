@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/oovets/imessage-tui/provider"
 	"github.com/oovets/imessage-tui/provider/imessage"
 	slackprovider "github.com/oovets/imessage-tui/provider/slack"
+	telegramprovider "github.com/oovets/imessage-tui/provider/telegram"
 	"github.com/oovets/imessage-tui/tui"
 	"github.com/oovets/imessage-tui/ws"
 )
@@ -32,6 +34,10 @@ func init() {
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		os.Exit(runCommand(os.Args[1:]))
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		fatal("reading config: %v", err)
@@ -68,20 +74,23 @@ func main() {
 		streams = append(streams, imessageStream)
 	}
 	streams = append(streams, connectSlack(backends)...)
+	telegramStreams, telegramErrs := connectTelegram(backends)
+	streams = append(streams, telegramStreams...)
 
+	startupErrs := append([]error{imessageErr}, telegramErrs...)
 	if len(backends.All()) == 0 {
-		if imessageErr != nil {
-			fatal("%v", imessageErr)
+		if err := joinErrors(startupErrs); err != nil {
+			fatal("%v", err)
 		}
-		fatal("no network is configured: set BB_SERVER_URL and BB_PASSWORD for imessage, or a slack token (see README)")
+		fatal("no network is configured: set BB_SERVER_URL and BB_PASSWORD for imessage, add a slack token, or run: imessage-tui telegram login (see README)")
 	}
 
 	app := tui.NewAppModelWithConfig(backends, provider.Merge(streams...), cfg)
-	if imessageErr != nil {
-		// The other networks are up, so iMessage being down is something to
-		// say, not a reason to keep them from starting.
-		log.Printf("%v; starting without it", imessageErr)
-		app.ShowError(imessageErr)
+	if err := joinErrors(startupErrs); err != nil {
+		// The other networks are up, so one being down is something to say,
+		// not a reason to keep them from starting.
+		log.Printf("starting without: %v", err)
+		app.ShowError(err)
 	}
 
 	p := tea.NewProgram(
@@ -108,6 +117,22 @@ func fatal(format string, args ...any) {
 	log.Print(msg)
 	fmt.Fprintln(os.Stderr, "imessage-tui: "+msg)
 	os.Exit(1)
+}
+
+// joinErrors folds startup problems into one status-line message. nil entries
+// are skipped; errors.Join would put each on its own line, and the status line
+// has one.
+func joinErrors(errs []error) error {
+	var parts []string
+	for _, err := range errs {
+		if err != nil {
+			parts = append(parts, err.Error())
+		}
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(parts, "; "))
 }
 
 // connectIMessage sets up the BlueBubbles backend when it is configured.
@@ -189,4 +214,46 @@ func connectSlack(backends *provider.Registry) []provider.Stream {
 		}
 	}
 	return streams
+}
+
+// connectTelegram registers every logged-in Telegram account and returns their
+// realtime streams.
+//
+// An account that cannot connect is reported, not fatal — a revoked session
+// costs that account, never the app — and its error says what fixes it.
+func connectTelegram(backends *provider.Registry) ([]provider.Stream, []error) {
+	accounts, err := config.LoadTelegramAccounts()
+	if err != nil {
+		log.Printf("telegram: reading accounts failed: %v", err)
+		return nil, []error{fmt.Errorf("telegram: reading accounts from the keyring failed: %w", err)}
+	}
+
+	// As with Slack workspaces: one account needs no label, two need one
+	// each to tell their chats apart.
+	labelAccounts := len(accounts) > 1
+
+	var (
+		streams []provider.Stream
+		errs    []error
+	)
+	for _, account := range accounts {
+		backend, err := telegramprovider.New(
+			telegramprovider.Account{ID: account.ID, Name: account.Name},
+			telegramprovider.Credentials{APIID: account.APIID, APIHash: account.APIHash},
+			config.TelegramSessionStore{AccountID: account.ID},
+			config.ErrTelegramSessionNotFound,
+		)
+		if err != nil {
+			log.Printf("telegram: account %s unavailable: %v", account.ID, err)
+			errs = append(errs, fmt.Errorf("telegram %s: %w", account.Name, err))
+			continue
+		}
+		backend.ShowAccountInNames(labelAccounts)
+		backends.Register(backend.GUIDPrefix(), backend)
+		log.Printf("telegram: connected account %s (%s)", account.Name, account.ID)
+		if stream := telegramprovider.NewStream(backend); stream != nil {
+			streams = append(streams, stream)
+		}
+	}
+	return streams, errs
 }
