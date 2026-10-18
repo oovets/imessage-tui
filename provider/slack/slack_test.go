@@ -693,3 +693,43 @@ func channelsNamed(prefix string, n int) []any {
 	}
 	return out
 }
+
+// An app's alert carries its content in an attachment and no text at all.
+// History has to reach the renderer with that content, or the pane shows a
+// row with a name and nothing after it.
+func TestMessagesShowAnAppsAttachment(t *testing.T) {
+	fake := newFakeSlack(t)
+	fake.route("users.list", func(map[string]string) any {
+		return map[string]any{"ok": true, "members": []any{}}
+	})
+	fake.route("conversations.history", func(map[string]string) any {
+		return map[string]any{"ok": true, "messages": []any{
+			map[string]any{
+				"type": "message", "subtype": "bot_message", "username": "Alertmanager",
+				"text": "", "ts": "1700000100.000100",
+				"attachments": []any{map[string]any{
+					"title":      ":red_circle: 1 firing · DiskFull",
+					"title_link": "https://alerts.example.com/",
+					"text":       "• db-1 has &lt;5% left",
+					"fallback":   "[FIRING:1] DiskFull",
+				}},
+			},
+		}}
+	})
+	p, err := newAgainst(fake, Workspace{ID: "acme", Name: "Acme", Token: "xoxp-test"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	msgs, err := p.Messages("sl:acme:C1", 50)
+	if err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	want := "🔴 1 firing · DiskFull (https://alerts.example.com/)\n• db-1 has <5% left"
+	if len(msgs) != 1 || msgs[0].Text != want {
+		t.Fatalf("messages = %+v, want one with text %q", msgs, want)
+	}
+	if msgs[0].Handle == nil || msgs[0].Handle.DisplayName != "Alertmanager" {
+		t.Errorf("handle = %+v", msgs[0].Handle)
+	}
+}

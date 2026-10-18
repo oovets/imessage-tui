@@ -424,7 +424,7 @@ func (p *Provider) resolveSenders(msgs []slackapi.Msg) map[string]string {
 }
 
 func (p *Provider) toMessage(chatGUID, channelID string, msg *slackapi.Msg, names map[string]string) models.Message {
-	text := TextToPlain(msg.Text, names)
+	text := TextToPlain(messageMrkdwn(msg), names)
 	// A reply carries no visual link to its root in a flat message list, so it
 	// gets a marker instead of a thread pane.
 	if msg.ThreadTimestamp != "" && msg.ThreadTimestamp != msg.Timestamp {

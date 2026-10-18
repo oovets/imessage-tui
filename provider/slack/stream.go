@@ -134,11 +134,16 @@ func (s *Stream) publish(kind provider.EventKind, channelID string, msg slackapi
 	if channelID == "" || msg.Timestamp == "" {
 		return
 	}
-	// slackevents drops the files array on the way in, so it is read back off
-	// the raw envelope. Without this an image posted while the app is open
-	// shows as an empty message until the next refresh.
+	// slackevents drops the files and attachments on the way in, so they are
+	// read back off the raw envelope. Without this an image or an app's alert
+	// posted while the app is open shows as an empty message until the next
+	// refresh.
+	files, attachments := bodyFromRequest(request)
 	if len(msg.Files) == 0 {
-		msg.Files = filesFromRequest(request)
+		msg.Files = files
+	}
+	if len(msg.Attachments) == 0 {
+		msg.Attachments = attachments
 	}
 
 	chatGUID := ChatGUID(s.provider.ws.ID, channelID)
@@ -172,30 +177,38 @@ func msgFromEvent(event *slackevents.MessageEvent) slackapi.Msg {
 		SubType:         event.SubType,
 		BotID:           event.BotID,
 		Username:        event.Username,
+		Blocks:          event.Blocks,
 	}
 }
 
-// filesFromRequest digs the files array out of the raw Socket Mode envelope,
-// looking in both places Slack puts a message body.
-func filesFromRequest(request *socketmode.Request) []slackapi.File {
+// bodyFromRequest digs the files and attachments out of the raw Socket Mode
+// envelope, looking in both places Slack puts a message body.
+func bodyFromRequest(request *socketmode.Request) ([]slackapi.File, []slackapi.Attachment) {
 	if request == nil || len(request.Payload) == 0 {
-		return nil
+		return nil, nil
+	}
+	type body struct {
+		Files       []slackapi.File       `json:"files"`
+		Attachments []slackapi.Attachment `json:"attachments"`
 	}
 	var payload struct {
 		Event struct {
-			Files   []slackapi.File `json:"files"`
-			Message struct {
-				Files []slackapi.File `json:"files"`
-			} `json:"message"`
+			body
+			Message body `json:"message"`
 		} `json:"event"`
 	}
 	if err := json.Unmarshal(request.Payload, &payload); err != nil {
-		return nil
+		return nil, nil
 	}
-	if len(payload.Event.Files) > 0 {
-		return payload.Event.Files
+	top, nested := payload.Event.body, payload.Event.Message
+	files, attachments := top.Files, top.Attachments
+	if len(files) == 0 {
+		files = nested.Files
 	}
-	return payload.Event.Message.Files
+	if len(attachments) == 0 {
+		attachments = nested.Attachments
+	}
+	return files, attachments
 }
 
 func (s *Stream) signal(ch chan struct{}) {

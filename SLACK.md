@@ -109,6 +109,7 @@ credentials; `main.go` registers one provider per workspace.
 |---|---|---|
 | Conversations | `slack.go` `Chats` | `users.conversations`, paginated, bot DMs filtered out |
 | History | `slack.go` `Messages` | `conversations.history`, oldest-first, mrkdwn converted |
+| App messages | `content.go` | Block Kit blocks and legacy attachments drawn as text |
 | Threads | `slack.go` `threadReplies` | `conversations.replies`, inline, marked `↳` |
 | Sending | `slack.go` `Send` | `chat.postMessage`, threaded when given a message GUID |
 | Replying in a thread | `tui/app.go` `/r #N` | The only way to answer *in* a thread rather than beside it |
@@ -132,6 +133,28 @@ and adding one for a single backend would mean a delete iMessage can never
 send. The periodic refresh replaces a pane's history wholesale, so a deleted
 message disappears within one poll interval.
 
+**App messages are read from their blocks and attachments.** Apps rarely
+put what they have to say in `text`. An Alertmanager webhook leaves it empty
+and sends a legacy attachment — title, body, colour — so reading the text
+alone drew a row with a name and nothing after it. Linear sends a one-line
+summary as text and the issue itself in Block Kit. `content.go` assembles the
+body the way Slack's client stacks it: the blocks when the app sent a layout,
+otherwise the text, then each attachment (pretext, author, title with its
+link, text, fields, blocks, image, URL buttons, footer), falling back to the
+attachment's `fallback` only when nothing else is there. It builds mrkdwn
+rather than display text, so one `TextToPlain` pass resolves mentions, links,
+entities and emoji in all of it the same way; literal text — `plain_text`
+objects, rich-text runs — is escaped first so it comes through as written.
+
+Every message typed in Slack's composer also carries a `rich_text` block with
+what its text says. So text wins whenever the blocks are only `rich_text`,
+which keeps typed messages exactly as `TextToPlain` has always shown them;
+`rich_text` is rendered only when the text is empty. Section fields of the
+form `*Label*\nvalue` are joined onto one line.
+
+Socket Mode needs the same care as files did: slackevents keeps a message's
+blocks but drops its attachments, so they are read back off the raw envelope.
+
 **Formatting marks are left alone.** `*bold*` renders as typed. The message
 renderer treats text as plain, and a Slack user reads the asterisks as
 emphasis — stripping them would silently drop what someone wrote.
@@ -149,6 +172,9 @@ empty, which is what the opener checks.
   read receipt to mirror iMessage's.
 - Custom workspace emoji (`:aspace-logo:`) have no Unicode character and stay
   as shortcodes.
+- An app's buttons, menus and inputs only work inside Slack. A button with a
+  URL is shown as that link; the rest are left out. Attachment colour bars,
+  tables and link-unfurl cards (including shared messages) are not drawn.
 - Socket Mode only delivers events for channels the app is subscribed to.
 - The optimistic echo reconciles on text, so sending a message whose text Slack
   rewrites (a bare `:shortcode:` the composer did not already expand) shows a

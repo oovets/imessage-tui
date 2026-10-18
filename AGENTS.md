@@ -131,8 +131,12 @@ under `sl:<workspace>:`. Two things there are load-bearing and easy to undo by
 accident: names come from one `users.list` rather than a `users.info` per
 sender, and threads are cached by reply count so the refresh timer does not
 re-expand them. Both exist because `conversations.history` and
-`conversations.replies` are Tier 3, about fifty calls a minute. `SLACK.md` has
-the rest.
+`conversations.replies` are Tier 3, about fifty calls a minute. A message's
+body is assembled in `content.go` from its text, Block Kit blocks and legacy
+attachments, as mrkdwn, before `TextToPlain` runs once over all of it. Every
+typed message also carries a `rich_text` block saying what its text says, so
+the text wins unless an app sent a layout; drop that rule and every message
+shows twice. `SLACK.md` has the rest.
 
 Telegram lives in `provider/telegram/` — one `Provider` per logged-in account,
 registered under `tg:<user id>:`, on `gotd/td`. Three things there are easy to

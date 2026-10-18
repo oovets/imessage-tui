@@ -178,6 +178,36 @@ func TestStreamRecoversFilesFromTheRawEnvelope(t *testing.T) {
 	}
 }
 
+// An alert posted while the app is open has to read the same live as it does
+// after a refresh: slackevents keeps the blocks but drops the attachments, so
+// those come back off the raw envelope too.
+func TestStreamCarriesBlocksAndAttachments(t *testing.T) {
+	fake := newFakeSlack(t)
+	fake.route("users.list", func(map[string]string) any {
+		return map[string]any{"ok": true, "members": []any{}}
+	})
+	p, err := newAgainst(fake, Workspace{ID: "acme", Name: "Acme", Token: "xoxp-test"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	p.users.loadAll()
+
+	payload := `{"event":{"type":"message","subtype":"bot_message","channel":"C1","ts":"1700000100.000100",
+		"text":"Deploy finished","attachments":[{"title":"web 1.4.2","text":"all green"}]}}`
+	stream := newTestStream(t, p)
+	stream.handleEventsAPI(eventsAPI(&slackevents.MessageEvent{
+		Type: "message", SubType: "bot_message", Channel: "C1", BotID: "B1", Username: "ci",
+		Text: "Deploy finished", TimeStamp: "1700000100.000100",
+		Blocks: slackapi.Blocks{BlockSet: []slackapi.Block{slackapi.NewSectionBlock(
+			slackapi.NewTextBlockObject(slackapi.MarkdownType, "*Deploy* finished", false, false), nil, nil)}},
+	}), &socketmode.Request{Payload: json.RawMessage(payload)})
+
+	event := <-stream.Events()
+	if want := "*Deploy* finished\nweb 1.4.2\nall green"; event.Message.Text != want {
+		t.Errorf("text = %q, want %q", event.Message.Text, want)
+	}
+}
+
 func TestStreamRemembersLatestTimestampForMarkRead(t *testing.T) {
 	fake := newFakeSlack(t)
 	fake.route("users.list", func(map[string]string) any {

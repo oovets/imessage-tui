@@ -182,6 +182,8 @@ max_previews_per_message: 2
     thread replies, shown inline and marked, and /r #N to answer in a thread
     files, opened with /img #N or a click
     reactions, mentions resolved to names, emoji shortcodes
+    messages from apps -- alertmanager, linear, ci bots: their attachments
+    and block kit layouts are drawn as text, title, body, fields and links
     realtime over socket mode, several workspaces at once
 
   what does not
@@ -193,6 +195,9 @@ max_previews_per_message: 2
     else keeps working
     channels you have not joined, archived channels, closed dms. the list is
     your membership, the same thing slack's own sidebar shows
+    an app's buttons, menus and inputs, which only do something inside
+    slack. a button that opens a url shows as that link; the rest are left
+    out. attachment colour bars and slack's link-unfurl cards are not drawn
 
   ordering
     imessage first, then each workspace: people and group chats before
