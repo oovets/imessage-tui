@@ -41,6 +41,7 @@ func helpOverlayView(width, height int) string {
 				"x            Ignore / stop ignoring selected chat",
 				"I            Show / hide ignored chats",
 				"U            Show / hide chats from unknown senders",
+				"t            Show / hide times in the chat list",
 				"d / D        Delete selected chat / confirm delete",
 				"r            Rename selected chat",
 				"Ctrl+D/R     Delete / rename active pane chat",
@@ -100,7 +101,7 @@ func helpOverlayView(width, height int) string {
 		body.WriteString("\n")
 	}
 	note := lipgloss.NewStyle().Foreground(ColorWindowPlaceholder)
-	body.WriteString(note.Render("Single-letter shortcuts (? q d r n s p K J x I U g G /) and the plain arrow keys pause"))
+	body.WriteString(note.Render("Single-letter shortcuts (? q d r n s p K J x I U t g G /) and the plain arrow keys pause"))
 	body.WriteString("\n")
 	body.WriteString(note.Render("while you are typing in a message or in chat search — there they edit"))
 	body.WriteString("\n")

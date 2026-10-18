@@ -65,6 +65,7 @@ type SimpleListModel struct {
 	focused         bool
 	loading         bool
 	showPreview     bool
+	showTime        bool
 	searchActive    bool
 	searchQuery     string
 	// The GUID is opaque here, so which network a chat belongs to is asked of
@@ -101,6 +102,7 @@ func NewSimpleListModel() SimpleListModel {
 		cursor:      0,
 		offset:      0,
 		showPreview: true,
+		showTime:    true,
 		selectedStyle: lipgloss.NewStyle().
 			Foreground(ColorChatListSelectedForeground).
 			Background(ColorChatListSelectedBackground),
@@ -166,6 +168,12 @@ func (m *SimpleListModel) SetLoading(loading bool) {
 
 func (m *SimpleListModel) SetShowPreview(show bool) {
 	m.showPreview = show
+}
+
+// SetShowTime shows or hides the time of the last message on each row. The
+// name gets the width back.
+func (m *SimpleListModel) SetShowTime(show bool) {
+	m.showTime = show
 }
 
 // SetNetworks tells the list how to name a chat's network and in which order
@@ -1122,7 +1130,7 @@ func (m SimpleListModel) View() string {
 		timeStr := ""
 		timeStyled := m.timeStyle.Render(formatChatListTime(chat.LastMessageTime))
 		reserved := 1 + lipgloss.Width(linePrefix) + lipgloss.Width(lineSuffix)
-		if lipgloss.Width(timeStyled) > 0 && lineWidth-reserved-lipgloss.Width(timeStyled)-1 >= 1 {
+		if m.showTime && lipgloss.Width(timeStyled) > 0 && lineWidth-reserved-lipgloss.Width(timeStyled)-1 >= 1 {
 			timeStr = timeStyled
 			reserved += lipgloss.Width(timeStyled) + 1
 		}

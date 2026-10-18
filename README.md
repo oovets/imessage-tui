@@ -222,6 +222,7 @@ max_previews_per_message: 2
     x                      ignore the selected chat, or stop ignoring it
     I                      show or hide ignored chats
     U                      show or hide chats from unknown senders
+    t                      show or hide the time on each chat list row
     enter                  open the selected chat, or send the composer
     shift+enter            newline in the composer
     ? / F1                 help

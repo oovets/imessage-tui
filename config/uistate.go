@@ -13,6 +13,8 @@ type UIState struct {
 	ShowSenderNames  bool `json:"show_sender_names"`
 	ShowPaneDividers bool `json:"show_pane_dividers"`
 	ShowChatPreview  bool `json:"show_chat_preview"`
+	// ShowChatListTime is the last-message time on each chat list row.
+	ShowChatListTime bool `json:"show_chat_list_time"`
 	ChatListWidth    int  `json:"chat_list_width"`
 	// ChatListNetwork is the network the chat list is filtered to, by label;
 	// empty shows every network.
@@ -50,6 +52,7 @@ func LoadUIState() UIState {
 		ShowSenderNames:  true,
 		ShowPaneDividers: true,
 		ShowChatPreview:  true,
+		ShowChatListTime: true,
 		ChatListWidth:    25,
 	}
 	path, err := uiStatePath()

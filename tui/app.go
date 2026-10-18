@@ -147,6 +147,7 @@ type AppModel struct {
 	showSenderNames       bool
 	showPaneDividers      bool
 	showChatPreview       bool
+	showChatListTime      bool
 	chatListWidth         int
 	messageLimit          int
 	chatLimit             int
@@ -243,6 +244,7 @@ func NewAppModelWithConfig(backends *provider.Registry, stream provider.Stream, 
 		showSenderNames:       ui.ShowSenderNames,
 		showPaneDividers:      ui.ShowPaneDividers,
 		showChatPreview:       ui.ShowChatPreview,
+		showChatListTime:      ui.ShowChatListTime,
 		chatListWidth:         clampChatListWidth(ui.ChatListWidth),
 		messageLimit:          messageLimit,
 		chatLimit:             chatLimit,
@@ -264,6 +266,7 @@ func NewAppModelWithConfig(backends *provider.Registry, stream provider.Stream, 
 		app.savedLayoutState = &layoutState
 	}
 	app.chatList.SetShowPreview(app.showChatPreview)
+	app.chatList.SetShowTime(app.showChatListTime)
 	app.chatList.SetNetworks(backends.Label, backends.Labels())
 	app.chatList.SetNetwork(ui.ChatListNetwork)
 	app.chatList.SetGroupByNetwork(ui.ChatListSort == config.ChatListSortNetwork)
@@ -605,6 +608,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, showToastCmd(toast, 3*time.Second)
+			case "t":
+				m.showChatListTime = !m.showChatListTime
+				m.chatList.SetShowTime(m.showChatListTime)
+				m.saveUIState()
+				return m, nil
 			case "U":
 				show := !m.chatList.ShowUnknown()
 				m.chatList.SetShowUnknown(show)
@@ -1070,6 +1078,7 @@ func (m *AppModel) saveUIState() {
 		ShowSenderNames:  m.showSenderNames,
 		ShowPaneDividers: m.showPaneDividers,
 		ShowChatPreview:  m.showChatPreview,
+		ShowChatListTime: m.showChatListTime,
 		ChatListWidth:    m.chatListWidth,
 		ChatListNetwork:  m.chatList.Network(),
 		ChatListSort:     chatListSort(m.chatList.GroupByNetwork()),

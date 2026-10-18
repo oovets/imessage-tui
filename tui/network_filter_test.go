@@ -720,3 +720,42 @@ func TestPinnedUnknownSenderStaysInView(t *testing.T) {
 		t.Fatalf("rows = %s, want the pinned unknown sender kept", got)
 	}
 }
+
+func TestChatListTimeCanBeHidden(t *testing.T) {
+	m := NewSimpleListModel()
+	m.SetShowPreview(false)
+	m.SetSize(30, 8)
+	m.SetItems([]models.Chat{{GUID: "a", DisplayName: "Alpha", LastMessageTime: 1000}})
+	stamp := formatChatListTime(1000)
+
+	if !strings.Contains(stripANSI(m.View()), stamp) {
+		t.Fatalf("time %q not shown by default: %q", stamp, stripANSI(m.View()))
+	}
+	m.SetShowTime(false)
+	if strings.Contains(stripANSI(m.View()), stamp) {
+		t.Fatalf("time %q still shown: %q", stamp, stripANSI(m.View()))
+	}
+}
+
+func TestTKeyTogglesChatListTimeAndRemembersIt(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	app := NewAppModelWithConfig(nil, nil, nil)
+	app.focused = focusChatList
+	app.chatList.SetChats([]models.Chat{{GUID: "a", DisplayName: "Alpha", LastMessageTime: 1000}})
+
+	app = typeRunes(app, "t")
+	if app.showChatListTime || app.chatList.list.showTime {
+		t.Fatal("t did not hide the chat list times")
+	}
+	app.persist.flushAll()
+	if config.LoadUIState().ShowChatListTime {
+		t.Fatal("hidden chat list times were not saved")
+	}
+
+	// While searching, t is a letter of the query.
+	app.chatList.StartSearch()
+	app = typeRunes(app, "t")
+	if app.showChatListTime {
+		t.Fatal("t toggled the times while typing in the search box")
+	}
+}

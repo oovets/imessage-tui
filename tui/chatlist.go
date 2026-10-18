@@ -76,6 +76,10 @@ func (m *ChatListModel) SetShowPreview(show bool) {
 	m.list.SetShowPreview(show)
 }
 
+func (m *ChatListModel) SetShowTime(show bool) {
+	m.list.SetShowTime(show)
+}
+
 func (m *ChatListModel) SetNetworks(networkOf func(chatGUID string) string, order []string) {
 	m.list.SetNetworks(networkOf, order)
 }
