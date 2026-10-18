@@ -236,7 +236,13 @@ func mergeDuplicateMessage(base, incoming models.Message) models.Message {
 		merged.GUID = firstNonEmpty(base.GUID, incoming.GUID)
 	}
 	if strings.TrimSpace(merged.Text) == "" {
-		merged.Text = firstNonEmpty(base.Text, incoming.Text)
+		// The format and accents describe one particular text, so they come
+		// along with it.
+		source := base
+		if strings.TrimSpace(base.Text) == "" {
+			source = incoming
+		}
+		merged.Text, merged.Format, merged.Accents = source.Text, source.Format, source.Accents
 	}
 	if merged.DateCreated == 0 {
 		if base.DateCreated != 0 {

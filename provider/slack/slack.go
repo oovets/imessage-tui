@@ -424,16 +424,12 @@ func (p *Provider) resolveSenders(msgs []slackapi.Msg) map[string]string {
 }
 
 func (p *Provider) toMessage(chatGUID, channelID string, msg *slackapi.Msg, names map[string]string) models.Message {
-	text := TextToPlain(messageMrkdwn(msg), names)
-	// A reply carries no visual link to its root in a flat message list, so it
-	// gets a marker instead of a thread pane.
-	if msg.ThreadTimestamp != "" && msg.ThreadTimestamp != msg.Timestamp {
-		text = "↳ " + text
-	}
-
+	text, accents := messageContent(msg, names)
 	out := models.Message{
 		GUID:        MessageGUID(p.ws.ID, channelID, msg.Timestamp),
 		Text:        text,
+		Format:      models.FormatMrkdwn,
+		Accents:     accents,
 		IsFromMe:    msg.User != "" && msg.User == p.selfID,
 		DateCreated: TSToMillis(msg.Timestamp),
 		ChatGUID:    chatGUID,

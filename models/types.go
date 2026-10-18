@@ -104,6 +104,31 @@ type Message struct {
 	ReactionCounts        map[string]int `json:"-"` // folded tapbacks for rendering
 	Pending               bool           `json:"-"` // local optimistic outgoing not yet confirmed
 	LinkPreviews          []LinkPreview  `json:"linkPreviews,omitempty"`
+
+	// Format says how Text marks emphasis; the zero value is plain text.
+	Format TextFormat `json:"format,omitempty"`
+	// Accents are the stretches of Text an app sent as attachments, which
+	// get a coloured bar beside them the way Slack draws one. In order, not
+	// overlapping.
+	Accents []Accent `json:"accents,omitempty"`
+}
+
+// TextFormat names the markup a message's text is written in. The marks stay
+// in Text — it is what was sent, and what an optimistic copy is matched
+// against — and the renderer draws them as styles.
+type TextFormat string
+
+// FormatMrkdwn is Slack's markup: *bold*, _italic_, ~strike~, `code`,
+// ```preformatted``` and "> " quotes.
+const FormatMrkdwn TextFormat = "mrkdwn"
+
+// Accent covers Text[Start:End], byte offsets.
+type Accent struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+	// Color is "#rrggbb", or empty for the neutral bar Slack draws when
+	// the app chose none.
+	Color string `json:"color,omitempty"`
 }
 
 type LinkPreview struct {

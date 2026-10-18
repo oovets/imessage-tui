@@ -118,6 +118,25 @@ func TestClickOpensTheURLUnderThePointerOnly(t *testing.T) {
 			want: map[string]string{"https://example.com/a": "https://example.com/a"},
 		},
 		{
+			// A bar takes two columns at the start of every row it is on,
+			// and the URL's spans have to start after it.
+			name: "beside a bar, wrapped",
+			msg:  accented(models.Message{Text: "larm " + long + " slut", Handle: &models.Handle{DisplayName: "Alice"}}),
+			want: map[string]string{long: long},
+		},
+		{
+			name: "beside a bar, outgoing",
+			msg:  accented(models.Message{Text: "kolla https://example.com/a?b=1 nu", IsFromMe: true}),
+			want: map[string]string{"https://example.com/a?b=1": "https://example.com/a?b=1"},
+		},
+		{
+			// The marks come out before the URL is looked for, so a bold
+			// link opens without its asterisks.
+			name: "bold link",
+			msg:  models.Message{Text: "*https://example.com/a_b* ok", Format: models.FormatMrkdwn, Handle: &models.Handle{DisplayName: "Alice"}},
+			want: map[string]string{"https://example.com/a_b": "https://example.com/a_b"},
+		},
+		{
 			name: "not openable",
 			msg:  models.Message{Text: "file:///etc/passwd", Handle: &models.Handle{DisplayName: "Alice"}},
 			want: map[string]string{},

@@ -133,10 +133,11 @@ sender, and threads are cached by reply count so the refresh timer does not
 re-expand them. Both exist because `conversations.history` and
 `conversations.replies` are Tier 3, about fifty calls a minute. A message's
 body is assembled in `content.go` from its text, Block Kit blocks and legacy
-attachments, as mrkdwn, before `TextToPlain` runs once over all of it. Every
-typed message also carries a `rich_text` block saying what its text says, so
-the text wins unless an app sent a layout; drop that rule and every message
-shows twice. `SLACK.md` has the rest.
+attachments, as mrkdwn, and `TextToPlain` runs over each part before the
+attachments' `Accents` offsets are taken — it changes lengths. Every typed
+message also carries a `rich_text` block saying what its text says, so the
+text wins unless an app sent a layout; drop that rule and every message shows
+twice. `SLACK.md` has the rest.
 
 Telegram lives in `provider/telegram/` — one `Provider` per logged-in account,
 registered under `tg:<user id>:`, on `gotd/td`. Three things there are easy to
@@ -207,6 +208,14 @@ padding, a marker, a prefix — moves those columns; `TestClickOpensTheURLUnderT
 clicks every cell of a rendered pane and catches it. Only http(s) links are
 ever handed to the system opener (`isOpenableLink`, checked again in
 `openURLCmd`): message text is written by other people.
+
+A message with `Format: models.FormatMrkdwn` keeps its marks in `Text`, which
+is what echo matching and the dedupe compare; `tui/mrkdwn.go` takes them out
+at render time and styles word by word, because each wrapped row is drawn on
+its own and a style spanning a break would be lost on the next row. Anywhere
+text is shown without styles reads `displayText(msg)`. `Accents` split the
+text into segments drawn behind a coloured bar, which takes columns like any
+other prefix.
 
 ## Tests
 

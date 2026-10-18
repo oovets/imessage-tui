@@ -121,3 +121,25 @@ func TestSentMessageEventReplacesPendingEcho(t *testing.T) {
 		t.Errorf("message still drawn as pending:\n%s", view)
 	}
 }
+
+// The chat list's preview line has no styles to draw marks with, so it shows
+// the text as a reader sees it rather than Slack's asterisks and backticks.
+func TestChatPreviewShowsFormattedTextWithoutItsMarks(t *testing.T) {
+	app := NewAppModelWithConfig(nil, nil, nil)
+	app.chatList.SetChats([]models.Chat{{GUID: "sl:acme:C1", DisplayName: "#drift"}})
+
+	model, _ := app.Update(providerEventMsg(provider.Event{
+		Kind:     provider.EventNewMessage,
+		ChatGUID: "sl:acme:C1",
+		Message: models.Message{
+			GUID: "sl:acme:C1:1.0", ChatGUID: "sl:acme:C1", DateCreated: 1000,
+			Text: "*Linear* closed `CORE-12`", Format: models.FormatMrkdwn,
+			Handle: &models.Handle{DisplayName: "Linear"},
+		},
+	}))
+	app = *model.(*AppModel)
+
+	if got := app.chatList.list.items[0].LastMessageText; got != "Linear closed CORE-12" {
+		t.Errorf("preview = %q", got)
+	}
+}

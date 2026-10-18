@@ -155,9 +155,25 @@ form `*Label*\nvalue` are joined onto one line.
 Socket Mode needs the same care as files did: slackevents keeps a message's
 blocks but drops its attachments, so they are read back off the raw envelope.
 
-**Formatting marks are left alone.** `*bold*` renders as typed. The message
-renderer treats text as plain, and a Slack user reads the asterisks as
-emphasis — stripping them would silently drop what someone wrote.
+**Formatting marks stay in the text and are drawn as styles.** Every Slack
+message goes out as `models.FormatMrkdwn`, with `*bold*`, `_italic_`,
+`~strike~`, `` `code` ``, ` ``` ` blocks and `> ` quotes still in `Text`. The
+text is what was sent: the optimistic copy of a send is matched against it,
+and the dedupe compares it. The renderer (`tui/mrkdwn.go`) takes the marks out
+and styles the words, with Slack's boundary rules — a mark opens where a word
+starts and closes where one ends, so `snake_case_names` and `2*3*4` stay as
+written — and never inside a URL, where a dropped underscore would open a
+different page. The chat list's preview line and `/open` read the text with
+the marks taken out.
+
+**Attachments keep their colour bar.** `models.Message.Accents` marks the
+stretches of `Text` that came from attachments, as byte offsets with the
+attachment's colour (`good`, `warning` and `danger` become Slack's hex; no
+colour is the neutral grey). The pane draws `▎` in that colour at the start of
+every row those lines take, so a firing alert reads red and a resolved one
+green at a glance. Offsets are taken after `TextToPlain`, part by part,
+because it changes lengths; the renderer ignores accents that do not fit the
+text rather than cutting it in the wrong places.
 
 **Attachment URLs never reach the system opener.** Slack's `url_private` is a
 login page without the workspace token, so it rides on
@@ -173,8 +189,8 @@ empty, which is what the opener checks.
 - Custom workspace emoji (`:aspace-logo:`) have no Unicode character and stay
   as shortcodes.
 - An app's buttons, menus and inputs only work inside Slack. A button with a
-  URL is shown as that link; the rest are left out. Attachment colour bars,
-  tables and link-unfurl cards (including shared messages) are not drawn.
+  URL is shown as that link; the rest are left out. Tables and link-unfurl
+  cards (including shared messages) are not drawn.
 - Socket Mode only delivers events for channels the app is subscribed to.
 - The optimistic echo reconciles on text, so sending a message whose text Slack
   rewrites (a bare `:shortcode:` the composer did not already expand) shows a

@@ -32,6 +32,9 @@ const (
 	PaletteGray  = lipgloss.Color("243") // #767676, ~4.6:1 on white and on black
 	PaletteDim   = lipgloss.Color("242") // #6c6c6c, one step dimmer for dividers
 	PaletteRed   = lipgloss.Color("196")
+	// PaletteCode is the nick palette's orange, #af5f00. A name and a code
+	// span never share a place on the row, so the hue cannot be misread.
+	PaletteCode = lipgloss.Color("130")
 )
 
 // Brighter variants, used only when the background is *known* to be dark
@@ -43,6 +46,7 @@ const (
 	PaletteBlueBright = lipgloss.Color("39")  // #00afff, ~8.6:1 on black
 	PaletteGrayBright = lipgloss.Color("245") // #8a8a8a, ~6.1:1 on black
 	PaletteDimBright  = lipgloss.Color("243") // #767676, ~4.6:1 on black
+	PaletteCodeBright = lipgloss.Color("214") // #ffaf00
 )
 
 // nickPalette colours sender names so a group conversation can be read by who
@@ -94,6 +98,7 @@ var (
 	ColorWindowDivider              = PaletteDim
 	ColorMuted                      = PaletteGray
 	ColorAccent                     = PaletteBlue
+	ColorCode                       = PaletteCode
 )
 
 // ApplyTheme tunes the palette for a background the user has pinned explicitly
@@ -109,12 +114,14 @@ func ApplyTheme(dark bool) {
 		ColorMuted = PaletteGrayBright
 		ColorWindowPlaceholder = PaletteGrayBright
 		ColorWindowDivider = PaletteDimBright
+		ColorCode = PaletteCodeBright
 		NickPalette = nickPaletteDark
 	} else {
 		ColorAccent = PaletteBlue
 		ColorMuted = PaletteGray
 		ColorWindowPlaceholder = PaletteGray
 		ColorWindowDivider = PaletteDim
+		ColorCode = PaletteCode
 		NickPalette = nickPalette
 	}
 	rebuildStyles()

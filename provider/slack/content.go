@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/oovets/imessage-tui/emojiset"
+	"github.com/oovets/imessage-tui/models"
 	slackapi "github.com/slack-go/slack"
 )
 
@@ -19,13 +20,85 @@ import (
 // attachment — and it is assembled as mrkdwn, so TextToPlain resolves the
 // mentions, links, entities and emoji in all of it exactly as in typed text.
 
-// messageMrkdwn is everything a message shows, as one mrkdwn string.
-func messageMrkdwn(msg *slackapi.Msg) string {
-	parts := []string{messageBody(msg)}
-	for i := range msg.Attachments {
-		parts = append(parts, attachmentMrkdwn(&msg.Attachments[i]))
+// card is one attachment's worth of mrkdwn, and the colour of its bar.
+type card struct {
+	text  string
+	color string
+}
+
+// messageContent is everything a message shows, as display text, with the
+// stretches that came from attachments marked so the renderer can draw their
+// bars. Each part is converted on its own: TextToPlain changes lengths, so the
+// offsets can only be taken once a part is in its final form.
+func messageContent(msg *slackapi.Msg, userNames map[string]string) (string, []models.Accent) {
+	text := strings.TrimSpace(TextToPlain(messageBody(msg), userNames))
+	var accents []models.Accent
+	for _, c := range messageCards(msg) {
+		cardText := strings.TrimSpace(TextToPlain(c.text, userNames))
+		if cardText == "" {
+			continue
+		}
+		if text != "" {
+			text += "\n"
+		}
+		accents = append(accents, models.Accent{Start: len(text), End: len(text) + len(cardText), Color: c.color})
+		text += cardText
 	}
-	return joinNonEmpty(parts, "\n")
+
+	// A reply carries no visual link to its root in a flat message list, so
+	// it gets a marker instead of a thread pane. When the reply is all
+	// attachment, the marker joins the first bar rather than sitting on a
+	// line of its own.
+	if msg.ThreadTimestamp != "" && msg.ThreadTimestamp != msg.Timestamp {
+		text = replyMarker + text
+		for i := range accents {
+			accents[i].Start += len(replyMarker)
+			accents[i].End += len(replyMarker)
+		}
+		if len(accents) > 0 && accents[0].Start == len(replyMarker) {
+			accents[0].Start = 0
+		}
+	}
+	return text, accents
+}
+
+const replyMarker = "↳ "
+
+func messageCards(msg *slackapi.Msg) []card {
+	var cards []card
+	for i := range msg.Attachments {
+		att := &msg.Attachments[i]
+		if text := attachmentMrkdwn(att); text != "" {
+			cards = append(cards, card{text: text, color: attachmentColor(att.Color)})
+		}
+	}
+	return cards
+}
+
+// attachmentColor normalises the colour an app gave its attachment: Slack
+// takes "good", "warning" and "danger" as well as hex, with or without '#'.
+// Anything else gets the neutral bar.
+func attachmentColor(color string) string {
+	color = strings.ToLower(strings.TrimSpace(color))
+	switch color {
+	case "good":
+		return "#2eb886"
+	case "warning":
+		return "#daa038"
+	case "danger":
+		return "#a30200"
+	}
+	hex := strings.TrimPrefix(color, "#")
+	if len(hex) == 3 {
+		hex = string([]byte{hex[0], hex[0], hex[1], hex[1], hex[2], hex[2]})
+	}
+	if len(hex) != 6 {
+		return ""
+	}
+	if _, err := strconv.ParseUint(hex, 16, 32); err != nil {
+		return ""
+	}
+	return "#" + hex
 }
 
 // messageBody chooses between the text and the blocks.

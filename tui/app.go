@@ -2626,7 +2626,7 @@ func (m *AppModel) handleProviderEvent(event provider.Event) (tea.Model, tea.Cmd
 			} else if !msg.IsFromMe {
 				m.chatList.MarkNewMessage(msg.ChatGUID)
 			}
-			preview := strings.TrimSpace(msg.Text)
+			preview := strings.TrimSpace(displayText(msg))
 			if preview == "" && len(msg.Attachments) > 0 {
 				preview = attachmentPreviewFromMessage(msg)
 			}

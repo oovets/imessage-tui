@@ -34,9 +34,10 @@ var (
 // userNames resolves <@U123> mentions that arrive without a label; an id with
 // no known name is still more use as "@U123" than as a raw entity.
 //
-// Formatting marks (*bold*, _italic_, `code`) are deliberately left in place.
-// The renderer treats message text as plain, and a Slack user reads *bold* as
-// emphasis — stripping the markers would silently drop what someone wrote.
+// Formatting marks (*bold*, _italic_, `code`) are deliberately left in place:
+// the message goes out as models.FormatMrkdwn and the renderer draws them as
+// styles. Stripping them here would lose the emphasis everywhere the text is
+// shown without styles, and break matching a sent message against its echo.
 func TextToPlain(text string, userNames map[string]string) string {
 	if text == "" {
 		return ""

@@ -25,6 +25,10 @@ func TestAppendMessageIncrementalMatchesFullRender(t *testing.T) {
 		{GUID: "d", Text: "new day message", DateCreated: base + day, IsFromMe: true},
 		{GUID: "e", Text: "check https://youtu.be/abc out", DateCreated: base + day + 1000, IsFromMe: false, Handle: &models.Handle{Address: "+111", DisplayName: "Alice"}},
 		{GUID: "f", Text: "mine https://example.com/a-path-long-enough-to-wrap-the-pane", DateCreated: base + day + 2000, IsFromMe: true},
+		// Styled text and a bar beside an app's attachment.
+		{GUID: "g", Text: "*bold* intro\n🔴 firing · `disk` on https://example.com/alerts-long-enough", DateCreated: base + day + 3000,
+			Format: models.FormatMrkdwn, Accents: []models.Accent{{Start: 13, End: 13 + len("🔴 firing · `disk` on https://example.com/alerts-long-enough"), Color: "#a30200"}},
+			Handle: &models.Handle{Address: "+111", DisplayName: "Alice"}},
 	}
 
 	// Incremental: append one at a time.

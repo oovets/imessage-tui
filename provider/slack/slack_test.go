@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/oovets/imessage-tui/models"
 	slackapi "github.com/slack-go/slack"
 )
 
@@ -731,5 +732,12 @@ func TestMessagesShowAnAppsAttachment(t *testing.T) {
 	}
 	if msgs[0].Handle == nil || msgs[0].Handle.DisplayName != "Alertmanager" {
 		t.Errorf("handle = %+v", msgs[0].Handle)
+	}
+	// The whole message is the attachment, so its bar covers all of it.
+	if got := msgs[0].Accents; len(got) != 1 || got[0].Start != 0 || got[0].End != len(want) {
+		t.Errorf("accents = %+v, want one over the whole text", got)
+	}
+	if msgs[0].Format != models.FormatMrkdwn {
+		t.Errorf("format = %q, want mrkdwn so the marks are drawn", msgs[0].Format)
 	}
 }

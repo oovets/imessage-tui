@@ -2,6 +2,7 @@ package slack
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	slackapi "github.com/slack-go/slack"
@@ -158,7 +159,7 @@ func TestMessageContent(t *testing.T) {
 			if err := json.Unmarshal([]byte(tt.json), &msg); err != nil {
 				t.Fatalf("fixture: %v", err)
 			}
-			if got := TextToPlain(messageMrkdwn(&msg), names); got != tt.want {
+			if got, _ := messageContent(&msg, names); got != tt.want {
 				t.Errorf("got\n%s\nwant\n%s", got, tt.want)
 			}
 		})
@@ -179,5 +180,85 @@ func TestMrkdwnLinkSurvivesAPipeInTheURL(t *testing.T) {
 	got := TextToPlain(mrkdwnLink("https://x.example/a|b", "label"), nil)
 	if got != "label (https://x.example/a%7Cb)" {
 		t.Errorf("got %q", got)
+	}
+}
+
+// The renderer draws a bar beside each attachment, so the offsets have to land
+// exactly on the attachment's text once mentions and entities are resolved —
+// which changes lengths — and stay right when a reply marker is put in front.
+func TestMessageContentMarksAttachments(t *testing.T) {
+	names := map[string]string{"UANNA": "Anna"}
+	tests := []struct {
+		name  string
+		json  string
+		text  string
+		cards []string
+		color []string
+	}{
+		{
+			name:  "body, then a coloured attachment and a plain one",
+			json:  `{"text": "ping <@UANNA> &amp; co", "attachments": [{"color": "danger", "title": "down &lt;db&gt;"}, {"text": "more"}]}`,
+			text:  "ping @Anna & co\ndown <db>\nmore",
+			cards: []string{"down <db>", "more"},
+			color: []string{"#a30200", ""},
+		},
+		{
+			name:  "attachment only",
+			json:  `{"text": "", "attachments": [{"color": "2EB886", "title": "resolved"}]}`,
+			text:  "resolved",
+			cards: []string{"resolved"},
+			color: []string{"#2eb886"},
+		},
+		{
+			name:  "a reply that is all attachment carries its marker inside the bar",
+			json:  `{"ts": "2.0", "thread_ts": "1.0", "attachments": [{"color": "#abc", "title": "firing"}]}`,
+			text:  "↳ firing",
+			cards: []string{"↳ firing"},
+			color: []string{"#aabbcc"},
+		},
+		{
+			name:  "a reply with a body keeps the marker on the body",
+			json:  `{"ts": "2.0", "thread_ts": "1.0", "text": "se här", "attachments": [{"title": "firing"}]}`,
+			text:  "↳ se här\nfiring",
+			cards: []string{"firing"},
+			color: []string{""},
+		},
+		{
+			name: "an attachment with nothing to show gets no bar",
+			json: `{"text": "hej", "attachments": [{"color": "good"}, {"from_url": "https://x.example", "title": "unfurl"}]}`,
+			text: "hej",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var msg slackapi.Msg
+			if err := json.Unmarshal([]byte(tt.json), &msg); err != nil {
+				t.Fatalf("fixture: %v", err)
+			}
+			text, accents := messageContent(&msg, names)
+			if text != tt.text {
+				t.Errorf("text = %q, want %q", text, tt.text)
+			}
+			var cards, colors []string
+			for _, a := range accents {
+				cards = append(cards, text[a.Start:a.End])
+				colors = append(colors, a.Color)
+			}
+			if !reflect.DeepEqual(cards, tt.cards) || !reflect.DeepEqual(colors, tt.color) {
+				t.Errorf("accents cover %q in %q, want %q in %q", cards, colors, tt.cards, tt.color)
+			}
+		})
+	}
+}
+
+func TestAttachmentColor(t *testing.T) {
+	for in, want := range map[string]string{
+		"good": "#2eb886", "warning": "#daa038", "danger": "#a30200",
+		"a30200": "#a30200", "#95A2B3": "#95a2b3", "#fff": "#ffffff",
+		"": "", "chartreuse": "", "#12345g": "", "#1234": "",
+	} {
+		if got := attachmentColor(in); got != want {
+			t.Errorf("attachmentColor(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

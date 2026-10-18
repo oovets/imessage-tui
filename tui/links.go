@@ -81,7 +81,7 @@ func messageLinks(msg models.Message) []string {
 		seen[link] = struct{}{}
 		links = append(links, link)
 	}
-	for _, link := range textLinks(stripSupportedMediaLinks(msg.Text, previewLinks)) {
+	for _, link := range textLinks(stripSupportedMediaLinks(displayText(msg), previewLinks)) {
 		add(link)
 	}
 	for _, link := range previewLinks {

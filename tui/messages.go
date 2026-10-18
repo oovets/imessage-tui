@@ -465,7 +465,16 @@ func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg model
 		previewLinks = append(previewLinks, preview.URL)
 	}
 
-	bodyLines := splitNonEmptyLines(stripSupportedMediaLinks(msg.Text, previewLinks))
+	var (
+		bodyLines    []string
+		bodyLineBars []lipgloss.TerminalColor
+	)
+	for _, segment := range messageSegments(msg) {
+		for _, line := range textLines(stripSupportedMediaLinks(segment.text, previewLinks), msg.Format) {
+			bodyLines = append(bodyLines, line)
+			bodyLineBars = append(bodyLineBars, segment.bar)
+		}
+	}
 	bodyLineLinks := make([]string, len(bodyLines))
 	if attLabel := attachmentLabel(msg, len(previews) > 0); attLabel != "" {
 		if len(bodyLines) == 0 {
@@ -511,17 +520,18 @@ func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg model
 		reopen := styleOpenSequence(msgStyle)
 		wroteLine := false
 		for li, rawLine := range fullLines {
-			lines := messageWrappedLines(rawLine, wrapWidth, fullLineLinks[li] == "")
+			bar := barAt(bodyLineBars, li)
+			lines := messageWrappedLines(rawLine, wrapWidth-barWidth(bar), fullLineLinks[li] == "")
 			spans := lineTextLinkSpans(rawLine, lines, fullLineLinks[li])
 			for vi, line := range lines {
 				if wroteLine {
 					sb.WriteString("\n")
 				}
-				content := strings.TrimRight(line, " ")
+				content := renderBar(bar) + strings.TrimRight(line, " ")
 				padLen := max(0, wrapWidth-lipgloss.Width(content))
 				sb.WriteString(strings.Repeat(" ", padLen))
 				sb.WriteString(msgStyle.Render(reopenAfterResets(content, reopen)))
-				m.appendLineIndex(i+1, fullLineLinks[li], shiftSpans(spansAt(spans, vi), padLen))
+				m.appendLineIndex(i+1, fullLineLinks[li], shiftSpans(spansAt(spans, vi), padLen+barWidth(bar)))
 				wroteLine = true
 			}
 		}
@@ -534,14 +544,15 @@ func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg model
 		reopen := styleOpenSequence(style)
 		wroteLine := false
 		for li, rawLine := range fullLines {
-			lines := messageWrappedLines(rawLine, wrapWidth, fullLineLinks[li] == "")
+			bar := barAt(bodyLineBars, li)
+			lines := messageWrappedLines(rawLine, wrapWidth-barWidth(bar), fullLineLinks[li] == "")
 			spans := lineTextLinkSpans(rawLine, lines, fullLineLinks[li])
 			for vi, line := range lines {
 				if wroteLine {
 					sb.WriteString("\n")
 				}
-				sb.WriteString(style.Width(wrapWidth).Render(reopenAfterResets(line, reopen)))
-				m.appendLineIndex(i+1, fullLineLinks[li], spansAt(spans, vi))
+				sb.WriteString(style.Width(wrapWidth).Render(reopenAfterResets(renderBar(bar)+line, reopen)))
+				m.appendLineIndex(i+1, fullLineLinks[li], shiftSpans(spansAt(spans, vi), barWidth(bar)))
 				wroteLine = true
 			}
 		}
@@ -574,6 +585,69 @@ func spansAt(spans [][]linkSpan, i int) []linkSpan {
 		return spans[i]
 	}
 	return nil
+}
+
+// segment is a stretch of a message's text, with the bar it is drawn beside,
+// or nil for none.
+type segment struct {
+	text string
+	bar  lipgloss.TerminalColor
+}
+
+// messageSegments splits a message's text at its accents. Accents that do not
+// fit the text are not trusted: the whole text is drawn without bars rather
+// than cut in the wrong places.
+func messageSegments(msg models.Message) []segment {
+	var out []segment
+	pos := 0
+	for _, accent := range msg.Accents {
+		if accent.Start < pos || accent.End <= accent.Start || accent.End > len(msg.Text) {
+			return []segment{{text: msg.Text}}
+		}
+		if accent.Start > pos {
+			out = append(out, segment{text: msg.Text[pos:accent.Start]})
+		}
+		out = append(out, segment{text: msg.Text[accent.Start:accent.End], bar: accentColor(accent.Color)})
+		pos = accent.End
+	}
+	if pos < len(msg.Text) || len(out) == 0 {
+		out = append(out, segment{text: msg.Text[pos:]})
+	}
+	return out
+}
+
+// accentColor is the bar's colour: the app's own, or the muted grey where
+// Slack would draw its neutral one.
+func accentColor(color string) lipgloss.TerminalColor {
+	if color == "" {
+		return ColorMuted
+	}
+	return lipgloss.Color(color)
+}
+
+const accentBar = "▎ "
+
+func barAt(bars []lipgloss.TerminalColor, i int) lipgloss.TerminalColor {
+	if i < len(bars) {
+		return bars[i]
+	}
+	return nil
+}
+
+func barWidth(bar lipgloss.TerminalColor) int {
+	if bar == nil {
+		return 0
+	}
+	return lipgloss.Width(accentBar)
+}
+
+// renderBar draws the bar at the start of a line, on every row the line
+// wraps onto, so a long alert reads as one block.
+func renderBar(bar lipgloss.TerminalColor) string {
+	if bar == nil {
+		return ""
+	}
+	return lipgloss.NewStyle().Foreground(bar).Render(strings.TrimRight(accentBar, " ")) + " "
 }
 
 func attachmentLabel(msg models.Message, hideGeneric bool) string {

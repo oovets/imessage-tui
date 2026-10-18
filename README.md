@@ -183,7 +183,10 @@ max_previews_per_message: 2
     files, opened with /img #N or a click
     reactions, mentions resolved to names, emoji shortcodes
     messages from apps -- alertmanager, linear, ci bots: their attachments
-    and block kit layouts are drawn as text, title, body, fields and links
+    and block kit layouts are drawn as text, title, body, fields and links,
+    each attachment with its colour bar beside it
+    *bold* _italic_ ~strike~ `code`, ```code blocks``` and > quotes, drawn
+    as styles with the marks taken out
     realtime over socket mode, several workspaces at once
 
   what does not
@@ -197,7 +200,7 @@ max_previews_per_message: 2
     your membership, the same thing slack's own sidebar shows
     an app's buttons, menus and inputs, which only do something inside
     slack. a button that opens a url shows as that link; the rest are left
-    out. attachment colour bars and slack's link-unfurl cards are not drawn
+    out. tables and slack's link-unfurl cards are not drawn
 
   ordering
     imessage first, then each workspace: people and group chats before
