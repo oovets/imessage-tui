@@ -701,6 +701,7 @@ func (m *SimpleListModel) clampCursor() {
 	m.ensureCursorVisible()
 }
 
+// linesPerItem is the most lines one chat can take.
 func (m *SimpleListModel) linesPerItem() int {
 	if m.showPreview {
 		return 2
@@ -718,11 +719,18 @@ func (m *SimpleListModel) bodyLines() int {
 	return m.height - reserved
 }
 
+// rowLines is how many lines a row takes. A chat's preview goes on a second
+// line, and a chat with nothing to preview — every Slack conversation, which
+// arrives without its last message — takes one line rather than leaving that
+// second line blank.
 func (m *SimpleListModel) rowLines(row listRow) int {
-	if row.item < 0 {
+	if row.item < 0 || !m.showPreview || row.item >= len(m.filteredIndices) {
 		return 1
 	}
-	return m.linesPerItem()
+	if previewText(m.items[m.filteredIndices[row.item]]) == "" {
+		return 1
+	}
+	return 2
 }
 
 func (m *SimpleListModel) cursorRow() int {
@@ -1159,16 +1167,13 @@ func (m SimpleListModel) View() string {
 		b.WriteString(line1)
 		b.WriteString("\n")
 
-		if m.showPreview {
-			preview := previewText(chat)
-			if preview != "" {
-				preview = truncatePreview(preview, nameWidth)
-				previewLine := m.previewStyle.Render("   " + preview)
-				if fi == m.cursor {
-					previewLine = m.selectedStyle.Render("   " + preview)
-				}
-				b.WriteString(previewLine)
+		if preview := previewText(chat); m.showPreview && preview != "" {
+			preview = truncatePreview(preview, nameWidth)
+			previewLine := m.previewStyle.Render("   " + preview)
+			if fi == m.cursor {
+				previewLine = m.selectedStyle.Render("   " + preview)
 			}
+			b.WriteString(previewLine)
 			b.WriteString("\n")
 		}
 	}

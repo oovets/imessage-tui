@@ -229,6 +229,7 @@ func NewAppModelWithConfig(backends *provider.Registry, stream provider.Stream, 
 	wm.SetShowTimestamps(ui.ShowTimestamps)
 	wm.SetShowLineNumbers(ui.ShowLineNumbers)
 	wm.SetShowSenderNames(ui.ShowSenderNames)
+	wm.SetSenderNameChoices(chatOverrides.SenderNames)
 	wm.SetShowPaneDividers(ui.ShowPaneDividers)
 	app := AppModel{
 		chatList:              NewChatListModel(),
@@ -782,13 +783,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "ctrl+b":
-			// Sender names for the focused pane only. Panes hold different
-			// kinds of conversation — a Slack channel needs names, a
-			// two-person iMessage thread does not — so the toggle answers for
-			// the one you are looking at. The choice lasts until that pane
-			// changes conversation.
+			// Sender names for the chat in the focused pane. Chats differ —
+			// a Slack channel needs names, a two-person thread does not — so
+			// the toggle answers for the one you are looking at, and the
+			// answer is kept with the chat's other overrides.
 			show := m.windowManager.ToggleFocusedSenderNames()
-			return m, showToastCmd(senderNameToast(show, "this pane"), 2*time.Second)
+			m.saveSenderNameChoices()
+			return m, showToastCmd(senderNameToast(show, "this chat"), 2*time.Second)
 
 		case "alt+m", "ctrl+m":
 			// The same toggle for every pane, and the default new panes start
@@ -797,7 +798,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showSenderNames = !m.showSenderNames
 			m.windowManager.SetShowSenderNames(m.showSenderNames)
 			m.saveUIState()
-			return m, showToastCmd(senderNameToast(m.showSenderNames, "all panes"), 2*time.Second)
+			toast := "Sender names in every chat"
+			if !m.showSenderNames {
+				toast = "Sender names in group chats only"
+			}
+			return m, showToastCmd(toast, 2*time.Second)
 
 		case "ctrl+e":
 			// Toggle pane dividers between split windows.
@@ -1159,6 +1164,8 @@ func (m *AppModel) removeChatLocalState(chatGUID string) {
 	delete(m.pendingOutgoing, chatGUID)
 	delete(m.readMarkInFlight, chatGUID)
 	delete(m.chatOverrides.Aliases, chatGUID)
+	m.windowManager.ForgetSenderNameChoice(chatGUID)
+	m.chatOverrides.SenderNames = m.windowManager.SenderNameChoices()
 	if m.chatList.IsPinned(chatGUID) {
 		m.chatList.TogglePin(chatGUID)
 	}
@@ -1184,6 +1191,13 @@ func (m *AppModel) togglePin(chat *models.Chat) tea.Cmd {
 func (m *AppModel) savePins() {
 	m.chatOverrides.Pinned = m.chatList.Pinned()
 	m.chatOverrides.Ignored = m.chatList.Ignored()
+	_ = config.SaveChatOverrides(m.chatOverrides)
+}
+
+// saveSenderNameChoices writes the per-chat sender-name choices beside the
+// aliases and pins.
+func (m *AppModel) saveSenderNameChoices() {
+	m.chatOverrides.SenderNames = m.windowManager.SenderNameChoices()
 	_ = config.SaveChatOverrides(m.chatOverrides)
 }
 
@@ -1473,7 +1487,7 @@ func isTornSequenceStart(msg tea.KeyMsg) bool {
 }
 
 // senderNameToast says what a sender-name toggle just did. Without it the
-// per-pane and all-panes bindings look identical from the outside.
+// per-chat and every-chat bindings look identical from the outside.
 func senderNameToast(show bool, scope string) string {
 	if show {
 		return "Sender names on (" + scope + ")"
@@ -1574,7 +1588,7 @@ func (m *AppModel) selectChat(chat *models.Chat, window *ChatWindow) tea.Cmd {
 		return nil
 	}
 
-	window.SetChat(chat)
+	m.windowManager.ShowChat(window, chat)
 	m.chatList.ClearNewMessage(chat.GUID)
 	m.saveLayoutState()
 
@@ -1838,7 +1852,7 @@ func (m *AppModel) restoreLayoutFromState(chats []models.Chat) bool {
 		if !ok {
 			continue
 		}
-		window.SetChat(chat)
+		wm.ShowChat(window, chat)
 		if cached := wm.GetCachedMessages(chatGUID); len(cached) > 0 {
 			window.Messages.SetMessages(cached)
 		}

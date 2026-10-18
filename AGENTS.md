@@ -70,11 +70,17 @@ in `reopenAfterResets` (in `tui/messages.go`) before rendering it with an
 enclosing style. Symptom when you forget: the color is correct on wrapped
 continuation lines, which carry no prefix, and wrong on the first line.
 
-**Sender names answer per pane, not per app.** `ctrl+b` pins the focused pane,
-`alt+m` sets every pane and the default new ones start from. A pane showing more
-than one distinct sender turns names on by itself unless pinned, which is what
-makes a Slack channel readable without touching the setting while a two-person
-thread stays clean. The pin clears when the pane changes conversation.
+**Sender names answer per chat, not per app.** By default they show only in
+group chats: a chat whose participants say it is a group (iMessage), or a pane
+that has seen more than one distinct incoming sender (Slack channels, Telegram
+groups, whose chats carry no participants). `alt+m` turns them on in one-to-one
+chats too. `ctrl+b` pins the focused chat either way; the choice is kept per
+chat GUID in `chat_overrides.json` (`WindowManager.senderNameChoices`), applied
+by `WindowManager.ShowChat` whenever the chat is put in a pane, and reaches
+every pane showing that chat. A toggle that lands back on what the chat would
+show anyway deletes the choice rather than storing it, so the saved choices are
+exactly the exceptions and everything else keeps following `alt+m`. Put a chat
+in a pane with `ShowChat`, not `ChatWindow.SetChat`, or its choice is skipped.
 
 **Sender colours are derived, not assigned.** A name's colour is an FNV hash of
 the lowercased name into `NickPalette`, so the same person keeps the same colour
@@ -199,6 +205,12 @@ ever handed to the system opener (`isOpenableLink`, checked again in
 `openURLCmd`): message text is written by other people.
 
 ## Tests
+
+`tui/main_test.go` points `HOME` at a temporary directory for the whole
+package: ordinary key presses and clicks save layout, UI state and chat
+overrides under `~/.config/imessage-tui`, and before it a test run wrote over
+the real files of whoever ran it. A test that reads back what it saved, or must
+start from a first run, sets its own `t.Setenv("HOME", t.TempDir())`.
 
 Table-driven where there is more than one case. Renderer tests must force a
 color profile, since `go test` has no TTY and Lipgloss otherwise strips all

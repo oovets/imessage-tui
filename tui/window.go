@@ -69,10 +69,12 @@ func (w *ChatWindow) SetChat(chat *models.Chat) {
 		chatCopy := *chat
 		w.Chat = &chatCopy
 		w.Messages.SetChatName(chatCopy.GetDisplayName())
+		w.Messages.SetGroupChat(chatCopy.IsGroup())
 		w.Messages.SetMessages(nil) // Clear stale messages before fresh load
 	} else {
 		w.Chat = nil
 		w.Messages.SetChatName("")
+		w.Messages.SetGroupChat(false)
 		w.Messages.SetMessages(nil)
 	}
 }

@@ -58,6 +58,7 @@ backend owns a conversation is never something you have to think about.
     tapbacks, slack and telegram reactions render as compact emoji on the
     message
     thread replies, quoted replies, image attachments, link previews
+    urls open with a click on the url itself, or with /open
 
   layout
     up to 8 panes, split horizontally or vertically, each with its own chat
@@ -66,8 +67,8 @@ backend owns a conversation is never something you have to think about.
 
   reading
     sender names get a stable colour per person, so a busy channel can be
-    read by who is talking. shown automatically wherever more than one
-    person talks, and toggleable per pane
+    read by who is talking. shown in group chats and hidden in one-to-one
+    chats by default; ctrl+b flips a single chat and is remembered
     optional timestamps, line numbers, sender names, pane dividers, previews
 
   connection
@@ -84,8 +85,8 @@ backend owns a conversation is never something you have to think about.
 
   read from env vars and ~/.config/imessage-tui/imessage.yaml; env wins.
   credentials prefer the os keyring and fall back to the config file.
-  ui state, layout, message cache and chat aliases live in
-  ~/.config/imessage-tui/
+  ui state, layout, message cache and per-chat overrides -- aliases, pins,
+  ignores, sender-name choices -- live in ~/.config/imessage-tui/
 
   setting                   env var                     default   what it does
   ----------------------------------------------------------------------------
@@ -300,8 +301,8 @@ max_previews_per_message: 2
     ctrl+n                 line numbers
     ctrl+e                 pane dividers
     ctrl+p                 chat previews in the list
-    ctrl+b                 sender names, focused pane only
-    alt+m                  sender names, every pane and new ones
+    ctrl+b                 sender names for this chat, remembered
+    alt+m                  sender names in one-to-one chats too
 
   chat actions
     d, then D              delete the selected chat, esc cancels
@@ -359,6 +360,11 @@ max_previews_per_message: 2
   moves to the top. filter and grouping combine with / search, and both are
   remembered across restarts.
 
+  ctrl+p shows the last message under each chat. a chat with nothing to show
+  -- every slack conversation, since slack's list carries no last message --
+  stays on one line rather than leaving an empty one; with previews off every
+  chat is one line. the choice is remembered.
+
   p pins the selected chat to a Pinned section at the top of the list, in
   both sort orders, and ctrl+o does the same from a pane. pinned chats keep
   the order you give them -- new pins go last, K and J move one -- rather than
@@ -397,6 +403,22 @@ max_previews_per_message: 2
     survive and urls keep their "://". a rewrite is skipped while the cursor
     sits behind the end of the text, so editing earlier in a draft never
     moves you to the end.
+
+  sender names
+    shown in group chats, hidden in one-to-one chats. a group is a chat whose
+    participants say so (imessage), or a pane where more than one other
+    person has written (slack channels, telegram groups). alt+m shows names
+    in one-to-one chats too.
+    ctrl+b flips the chat in the focused pane, in every pane showing it, and
+    is remembered in chat_overrides.json. flipping it back to what the chat
+    would show anyway forgets the choice, so it follows alt+m again.
+
+  links
+    a url in a message opens in the browser when you click the url itself --
+    clicking elsewhere on the message only focuses the pane -- including a
+    long url broken across rows. a preview line opens from anywhere on it.
+    /open opens the newest link in the pane, /open #N [K] the K-th on row N.
+    only http and https links are ever opened.
 
   link previews
     supported media urls render a compact preview line
@@ -454,6 +476,9 @@ max_previews_per_message: 2
     gofmt -l .
     go vet ./...
     go build ./...
+
+    the tui tests run with a throwaway HOME, so they never touch the layout,
+    ui state or chat overrides in your own ~/.config/imessage-tui.
 
   docs
     the root *.md files are the source of truth. scripts/docs.sh stages them

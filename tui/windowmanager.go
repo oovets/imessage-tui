@@ -31,6 +31,10 @@ type WindowManager struct {
 	showSenderNames  bool
 	showPaneDividers bool
 
+	// senderNameChoices are the chats whose sender names were toggled by
+	// hand, by GUID. They outlive the panes, which is why they live here.
+	senderNameChoices map[string]bool
+
 	// Message cache per chat GUID
 	messageCache     map[string][]models.Message
 	messageCacheKeys map[string]map[string]struct{}
@@ -538,16 +542,73 @@ func (wm *WindowManager) SetShowSenderNames(show bool) {
 	}
 }
 
-// ToggleFocusedSenderNames flips sender names for the focused pane only, and
-// returns what that pane now does. The choice sticks to the pane until it
-// changes conversation.
+// SetSenderNameChoices loads the per-chat sender-name choices saved from an
+// earlier session. They apply as each chat is shown.
+func (wm *WindowManager) SetSenderNameChoices(choices map[string]bool) {
+	wm.senderNameChoices = make(map[string]bool, len(choices))
+	for guid, show := range choices {
+		wm.senderNameChoices[guid] = show
+	}
+}
+
+// SenderNameChoices returns the per-chat choices, for saving.
+func (wm *WindowManager) SenderNameChoices() map[string]bool {
+	out := make(map[string]bool, len(wm.senderNameChoices))
+	for guid, show := range wm.senderNameChoices {
+		out[guid] = show
+	}
+	return out
+}
+
+// ForgetSenderNameChoice drops a chat's choice, for a deleted chat.
+func (wm *WindowManager) ForgetSenderNameChoice(chatGUID string) {
+	delete(wm.senderNameChoices, chatGUID)
+}
+
+// ShowChat puts chat in window, with the sender-name choice made for that
+// chat if there is one.
+func (wm *WindowManager) ShowChat(window *ChatWindow, chat *models.Chat) {
+	window.SetChat(chat)
+	if chat == nil {
+		return
+	}
+	if show, ok := wm.senderNameChoices[chat.GUID]; ok {
+		window.Messages.PinShowSenderNames(show)
+	}
+}
+
+// ToggleFocusedSenderNames flips sender names for the chat in the focused
+// pane, and returns what it now does. The choice belongs to the chat, so
+// every pane showing it follows, and it is remembered across restarts. A
+// toggle that lands back on what the chat would show anyway forgets the
+// choice instead, so the chat follows the default again.
 func (wm *WindowManager) ToggleFocusedSenderNames() bool {
 	window, ok := wm.windows[wm.focusedWindow]
 	if !ok {
 		return wm.showSenderNames
 	}
 	show := !window.Messages.ShowingSenderNames()
-	window.Messages.PinShowSenderNames(show)
+	if window.Chat == nil {
+		window.Messages.PinShowSenderNames(show)
+		return show
+	}
+	if wm.senderNameChoices == nil {
+		wm.senderNameChoices = make(map[string]bool)
+	}
+	chatGUID := window.Chat.GUID
+	auto := show == window.Messages.autoSenderNames()
+	if auto {
+		delete(wm.senderNameChoices, chatGUID)
+	} else {
+		wm.senderNameChoices[chatGUID] = show
+	}
+	for _, w := range wm.WindowsShowingChat(chatGUID) {
+		if auto {
+			w.Messages.UnpinShowSenderNames()
+		} else {
+			w.Messages.PinShowSenderNames(show)
+		}
+	}
 	return show
 }
 

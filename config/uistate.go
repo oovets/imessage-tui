@@ -49,7 +49,7 @@ func LoadUIState() UIState {
 		ShowTimestamps:   true,
 		ShowLineNumbers:  true,
 		ShowChatList:     true,
-		ShowSenderNames:  true,
+		ShowSenderNames:  false, // names in group chats only
 		ShowPaneDividers: true,
 		ShowChatPreview:  true,
 		ShowChatListTime: true,

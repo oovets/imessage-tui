@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/oovets/imessage-tui/models"
 )
@@ -134,5 +135,78 @@ func TestChatListLinesStayInsideWidthWithEmoji(t *testing.T) {
 			t.Errorf("chat list line %d is %d columns wide, want at most %d: %q",
 				i, w, width, line)
 		}
+	}
+}
+
+// A chat with nothing to preview takes one line, not a name and a blank line:
+// Slack conversations arrive without their last message, so with previews on
+// every one of them used to leave an empty row under it.
+func TestChatListLeavesNoBlankRowForChatsWithoutPreview(t *testing.T) {
+	chats := []models.Chat{
+		{GUID: "a", DisplayName: "Alice", LastMessageText: "hej", LastMessageTime: 6000},
+		{GUID: "b", DisplayName: "general", LastMessageTime: 5000},
+		{GUID: "c", DisplayName: "random", LastMessageTime: 4000},
+		{GUID: "d", DisplayName: "Bob", LastMessageText: "ses", LastMessageTime: 3000},
+		{GUID: "e", DisplayName: "design", LastMessageTime: 2000},
+		{GUID: "f", DisplayName: "ops", LastMessageTime: 1000},
+	}
+	m := NewSimpleListModel()
+	m.SetShowPreview(true)
+	m.SetSize(30, 20)
+	m.SetItems(chats)
+
+	lines := strings.Split(strings.TrimRight(stripANSI(m.View()), "\n"), "\n")
+	// Title, then each chat on one line plus a line for each preview.
+	if want := 1 + len(chats) + 2; len(lines) != want {
+		t.Fatalf("%d lines, want %d:\n%s", len(lines), want, strings.Join(lines, "\n"))
+	}
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			t.Fatalf("blank line %d:\n%s", i, strings.Join(lines, "\n"))
+		}
+	}
+
+	// With rows of two heights, a click still selects the chat drawn on the
+	// line clicked, and a click on a preview line selects the chat above it.
+	owner := ""
+	for y, line := range lines[1:] {
+		for _, chat := range chats {
+			if strings.Contains(line, chat.DisplayName) {
+				owner = chat.GUID
+			}
+		}
+		m.ClickAt(3, y+1)
+		if got := m.SelectedItem().GUID; got != owner {
+			t.Errorf("click on line %d %q selected %s, want %s", y+1, line, got, owner)
+		}
+	}
+}
+
+// Scrolling budgets each row by its own height, so moving down a list taller
+// than the pane keeps the cursor's chat on screen.
+func TestChatListScrollKeepsCursorVisibleWithMixedRowHeights(t *testing.T) {
+	var chats []models.Chat
+	for i := 0; i < 12; i++ {
+		chat := models.Chat{GUID: string(rune('a' + i)), DisplayName: "chat-" + string(rune('a'+i)), LastMessageTime: int64(100 - i)}
+		if i%3 == 0 {
+			chat.LastMessageText = "preview"
+		}
+		chats = append(chats, chat)
+	}
+	m := NewSimpleListModel()
+	m.SetShowPreview(true)
+	m.SetSize(30, 6)
+	m.SetItems(chats)
+
+	for i := 0; i < len(chats); i++ {
+		name := m.SelectedItem().DisplayName
+		view := stripANSI(m.View())
+		if !strings.Contains(view, name) {
+			t.Fatalf("cursor on %s, which is off screen:\n%s", name, view)
+		}
+		if n := strings.Count(view, "\n"); n > 6 {
+			t.Fatalf("view is %d lines in a 6-line pane:\n%s", n, view)
+		}
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	}
 }

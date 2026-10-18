@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/oovets/imessage-tui/config"
 	"github.com/oovets/imessage-tui/models"
 )
 
@@ -154,5 +156,142 @@ func TestAllPanesToggleStillWorks(t *testing.T) {
 	}
 	if got := app.windowManager.FocusedWindow().Messages.ShowingSenderNames(); got != app.showSenderNames {
 		t.Errorf("pane shows %v, app-wide setting is %v", got, app.showSenderNames)
+	}
+}
+
+// freshApp starts the app the way a first run does: no saved UI state, no
+// overrides. TestMain gives the package an empty HOME; each test gets its own.
+func freshApp(t *testing.T, chats ...models.Chat) AppModel {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	app := NewAppModelWithConfig(nil, nil, nil)
+	app.chatList.SetChats(chats)
+	model, _ := app.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	app = model.(AppModel)
+	app.focused = focusWindow
+	return app
+}
+
+func showIn(app *AppModel, window *ChatWindow, chat models.Chat, senders ...string) {
+	app.selectChat(&chat, window)
+	window.Messages.SetMessages(messagesFrom(senders...))
+}
+
+var (
+	anna   = models.Chat{GUID: "chat-anna", Participants: []models.Handle{{DisplayName: "Anna"}}}
+	bo     = models.Chat{GUID: "chat-bo", Participants: []models.Handle{{DisplayName: "Bo"}}}
+	family = models.Chat{GUID: "chat-family", Participants: []models.Handle{{DisplayName: "Anna"}, {DisplayName: "Bo"}}}
+)
+
+// Names are shown in group chats and nowhere else unless asked for. A group
+// shows them even when only one other person has written in what is loaded,
+// because the chat itself says it is a group.
+func TestNamesShowInGroupChatsOnlyByDefault(t *testing.T) {
+	app := freshApp(t, anna, family)
+	if app.showSenderNames {
+		t.Fatal("a first run starts with names in every chat")
+	}
+	window := app.windowManager.FocusedWindow()
+
+	showIn(&app, window, anna, "Anna", "Anna")
+	if window.Messages.ShowingSenderNames() {
+		t.Error("a one-to-one chat shows names")
+	}
+	showIn(&app, window, family, "Anna")
+	if !window.Messages.ShowingSenderNames() {
+		t.Error("a group chat hides names")
+	}
+	if view := stripANSI(window.Messages.View()); !strings.Contains(view, "Anna:") {
+		t.Errorf("names missing from the group's view: %q", view)
+	}
+}
+
+// ctrl+b answers for the chat, not the pane: the choice comes back whenever the
+// chat is shown again, in any pane, and after a restart.
+func TestSenderNameChoiceIsRememberedPerChat(t *testing.T) {
+	app := freshApp(t, anna, bo)
+	window := app.windowManager.FocusedWindow()
+
+	showIn(&app, window, anna, "Anna")
+	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	app = model.(AppModel)
+	if !window.Messages.ShowingSenderNames() {
+		t.Fatal("ctrl+b did not turn names on")
+	}
+
+	showIn(&app, window, bo, "Bo")
+	if window.Messages.ShowingSenderNames() {
+		t.Error("the choice for one chat carried into another")
+	}
+	showIn(&app, window, anna, "Anna")
+	if !window.Messages.ShowingSenderNames() {
+		t.Error("the chat lost its choice when shown again")
+	}
+
+	if got := config.LoadChatOverrides().SenderNames; !reflect.DeepEqual(got, map[string]bool{anna.GUID: true}) {
+		t.Errorf("saved choices = %v", got)
+	}
+
+	// A restart: same HOME, new app.
+	restarted := NewAppModelWithConfig(nil, nil, nil)
+	restarted.chatList.SetChats([]models.Chat{anna, bo})
+	window = restarted.windowManager.FocusedWindow()
+	showIn(&restarted, window, anna, "Anna")
+	if !window.Messages.ShowingSenderNames() {
+		t.Error("the choice did not survive a restart")
+	}
+}
+
+// Toggling back to what the chat shows anyway forgets the choice, so the chat
+// follows alt+m again instead of being stuck on an answer that matches it.
+func TestTogglingBackToTheDefaultForgetsTheChoice(t *testing.T) {
+	app := freshApp(t, anna)
+	window := app.windowManager.FocusedWindow()
+	showIn(&app, window, anna, "Anna")
+
+	for range 2 {
+		model, _ := app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+		app = model.(AppModel)
+	}
+	if got := config.LoadChatOverrides().SenderNames; len(got) != 0 {
+		t.Errorf("saved choices = %v, want none", got)
+	}
+
+	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
+	app = model.(AppModel)
+	if !window.Messages.ShowingSenderNames() {
+		t.Error("the chat no longer follows alt+m")
+	}
+}
+
+// Two panes on the same chat show the same thing.
+func TestSenderNameChoiceReachesEveryPaneOnTheChat(t *testing.T) {
+	app := freshApp(t, anna)
+	first := app.windowManager.FocusedWindow()
+	showIn(&app, first, anna, "Anna")
+	if err := app.windowManager.SplitWindow(SplitHorizontal); err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	second := app.windowManager.FocusedWindow()
+	showIn(&app, second, anna, "Anna")
+
+	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	app = model.(AppModel)
+	if !first.Messages.ShowingSenderNames() || !second.Messages.ShowingSenderNames() {
+		t.Errorf("panes disagree: first %v, second %v", first.Messages.ShowingSenderNames(), second.Messages.ShowingSenderNames())
+	}
+}
+
+// A deleted chat takes its choice with it.
+func TestDeletingAChatForgetsItsChoice(t *testing.T) {
+	app := freshApp(t, anna)
+	window := app.windowManager.FocusedWindow()
+	showIn(&app, window, anna, "Anna")
+	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	app = model.(AppModel)
+
+	app.removeChatLocalState(anna.GUID)
+	if got := config.LoadChatOverrides().SenderNames; len(got) != 0 {
+		t.Errorf("saved choices = %v after deleting the chat", got)
 	}
 }

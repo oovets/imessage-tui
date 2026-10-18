@@ -36,6 +36,7 @@ type MessagesModel struct {
 	// in a group it is the fastest way to see who is talking.
 	senders       map[string]struct{}
 	colorSenders  bool
+	groupChat     bool // the chat says it has several people; see SetGroupChat
 	stickToBottom bool
 	loading       bool
 	showHeader    bool
@@ -226,10 +227,26 @@ func (m *MessagesModel) SetShowSenderNames(show bool) {
 	if m.senderNamesPinned {
 		return
 	}
-	// A conversation with several people talking keeps its names either way:
-	// that is the case the setting exists for, and it is what makes a Slack
-	// channel readable without turning names back on by hand every time.
-	m.applySenderNames(show || m.colorSenders)
+	m.applySenderNames(m.autoSenderNames())
+}
+
+// SetGroupChat records whether the chat on show is a group by its own
+// account, which turns names on unless the pane is pinned.
+func (m *MessagesModel) SetGroupChat(group bool) {
+	m.groupChat = group
+	if m.senderNamesPinned {
+		return
+	}
+	m.applySenderNames(m.autoSenderNames())
+}
+
+// autoSenderNames is what the pane shows when nobody has chosen for it: the
+// app-wide default, or names anyway in a group. A conversation with several
+// people talking keeps its names either way: that is the case the setting
+// exists for, and it is what makes a Slack channel readable without turning
+// names on by hand.
+func (m *MessagesModel) autoSenderNames() bool {
+	return m.defaultSenderNames || m.groupChat || m.colorSenders
 }
 
 // PinShowSenderNames records an explicit choice for this pane, which then wins
@@ -237,6 +254,13 @@ func (m *MessagesModel) SetShowSenderNames(show bool) {
 func (m *MessagesModel) PinShowSenderNames(show bool) {
 	m.senderNamesPinned = true
 	m.applySenderNames(show)
+}
+
+// UnpinShowSenderNames drops the pane's own choice and goes back to the
+// default.
+func (m *MessagesModel) UnpinShowSenderNames() {
+	m.senderNamesPinned = false
+	m.applySenderNames(m.autoSenderNames())
 }
 
 // ShowingSenderNames reports what this pane currently does.
@@ -665,7 +689,7 @@ func (m *MessagesModel) rebuildSenders() {
 	if !m.senderNamesPinned {
 		// Back to the default before counting, so a pane that used to hold a
 		// group chat does not keep its names after loading a two-person one.
-		m.showSenderNames = m.defaultSenderNames
+		m.showSenderNames = m.defaultSenderNames || m.groupChat
 	}
 	for _, msg := range m.messages {
 		m.noteSender(msg)
