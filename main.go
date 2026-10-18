@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -31,21 +32,12 @@ func init() {
 }
 
 func main() {
-	cfg, err := config.LoadRequired()
+	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		fatal("reading config: %v", err)
 	}
 
-	apiClient := api.NewClient(cfg.ServerURL, cfg.Password)
-	if err := apiClient.Ping(); err != nil {
-		log.Fatalf("Failed to connect to server: %v", err)
-	}
-	// Link previews are fetched through the BlueBubbles server, so this is
-	// iMessage's own configuration rather than the app's.
-	apiClient.SetPreviewProxyURL(cfg.PreviewProxyURL)
-	apiClient.SetOEmbedEndpoint(cfg.OEmbedEndpoint)
-
-	wsClient := ws.NewClient(cfg.ServerURL, cfg.Password)
+	imessageBackend, imessageStream, imessageErr := connectIMessage(cfg)
 
 	// Resolve the terminal background before Bubble Tea claims stdin in raw
 	// mode: auto-detection queries the terminal over stdin, and done any
@@ -70,18 +62,30 @@ func main() {
 		lipgloss.HasDarkBackground()
 	}
 
-	// Assigned through their concrete types first: a nil *imessage.Stream put
-	// straight into a []provider.Stream would be a non-nil interface holding a
-	// nil pointer, which every `!= nil` guard downstream would wave through.
-	backends := provider.NewRegistry(imessage.New(apiClient))
+	backends := provider.NewRegistry(imessageBackend)
 	var streams []provider.Stream
-	if stream := imessage.NewStream(wsClient); stream != nil {
-		streams = append(streams, stream)
+	if imessageStream != nil {
+		streams = append(streams, imessageStream)
 	}
 	streams = append(streams, connectSlack(backends)...)
 
+	if len(backends.All()) == 0 {
+		if imessageErr != nil {
+			fatal("%v", imessageErr)
+		}
+		fatal("no network is configured: set BB_SERVER_URL and BB_PASSWORD for imessage, or a slack token (see README)")
+	}
+
+	app := tui.NewAppModelWithConfig(backends, provider.Merge(streams...), cfg)
+	if imessageErr != nil {
+		// The other networks are up, so iMessage being down is something to
+		// say, not a reason to keep them from starting.
+		log.Printf("%v; starting without it", imessageErr)
+		app.ShowError(imessageErr)
+	}
+
 	p := tea.NewProgram(
-		tui.NewAppModelWithConfig(backends, provider.Merge(streams...), cfg),
+		app,
 		tea.WithAltScreen(),
 		// Cell motion, not all motion: the app only reads motion while a
 		// button is held (dragging the sidebar edge and the pane dividers),
@@ -92,9 +96,50 @@ func main() {
 		tea.WithMouseCellMotion(),
 	)
 	if _, err := p.Run(); err != nil {
-		log.Fatalf("Error running program: %v", err)
-		os.Exit(1)
+		fatal("running the tui: %v", err)
 	}
+}
+
+// fatal reports a startup failure on stderr as well as in the log. Bubble Tea
+// has not claimed the terminal yet (or has given it back), and with the log
+// alone a missing setting looked like the program doing nothing at all.
+func fatal(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	log.Print(msg)
+	fmt.Fprintln(os.Stderr, "imessage-tui: "+msg)
+	os.Exit(1)
+}
+
+// connectIMessage sets up the BlueBubbles backend when it is configured.
+//
+// Not configured is not an error: iMessage is one network among several, and
+// someone may run this for Slack alone. Configured but unreachable is returned
+// as err beside a nil backend — the chat list is loaded once at startup, so a
+// server that is down now would contribute nothing but a 15-second timeout to
+// every other network's chats.
+//
+// Both returns are untyped nil when there is no backend. A nil *imessage.Stream
+// in a provider.Stream would be a non-nil interface holding a nil pointer,
+// which every `!= nil` guard downstream would wave through.
+func connectIMessage(cfg *config.Config) (provider.Provider, provider.Stream, error) {
+	if !cfg.HasCredentials() {
+		return nil, nil, nil
+	}
+
+	apiClient := api.NewClient(cfg.ServerURL, cfg.Password)
+	if err := apiClient.Ping(); err != nil {
+		return nil, nil, fmt.Errorf("imessage: bluebubbles server unreachable: %w", err)
+	}
+	// Link previews are fetched through the BlueBubbles server, so this is
+	// iMessage's own configuration rather than the app's.
+	apiClient.SetPreviewProxyURL(cfg.PreviewProxyURL)
+	apiClient.SetOEmbedEndpoint(cfg.OEmbedEndpoint)
+
+	stream := imessage.NewStream(ws.NewClient(cfg.ServerURL, cfg.Password))
+	if stream == nil {
+		return imessage.New(apiClient), nil, nil
+	}
+	return imessage.New(apiClient), stream, nil
 }
 
 // connectSlack registers every configured Slack workspace and returns their

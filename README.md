@@ -26,11 +26,13 @@ never something you have to think about.
 
   requirements
     go 1.25 or newer
-    a bluebubbles-compatible server, reachable over http and websocket
+    for imessage: a bluebubbles-compatible server, over http and websocket
     slack tokens, if you want slack -- optional, see below
 
-  the bluebubbles server is checked at startup and the app exits if it is
-  unreachable, whether or not slack is configured.
+  every network is optional; the app needs one. a bluebubbles server that
+  is configured but unreachable at startup is reported in the status line
+  and left out until the next start, so it never keeps slack from loading.
+  with nothing configured at all, the app says so on stderr and exits.
 
   build and run
     go build -o imessage-tui .
@@ -81,8 +83,8 @@ never something you have to think about.
 
   setting                   env var                     default   what it does
   ----------------------------------------------------------------------------
-  server_url                BB_SERVER_URL               required  bluebubbles url
-  password                  BB_PASSWORD                 required  api password
+  server_url                BB_SERVER_URL               unset     bluebubbles url
+  password                  BB_PASSWORD                 unset     api password
   theme                     BB_THEME                    auto      auto|light|dark
   message_limit             BB_MESSAGE_LIMIT            50        messages per chat
   chat_limit                BB_CHAT_LIMIT               50        imessage chats listed

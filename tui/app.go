@@ -2583,6 +2583,13 @@ func (m *AppModel) handleProviderEvent(event provider.Event) (tea.Model, tea.Cmd
 	}
 }
 
+// ShowError puts err in the status line the way a failed action would. It is
+// for main to report a problem found before the program started, such as one
+// network being unreachable while the others came up.
+func (m *AppModel) ShowError(err error) {
+	m.setAppError(err)
+}
+
 func (m *AppModel) setAppError(err error) {
 	if err == nil {
 		return
