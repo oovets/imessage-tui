@@ -181,8 +181,18 @@ waits a minute reads as a hung app.
 **Own sends come back through the updates manager.** Telegram does not push a
 session's own messages back to it; they arrive only in the call's result.
 `handleOwnUpdates` hands that result to the manager, which keeps its sequence
-numbers straight and dispatches the message like any other — which is what
+numbers straight. For a channel or supergroup the result holds the whole
+message, which the manager dispatches like any other — and that is what
 replaces the optimistic copy in the pane.
+
+A send to a private chat or basic group is answered with
+`UpdateShortSentMessage` instead: the id, the date and any media, nothing
+else. gotd turns it into an empty message and leaves the rest to the caller,
+so `Send` rebuilds the message from what it sent (`sentMessage`) and
+publishes it itself. Without that the pane kept the faint optimistic copy for
+the full 30-second pending timeout, then dropped it, and the chat's cached
+history — which no update had marked stale — hid the message for up to two
+minutes more.
 
 **A reaction only drops the cache.** `UpdateMessageReactions` carries the
 counts and nothing else, and the UI ignores an updated message whose GUID a

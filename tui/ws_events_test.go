@@ -82,3 +82,42 @@ func TestAppModelUpdatedMessageSkipsNewMessageIndicators(t *testing.T) {
 		t.Fatalf("updated-message must not mark new messages, count = %d", got)
 	}
 }
+
+// The confirmed copy of a sent message replaces the faint optimistic one as
+// soon as the backend reports it, rather than both showing until the pending
+// timeout. Telegram reports a send to a private chat only through the Send
+// call itself, which is the case this pins from the UI's side.
+func TestSentMessageEventReplacesPendingEcho(t *testing.T) {
+	app := NewAppModelWithConfig(nil, nil, nil)
+	chat := models.Chat{GUID: "tg:100:u200", DisplayName: "Anna"}
+	window := app.windowManager.FocusedWindow()
+	window.SetChat(&chat)
+
+	pending := app.addPendingOutgoing(chat.GUID, "hej")
+	if !app.hasPendingOutgoing(chat.GUID, pending.GUID) {
+		t.Fatal("no optimistic copy")
+	}
+
+	app.Update(providerEventMsg(provider.Event{
+		Kind:     provider.EventNewMessage,
+		ChatGUID: chat.GUID,
+		Message: models.Message{
+			GUID:        "tg:100:u200:40",
+			Text:        "hej",
+			IsFromMe:    true,
+			DateCreated: pending.DateCreated + 300,
+			ChatGUID:    chat.GUID,
+		},
+	}))
+
+	if app.hasPendingOutgoing(chat.GUID, pending.GUID) {
+		t.Error("the optimistic copy is still pending after the confirmed message arrived")
+	}
+	view := stripANSI(window.Messages.renderedBody)
+	if n := strings.Count(view, "hej"); n != 1 {
+		t.Errorf("message drawn %d times, want once:\n%s", n, view)
+	}
+	if strings.Contains(view, "…") {
+		t.Errorf("message still drawn as pending:\n%s", view)
+	}
+}

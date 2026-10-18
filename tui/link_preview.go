@@ -17,8 +17,7 @@ func supportedMediaLinksFromText(text string, limit int) []string {
 	seen := make(map[string]struct{})
 	links := make([]string, 0, limit)
 	for _, field := range fields {
-		raw := strings.Trim(field, "<>()[]{}\"'")
-		raw = strings.TrimRight(raw, ".,;:!?")
+		raw := trimLinkToken(field)
 		if raw == "" {
 			continue
 		}
@@ -155,8 +154,7 @@ func stripSupportedMediaLinks(text string, links []string) string {
 
 	var kept []string
 	for _, field := range strings.Fields(text) {
-		raw := strings.Trim(field, "<>()[]{}\"'")
-		raw = strings.TrimRight(raw, ".,;:!?")
+		raw := trimLinkToken(field)
 		u, err := url.Parse(raw)
 		if err == nil && u.Scheme != "" && u.Host != "" {
 			if _, ok := linkSet[u.String()]; ok {

@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/oovets/imessage-tui/models"
 )
 
@@ -38,8 +39,12 @@ type MessagesModel struct {
 	stickToBottom bool
 	loading       bool
 	showHeader    bool
+	// One entry per visual line of renderedBody. lineLinks is the link a
+	// whole line opens (a preview line); lineLinkSpans are the URLs written in
+	// the text, which open only where they are drawn.
 	lineMessages  []int
 	lineLinks     []string
+	lineLinkSpans [][]linkSpan
 
 	// Cached render so a single appended message doesn't re-render the whole
 	// history. renderedBody is the full viewport content; lastRenderedDay is
@@ -305,7 +310,10 @@ func (m *MessagesModel) FirstImageAttachmentAtViewportY(y int) (models.Attachmen
 	return m.FirstImageAttachmentByNumber(n)
 }
 
-func (m *MessagesModel) LinkAtViewportY(y int) (string, bool) {
+// LinkAtViewport returns the link drawn at column x of viewport row y: a URL
+// in the text when x falls on it, or the link a preview line opens from
+// anywhere on the line.
+func (m *MessagesModel) LinkAtViewport(x, y int) (string, bool) {
 	if y < 0 {
 		return "", false
 	}
@@ -313,8 +321,33 @@ func (m *MessagesModel) LinkAtViewportY(y int) (string, bool) {
 	if line < 0 || line >= len(m.lineLinks) {
 		return "", false
 	}
+	if line < len(m.lineLinkSpans) {
+		for _, span := range m.lineLinkSpans[line] {
+			if x >= span.start && x < span.end {
+				return span.url, true
+			}
+		}
+	}
 	link := strings.TrimSpace(m.lineLinks[line])
 	return link, link != ""
+}
+
+// LinksByNumber returns the links message #N shows, in screen order.
+func (m *MessagesModel) LinksByNumber(n int) []string {
+	if n < 1 || n > len(m.messages) {
+		return nil
+	}
+	return messageLinks(m.messages[n-1])
+}
+
+// LatestLink returns the last link of the newest message that has one.
+func (m *MessagesModel) LatestLink() (string, bool) {
+	for i := len(m.messages) - 1; i >= 0; i-- {
+		if links := messageLinks(m.messages[i]); len(links) > 0 {
+			return links[len(links)-1], true
+		}
+	}
+	return "", false
 }
 
 func (m *MessagesModel) messageNumberAtViewportY(y int) int {
@@ -339,6 +372,7 @@ func (m *MessagesModel) wrapWidth() int {
 func (m *MessagesModel) renderContent() {
 	m.lineMessages = m.lineMessages[:0]
 	m.lineLinks = m.lineLinks[:0]
+	m.lineLinkSpans = m.lineLinkSpans[:0]
 	if len(m.messages) == 0 {
 		if m.loading {
 			m.viewport.SetContent(lipgloss.NewStyle().Foreground(ColorWindowPlaceholder).Render("Loading messages…"))
@@ -376,8 +410,7 @@ func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg model
 	if dayKey != lastDay {
 		if lastDay != "" {
 			sb.WriteString("\n")
-			m.lineMessages = append(m.lineMessages, 0)
-			m.lineLinks = append(m.lineLinks, "")
+			m.appendLineIndex(0, "", nil)
 		}
 		sep := "── " + formatDateSeparator(msgTime) + " ──"
 		sepStyle := lipgloss.NewStyle().
@@ -386,8 +419,7 @@ func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg model
 			Align(lipgloss.Center)
 		sb.WriteString(sepStyle.Render(sep))
 		sb.WriteString("\n")
-		m.lineMessages = append(m.lineMessages, 0)
-		m.lineLinks = append(m.lineLinks, "")
+		m.appendLineIndex(0, "", nil)
 		lastDay = dayKey
 	}
 
@@ -455,17 +487,17 @@ func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg model
 		reopen := styleOpenSequence(msgStyle)
 		wroteLine := false
 		for li, rawLine := range fullLines {
-			for _, line := range messageWrappedLines(rawLine, wrapWidth, fullLineLinks[li] == "") {
+			lines := messageWrappedLines(rawLine, wrapWidth, fullLineLinks[li] == "")
+			spans := lineTextLinkSpans(rawLine, lines, fullLineLinks[li])
+			for vi, line := range lines {
 				if wroteLine {
 					sb.WriteString("\n")
 				}
 				content := strings.TrimRight(line, " ")
-				if padLen := wrapWidth - lipgloss.Width(content); padLen > 0 {
-					sb.WriteString(strings.Repeat(" ", padLen))
-				}
+				padLen := max(0, wrapWidth-lipgloss.Width(content))
+				sb.WriteString(strings.Repeat(" ", padLen))
 				sb.WriteString(msgStyle.Render(reopenAfterResets(content, reopen)))
-				m.lineMessages = append(m.lineMessages, i+1)
-				m.lineLinks = append(m.lineLinks, fullLineLinks[li])
+				m.appendLineIndex(i+1, fullLineLinks[li], shiftSpans(spansAt(spans, vi), padLen))
 				wroteLine = true
 			}
 		}
@@ -478,13 +510,14 @@ func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg model
 		reopen := styleOpenSequence(style)
 		wroteLine := false
 		for li, rawLine := range fullLines {
-			for _, line := range messageWrappedLines(rawLine, wrapWidth, fullLineLinks[li] == "") {
+			lines := messageWrappedLines(rawLine, wrapWidth, fullLineLinks[li] == "")
+			spans := lineTextLinkSpans(rawLine, lines, fullLineLinks[li])
+			for vi, line := range lines {
 				if wroteLine {
 					sb.WriteString("\n")
 				}
 				sb.WriteString(style.Width(wrapWidth).Render(reopenAfterResets(line, reopen)))
-				m.lineMessages = append(m.lineMessages, i+1)
-				m.lineLinks = append(m.lineLinks, fullLineLinks[li])
+				m.appendLineIndex(i+1, fullLineLinks[li], spansAt(spans, vi))
 				wroteLine = true
 			}
 		}
@@ -492,6 +525,31 @@ func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg model
 	}
 
 	return lastDay
+}
+
+// appendLineIndex records one visual line in the parallel line-index slices
+// that clicks and #N commands resolve against.
+func (m *MessagesModel) appendLineIndex(messageNumber int, link string, spans []linkSpan) {
+	m.lineMessages = append(m.lineMessages, messageNumber)
+	m.lineLinks = append(m.lineLinks, link)
+	m.lineLinkSpans = append(m.lineLinkSpans, spans)
+}
+
+// lineTextLinkSpans finds the URLs written in one logical line across the
+// visual lines it wrapped into. A preview line opens its link from anywhere on
+// it, so it carries no spans of its own.
+func lineTextLinkSpans(rawLine string, wrapped []string, wholeLineLink string) [][]linkSpan {
+	if wholeLineLink != "" {
+		return nil
+	}
+	return wrappedLinkSpans(wrapped, textLinks(ansi.Strip(rawLine)))
+}
+
+func spansAt(spans [][]linkSpan, i int) []linkSpan {
+	if i < len(spans) {
+		return spans[i]
+	}
+	return nil
 }
 
 func attachmentLabel(msg models.Message, hideGeneric bool) string {

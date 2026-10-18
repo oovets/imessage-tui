@@ -69,6 +69,18 @@ func peerOf(p tg.PeerClass) (Peer, bool) {
 	}
 }
 
+// tgPeer is peerOf in reverse.
+func (p Peer) tgPeer() tg.PeerClass {
+	switch p.Kind {
+	case kindGroup:
+		return &tg.PeerChat{ChatID: p.ID}
+	case kindChannel:
+		return &tg.PeerChannel{ChannelID: p.ID}
+	default:
+		return &tg.PeerUser{UserID: p.ID}
+	}
+}
+
 // ChatGUID is tg:<account>:<peer>.
 func ChatGUID(account string, peer Peer) string {
 	return Prefix + account + sep + peer.String()

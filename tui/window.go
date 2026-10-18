@@ -150,12 +150,16 @@ func (w *ChatWindow) FirstImageAttachmentAtContentY(y int) (models.Attachment, b
 	return w.Messages.FirstImageAttachmentAtViewportY(viewportY)
 }
 
-func (w *ChatWindow) LinkAtContentY(y int) (string, bool) {
+// LinkAt returns the link drawn at x, y, counted from the window's top-left
+// corner.
+func (w *ChatWindow) LinkAt(x, y int) (string, bool) {
 	viewportY, ok := w.messageViewportY(y)
 	if !ok {
 		return "", false
 	}
-	return w.Messages.LinkAtViewportY(viewportY)
+	// Both window styles pad the content by the same amount, so it does not
+	// matter whether the click landed on a focused pane or is focusing one.
+	return w.Messages.LinkAtViewport(x-FocusedWindowStyle.GetPaddingLeft(), viewportY)
 }
 
 func (w *ChatWindow) messageViewportY(y int) (int, bool) {

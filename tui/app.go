@@ -2170,6 +2170,20 @@ func (m *AppModel) handleLocalInputCommand(window *ChatWindow, raw string) (tea.
 		), true
 	}
 
+	if msgNum, linkNum, handled, err := parseOpenCommand(raw); handled {
+		if err != nil {
+			m.setAppError(err)
+			return nil, true
+		}
+		rawURL, err := linkToOpen(window, msgNum, linkNum)
+		if err != nil {
+			m.setAppError(err)
+			return nil, true
+		}
+		window.Input.Clear()
+		return openURLCmd(rawURL), true
+	}
+
 	msgNum, handled, err := parseImgCommand(raw)
 	if !handled {
 		return nil, false
@@ -2240,6 +2254,54 @@ func parseReplyCommand(raw string) (target int, text string, handled bool, err e
 		return 0, "", true, fmt.Errorf("usage: /r #<message-number> <text>")
 	}
 	return n, body, true, nil
+}
+
+// parseOpenCommand reads "/open", "/open #3" and "/open #3 2". Without a
+// message number it means the newest link in the pane; linkNum counts the
+// links of message #msgNum in the order they are drawn, from 1.
+func parseOpenCommand(raw string) (msgNum, linkNum int, handled bool, err error) {
+	parts := strings.Fields(strings.TrimSpace(raw))
+	if len(parts) == 0 || parts[0] != "/open" {
+		return 0, 0, false, nil
+	}
+	const usage = "usage: /open [#<message-number> [<link-number>]]"
+	if len(parts) == 1 {
+		return 0, 0, true, nil
+	}
+	if len(parts) > 3 {
+		return 0, 0, true, errors.New(usage)
+	}
+	msgNum, convErr := strconv.Atoi(strings.TrimPrefix(parts[1], "#"))
+	if convErr != nil || msgNum < 1 {
+		return 0, 0, true, fmt.Errorf("invalid message number: %s", parts[1])
+	}
+	linkNum = 1
+	if len(parts) == 3 {
+		linkNum, convErr = strconv.Atoi(parts[2])
+		if convErr != nil || linkNum < 1 {
+			return 0, 0, true, fmt.Errorf("invalid link number: %s", parts[2])
+		}
+	}
+	return msgNum, linkNum, true, nil
+}
+
+// linkToOpen resolves a parsed /open against what the pane shows.
+func linkToOpen(window *ChatWindow, msgNum, linkNum int) (string, error) {
+	if msgNum == 0 {
+		link, ok := window.Messages.LatestLink()
+		if !ok {
+			return "", fmt.Errorf("no link in this pane")
+		}
+		return link, nil
+	}
+	links := window.Messages.LinksByNumber(msgNum)
+	switch {
+	case len(links) == 0:
+		return "", fmt.Errorf("message #%d has no link", msgNum)
+	case linkNum > len(links):
+		return "", fmt.Errorf("message #%d has %d link(s), not %d", msgNum, len(links), linkNum)
+	}
+	return links[linkNum-1], nil
 }
 
 func parseImgCommand(raw string) (int, bool, error) {
@@ -2342,6 +2404,9 @@ func openWithSystem(target string) error {
 
 func openURLCmd(rawURL string) tea.Cmd {
 	return func() tea.Msg {
+		if !isOpenableLink(rawURL) {
+			return errMsg{err: fmt.Errorf("refusing to open %q: only http and https links open", rawURL)}
+		}
 		if err := openWithSystem(rawURL); err != nil {
 			return errMsg{err: fmt.Errorf("failed to open link: %v", err)}
 		}
@@ -2725,11 +2790,13 @@ func (m AppModel) handleMouseMsg(msg tea.MouseMsg) (AppModel, tea.Cmd) {
 			m.focused = focusWindow
 			cmd := m.clearFocusedWindowNewMessageIndicator()
 			m.saveLayoutState()
+			// A link wins over the message's image: the click landed on the
+			// link itself, while the image answers for every row of the message.
+			if rawURL, ok := window.LinkAt(relX-window.x, localY); ok {
+				return m, tea.Batch(cmd, openURLCmd(rawURL))
+			}
 			if att, ok := window.FirstImageAttachmentAtContentY(localY); ok {
 				return m, tea.Batch(cmd, openImageAttachmentCmd(m.providerFor(windowChatGUID(window)), att))
-			}
-			if rawURL, ok := window.LinkAtContentY(localY); ok {
-				return m, tea.Batch(cmd, openURLCmd(rawURL))
 			}
 			return m, cmd
 		}

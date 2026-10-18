@@ -431,7 +431,28 @@ func (p *Provider) Send(chatGUID, text, replyToGUID, _ string) error {
 		return fmt.Errorf("telegram send: %w", err)
 	}
 	p.handleOwnUpdates(ctx, result)
+	if sent, ok := result.(*tg.UpdateShortSentMessage); ok {
+		p.onMessage(provider.EventNewMessage, tg.Entities{}, sentMessage(peer, text, sent))
+	}
 	return nil
+}
+
+// sentMessage rebuilds the message a send to a private chat or basic group
+// created. Telegram answers those with UpdateShortSentMessage — id, date and
+// any media it attached, nothing else, since the caller knows the rest — and
+// never pushes the message itself back to this session. gotd passes it on as
+// an empty message for that reason, so without this the sent message reaches
+// the UI only when the chat's history is next fetched.
+func sentMessage(peer Peer, text string, u *tg.UpdateShortSentMessage) *tg.Message {
+	return &tg.Message{
+		ID:       u.ID,
+		Out:      true,
+		PeerID:   peer.tgPeer(),
+		Date:     u.Date,
+		Message:  text,
+		Media:    u.Media,
+		Entities: u.Entities,
+	}
 }
 
 // React adds one of the UI's six reactions.
@@ -628,9 +649,10 @@ func largestPhotoSize(sizes []tg.PhotoSizeClass) string {
 
 // handleOwnUpdates passes the updates a call returned to the updates manager.
 // The server does not push this session's own sends back to it; they arrive
-// only here, and this is how the sent message reaches the UI as an event —
-// replacing the optimistic copy — and how the manager's sequence numbers stay
-// unbroken.
+// only here, which keeps the manager's sequence numbers unbroken. A send to a
+// channel or supergroup carries the whole message, which then reaches the UI
+// as an event and replaces the optimistic copy; a send anywhere else carries
+// only its id, and Send has to rebuild the message (see sentMessage).
 func (p *Provider) handleOwnUpdates(ctx context.Context, result tg.UpdatesClass) {
 	if p.updates == nil || result == nil {
 		return

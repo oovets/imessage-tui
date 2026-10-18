@@ -13,6 +13,7 @@ import (
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
 	"github.com/oovets/imessage-tui/models"
+	"github.com/oovets/imessage-tui/provider"
 )
 
 const (
@@ -364,6 +365,53 @@ func TestSendRepliesWithinTheChatOnly(t *testing.T) {
 	request = api.request(&tg.MessagesSendMessageRequest{}).(*tg.MessagesSendMessageRequest)
 	if request.ReplyTo != nil {
 		t.Fatalf("reply to = %#v, want none", request.ReplyTo)
+	}
+}
+
+// A send to a private chat or basic group is answered with the new message's
+// id and date only, and the server never pushes the message back to the
+// session that sent it. Unless Send rebuilds it, the pane keeps the faint
+// optimistic copy until it times out, and the chat's cached history — which
+// nothing has marked stale — then hides the message for up to two minutes.
+func TestSendToAPrivateChatPublishesTheSentMessage(t *testing.T) {
+	tests := []struct {
+		chat string
+		peer Peer
+	}{
+		{chat: "tg:100:u200", peer: Peer{Kind: kindUser, ID: annaID}},
+		{chat: "tg:100:g400", peer: Peer{Kind: kindGroup, ID: groupID}},
+	}
+	for _, tt := range tests {
+		p, api := newTestProvider(t)
+		p.stream = newStream(p)
+		p.peers.apply(users(), chats())
+		p.setLive(true)
+		p.history[tt.peer] = cachedHistory{limit: 50, at: time.Now()}
+		api.reply(&tg.MessagesSendMessageRequest{}, &tg.UpdateShortSentMessage{
+			Out: true, ID: 40, Date: 1700000500, Media: &tg.MessageMediaWebPage{Webpage: &tg.WebPageEmpty{ID: 1}},
+		})
+
+		if err := p.Send(tt.chat, "kolla https://example.com", "", "echo"); err != nil {
+			t.Fatal(err)
+		}
+
+		select {
+		case event := <-p.stream.Events():
+			msg := event.Message
+			if event.Kind != provider.EventNewMessage || event.ChatGUID != tt.chat ||
+				msg.GUID != tt.chat+":40" || !msg.IsFromMe ||
+				msg.Text != "kolla https://example.com" || msg.DateCreated != 1700000500*1000 {
+				t.Errorf("%s: event = %+v", tt.chat, event)
+			}
+		default:
+			t.Errorf("%s: no event for the sent message", tt.chat)
+		}
+		if _, ok := p.history[tt.peer]; ok {
+			t.Errorf("%s: cached history survived the send, so a refresh would hide the message", tt.chat)
+		}
+		if p.latest[tt.peer] != 40 {
+			t.Errorf("%s: latest = %d, want 40", tt.chat, p.latest[tt.peer])
+		}
 	}
 }
 

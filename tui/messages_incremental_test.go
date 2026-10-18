@@ -9,8 +9,8 @@ import (
 
 // renderState captures everything an append must keep consistent with a full
 // render: the cached body string and the parallel line-index slices.
-func renderState(m *MessagesModel) (string, []int, []string) {
-	return m.renderedBody, append([]int(nil), m.lineMessages...), append([]string(nil), m.lineLinks...)
+func renderState(m *MessagesModel) (string, []int, []string, [][]linkSpan) {
+	return m.renderedBody, append([]int(nil), m.lineMessages...), append([]string(nil), m.lineLinks...), append([][]linkSpan(nil), m.lineLinkSpans...)
 }
 
 func TestAppendMessageIncrementalMatchesFullRender(t *testing.T) {
@@ -24,6 +24,7 @@ func TestAppendMessageIncrementalMatchesFullRender(t *testing.T) {
 		// Next day -> forces a day separator on append.
 		{GUID: "d", Text: "new day message", DateCreated: base + day, IsFromMe: true},
 		{GUID: "e", Text: "check https://youtu.be/abc out", DateCreated: base + day + 1000, IsFromMe: false, Handle: &models.Handle{Address: "+111", DisplayName: "Alice"}},
+		{GUID: "f", Text: "mine https://example.com/a-path-long-enough-to-wrap-the-pane", DateCreated: base + day + 2000, IsFromMe: true},
 	}
 
 	// Incremental: append one at a time.
@@ -42,8 +43,8 @@ func TestAppendMessageIncrementalMatchesFullRender(t *testing.T) {
 		t.Fatalf("incremental model should have a real render")
 	}
 
-	incBody, incLM, incLL := renderState(&inc)
-	fullBody, fullLM, fullLL := renderState(&full)
+	incBody, incLM, incLL, incSpans := renderState(&inc)
+	fullBody, fullLM, fullLL, fullSpans := renderState(&full)
 
 	if incBody != fullBody {
 		t.Errorf("body mismatch:\n--- incremental ---\n%q\n--- full ---\n%q", incBody, fullBody)
@@ -53,6 +54,12 @@ func TestAppendMessageIncrementalMatchesFullRender(t *testing.T) {
 	}
 	if !reflect.DeepEqual(incLL, fullLL) {
 		t.Errorf("lineLinks mismatch:\n incremental=%v\n full=%v", incLL, fullLL)
+	}
+	if !reflect.DeepEqual(incSpans, fullSpans) {
+		t.Errorf("lineLinkSpans mismatch:\n incremental=%v\n full=%v", incSpans, fullSpans)
+	}
+	if len(fullSpans) != len(fullLM) {
+		t.Errorf("lineLinkSpans has %d entries for %d lines", len(fullSpans), len(fullLM))
 	}
 }
 

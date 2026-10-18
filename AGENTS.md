@@ -184,8 +184,19 @@ field that distinguishes two otherwise identical messages, it belongs in
 Outgoing messages render optimistically with `Pending` set and reconcile when
 the server confirms or the timeout fires. Rendering is incremental —
 `renderMessageBlock` appends to the line-index slices (`lineMessages`,
-`lineLinks`) that mouse clicks and `/img #N` resolve against, so a new render
-path must keep one entry per *visual* line, including blank and separator lines.
+`lineLinks`, `lineLinkSpans`) that mouse clicks and `/img #N` resolve against,
+through `appendLineIndex`, so a new render path must keep one entry per
+*visual* line, including blank and separator lines.
+
+A URL in message text opens only where it is drawn: `lineLinkSpans` holds its
+columns on each visual line, found after wrapping (`wrappedLinkSpans` in
+`tui/links.go`), so a long URL that breaks across rows is clickable on each
+piece. A preview line instead opens its link from anywhere on the row
+(`lineLinks`). Anything that changes what precedes the text on a line —
+padding, a marker, a prefix — moves those columns; `TestClickOpensTheURLUnderThePointerOnly`
+clicks every cell of a rendered pane and catches it. Only http(s) links are
+ever handed to the system opener (`isOpenableLink`, checked again in
+`openURLCmd`): message text is written by other people.
 
 ## Tests
 

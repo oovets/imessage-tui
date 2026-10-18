@@ -310,8 +310,9 @@ max_previews_per_message: 2
     ctrl+o                 pin or unpin the chat in the focused pane
 
   mouse
-    click to focus a pane or open an image, click a network tab to filter the
-    chat list, scroll to move through history,
+    click to focus a pane, open an image or open a url where it is drawn,
+    click a network tab to filter the chat list, scroll to move through
+    history,
     drag the chat list edge or a pane divider to resize.
 ```
 
@@ -325,6 +326,9 @@ max_previews_per_message: 2
                   thread, the only way to answer in a thread rather than
                   beside it. on imessage it becomes a quoted reply
     /img #N       open the image on row N
+    /open         open the newest link in the pane
+    /open #N [K]  open link K on row N, counted in the order they are
+                  drawn; K defaults to 1
     /h            react to the newest message with a heart
     /lol          react with laughing
     /tu           react with thumbs up

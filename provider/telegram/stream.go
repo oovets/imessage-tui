@@ -52,6 +52,10 @@ func (s *Stream) Disconnected() <-chan struct{} { return s.disconnected }
 func (s *Stream) Overflowed() <-chan struct{}   { return s.overflowed }
 
 func (s *Stream) publish(event provider.Event) {
+	if s == nil {
+		// A provider without a connection has no feed to publish to.
+		return
+	}
 	select {
 	case s.events <- event:
 	default:
