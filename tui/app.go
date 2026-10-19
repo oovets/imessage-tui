@@ -1294,6 +1294,12 @@ func (m *AppModel) updateLayout() {
 }
 
 func (m AppModel) View() string {
+	// Settled once over the whole frame, after every pane, list and popup has
+	// been padded to its width, so no layout code has to know about it.
+	return settleEmojiWidths(m.frame())
+}
+
+func (m AppModel) frame() string {
 	if m.width == 0 || m.height == 0 {
 		return "Loading..."
 	}
