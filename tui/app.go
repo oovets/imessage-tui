@@ -159,6 +159,12 @@ type AppModel struct {
 	messageFetchedAt     map[string]time.Time
 	pendingOutgoing      map[string][]models.Message
 	readMarkInFlight     map[string]bool
+	// readMarkAgain holds a mark asked for while one was in flight, so the
+	// newer messages are still marked once the first answers.
+	readMarkAgain map[string]bool
+	// readMarkedUpTo is the newest message GUID a chat was marked read at,
+	// so the pane's periodic reload marks again only when it brought more.
+	readMarkedUpTo       map[string]string
 	linkPreviewInFlight  map[string]bool
 	linkPreviewAttempted map[string]bool
 	// Per backend, not global: BlueBubbles without the private API answers 404
@@ -256,6 +262,8 @@ func NewAppModelWithConfig(backends *provider.Registry, stream provider.Stream, 
 		messageFetchedAt:      make(map[string]time.Time),
 		pendingOutgoing:       make(map[string][]models.Message),
 		readMarkInFlight:      make(map[string]bool),
+		readMarkAgain:         make(map[string]bool),
+		readMarkedUpTo:        make(map[string]string),
 		disableReadSync:       make(map[string]bool),
 		linkPreviewInFlight:   make(map[string]bool),
 		linkPreviewAttempted:  make(map[string]bool),
@@ -351,7 +359,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			window.Messages.SetMessages(merged)
 			window.Messages.SetLoading(false)
 		}
-		return m, m.linkPreviewCmdsForMessages(msg.chatGUID, merged)
+		// Opening a chat marks it read before its history is in, and Slack
+		// marks by the newest timestamp it has seen: the first open had
+		// nothing to mark with. Marking again here is what reaches Slack.
+		return m, tea.Batch(m.linkPreviewCmdsForMessages(msg.chatGUID, merged), m.markFocusedChatRead(msg.chatGUID))
 
 	case loadMessagesErrMsg:
 		m.messageFetchInFlight[msg.chatGUID] = false
@@ -486,10 +497,17 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case markReadSuccessMsg:
 		m.readMarkInFlight[msg.chatGUID] = false
+		if m.readMarkAgain[msg.chatGUID] {
+			delete(m.readMarkAgain, msg.chatGUID)
+			return m, m.markChatReadIfNeeded(msg.chatGUID)
+		}
 		return m, nil
 
 	case markReadErrMsg:
 		m.readMarkInFlight[msg.chatGUID] = false
+		delete(m.readMarkAgain, msg.chatGUID)
+		// Marked nothing, so the next load or message tries again.
+		delete(m.readMarkedUpTo, msg.chatGUID)
 		low := strings.ToLower(msg.err.Error())
 		// A backend that cannot mark chats read says so the same way every
 		// time: BlueBubbles without the private API helper, Slack with a token
@@ -1163,6 +1181,8 @@ func (m *AppModel) removeChatLocalState(chatGUID string) {
 	delete(m.messageFetchInFlight, chatGUID)
 	delete(m.pendingOutgoing, chatGUID)
 	delete(m.readMarkInFlight, chatGUID)
+	delete(m.readMarkAgain, chatGUID)
+	delete(m.readMarkedUpTo, chatGUID)
 	delete(m.chatOverrides.Aliases, chatGUID)
 	m.windowManager.ForgetSenderNameChoice(chatGUID)
 	m.chatOverrides.SenderNames = m.windowManager.SenderNameChoices()
@@ -1953,11 +1973,47 @@ func (m *AppModel) clearFocusedWindowNewMessageIndicator() tea.Cmd {
 
 func (m *AppModel) markChatReadIfNeeded(chatGUID string) tea.Cmd {
 	chatGUID = strings.TrimSpace(chatGUID)
-	if chatGUID == "" || m.disableReadSync[m.backendIDFor(chatGUID)] || m.readMarkInFlight[chatGUID] {
+	if chatGUID == "" || m.disableReadSync[m.backendIDFor(chatGUID)] {
+		return nil
+	}
+	if m.readMarkInFlight[chatGUID] {
+		m.readMarkAgain[chatGUID] = true
 		return nil
 	}
 	m.readMarkInFlight[chatGUID] = true
+	m.readMarkedUpTo[chatGUID] = newestMessageGUID(m.windowManager.GetCachedMessages(chatGUID))
 	return markChatReadCmd(m.providerFor(chatGUID), chatGUID)
+}
+
+// markFocusedChatRead marks a chat read on the server when it is the one being
+// read — in the focused pane, with the focus on the panes — and it holds a
+// message newer than the last mark. Without this, Slack only heard about a
+// chat when it was opened, so whatever arrived while it was open stayed
+// unread in Slack's own apps.
+func (m *AppModel) markFocusedChatRead(chatGUID string) tea.Cmd {
+	if m.focused != focusWindow {
+		return nil
+	}
+	window := m.windowManager.FocusedWindow()
+	if window == nil || window.Chat == nil || window.Chat.GUID != chatGUID {
+		return nil
+	}
+	newest := newestMessageGUID(m.windowManager.GetCachedMessages(chatGUID))
+	if newest == "" || newest == m.readMarkedUpTo[chatGUID] {
+		return nil
+	}
+	return m.markChatReadIfNeeded(chatGUID)
+}
+
+func newestMessageGUID(msgs []models.Message) string {
+	var guid string
+	var at int64
+	for i := range msgs {
+		if msgs[i].GUID != "" && msgs[i].DateCreated >= at {
+			guid, at = msgs[i].GUID, msgs[i].DateCreated
+		}
+	}
+	return guid
 }
 
 func (m *AppModel) prefetchTopChatsCmd(chats []models.Chat, skipGUID string) tea.Cmd {
@@ -2715,6 +2771,11 @@ func (m *AppModel) handleProviderEvent(event provider.Event) (tea.Model, tea.Cmd
 		}
 
 		cmds := []tea.Cmd{m.waitForStreamEvent()}
+		if !msg.IsFromMe {
+			if cmd := m.markFocusedChatRead(msg.ChatGUID); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 		if cmd := m.linkPreviewCmdsForMessages(msg.ChatGUID, []models.Message{msg}); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
