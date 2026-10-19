@@ -116,7 +116,7 @@ credentials; `main.go` registers one provider per workspace.
 | Replying in a thread | `tui/app.go` `/r #N` | Posts under the root, also when row N is itself a reply |
 | Reactions | `slack.go` `React` | The six tapbacks map onto Slack emoji names |
 | Files | `slack.go` `DownloadAttachment` | Fetched with the token, never handed to the system opener |
-| Read state | `slack.go` `MarkRead` | `conversations.mark` up to the newest ts this client has seen |
+| Read state | `slack.go` `MarkRead`; `tui/app.go` `markFocusedChatRead` | `conversations.mark` up to the newest ts this client has seen — on open, when the history arrives, and on each message that lands in the focused pane |
 | Realtime | `stream.go` | Socket Mode: new, edited; deletions reconcile on the next refresh |
 | Several workspaces | `main.go` `connectSlack` | One provider each, names prefixed when more than one is connected |
 
