@@ -247,6 +247,12 @@ func tabTitle(info TabInfo, label func(string) string) string {
 	if info.Name != "" {
 		return info.Name
 	}
+	return strings.Join(tabNetworks(info, label), "+")
+}
+
+// tabNetworks returns the networks a tab's panes show, each once, in pane
+// order. label maps a chat GUID to its network's label.
+func tabNetworks(info TabInfo, label func(string) string) []string {
 	var labels []string
 	seen := make(map[string]bool)
 	for _, guid := range info.ChatGUIDs {
@@ -257,7 +263,7 @@ func tabTitle(info TabInfo, label func(string) string) string {
 		seen[l] = true
 		labels = append(labels, l)
 	}
-	return strings.Join(labels, "+")
+	return labels
 }
 
 // tabBarSpan is where one tab is drawn on the bar, in columns.

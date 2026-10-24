@@ -421,6 +421,56 @@ func TestOnlyTheTabOnScreenIsPolled(t *testing.T) {
 	}
 }
 
+// The chat list follows the tab on screen: a tab's one network, every
+// network for a tab that mixes them, and whatever it was for an empty tab.
+func TestChatListFollowsTheTabsNetwork(t *testing.T) {
+	app := twoNetworkApp(t)
+	app.chatList.SetChats([]models.Chat{
+		{GUID: "im-1", DisplayName: "Family"},
+		{GUID: "sl:acme:C1", DisplayName: "Engineering"},
+	})
+	show := func(guid string) {
+		app.windowManager.ShowChat(app.windowManager.FocusedWindow(), &models.Chat{GUID: guid})
+	}
+	show("im-1")
+	app = press(t, app, altKey('t'))
+	show("sl:acme:C1")
+	app = press(t, app, altKey('t'))
+	show("im-1")
+	if err := app.windowManager.SplitWindow(SplitHorizontal); err != nil {
+		t.Fatal(err)
+	}
+	show("sl:acme:C1")
+	app = press(t, app, altKey('t'))
+
+	steps := []struct {
+		tab  rune
+		want []string // chats the list shows
+	}{
+		{'1', []string{"Family"}},
+		{'2', []string{"Engineering"}},
+		{'3', []string{"Family", "Engineering"}},
+		{'2', []string{"Engineering"}},
+		{'4', []string{"Engineering"}},
+		{'1', []string{"Family"}},
+		{'4', []string{"Family"}},
+	}
+	for i, step := range steps {
+		app = press(t, app, altKey(step.tab))
+		list := stripANSI(app.chatList.View())
+		for _, name := range []string{"Family", "Engineering"} {
+			want := false
+			for _, w := range step.want {
+				want = want || w == name
+			}
+			if got := strings.Contains(list, name); got != want {
+				t.Errorf("step %d, tab %c: %s listed = %v, want %v (filter %q)\n%s",
+					i, step.tab, name, got, want, app.chatList.Network(), list)
+			}
+		}
+	}
+}
+
 func TestDisplayTogglesReachBackgroundTabs(t *testing.T) {
 	app := newTabTestApp(t, 100, 30)
 	background := app.windowManager.FocusedWindow()

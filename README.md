@@ -383,7 +383,9 @@ max_previews_per_message: 2
   number, then its name -- the one given with alt+r, or else the networks
   its panes show, so a tab of slack channels reads as that workspace without
   being named -- and a dot while a pane in it holds a message you have not
-  seen. a single tab has no bar. panes in a background tab keep taking
+  seen. a single tab has no bar. going to a tab filters the chat list to
+  its network, or to all of them when its panes mix networks; an empty tab
+  leaves the filter as it was. panes in a background tab keep taking
   realtime messages; the periodic reload covers only the tab on screen, and
   a tab coming back reloads whatever went stale while it was hidden. the
   8-pane limit is per tab. tabs, their names and their panes survive a

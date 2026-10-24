@@ -1407,6 +1407,7 @@ func (m *AppModel) afterTabChange() tea.Cmd {
 		}
 	}
 	m.saveLayoutState()
+	m.followTabNetwork()
 
 	cmds := []tea.Cmd{m.clearFocusedWindowNewMessageIndicator()}
 	seen := make(map[string]bool)
@@ -1423,6 +1424,28 @@ func (m *AppModel) afterTabChange() tea.Cmd {
 		cmds = append(cmds, prefetchMessagesCmd(m.providerFor(chatGUID), chatGUID, m.messageLimit))
 	}
 	return tea.Batch(cmds...)
+}
+
+// followTabNetwork points the chat list's network filter at the tab on
+// screen, so a tab of Slack channels lists Slack: the tab's one network, or
+// every network for a tab that mixes them — the same thing its title says.
+// An empty tab leaves the filter as it was; the list is where its first chat
+// is picked, from whichever network the last tab was on.
+func (m *AppModel) followTabNetwork() {
+	infos := m.windowManager.Tabs()
+	networks := tabNetworks(infos[m.windowManager.ActiveTab()], m.providers.Label)
+	network := ""
+	switch len(networks) {
+	case 0:
+		return
+	case 1:
+		network = networks[0]
+	}
+	if network == m.chatList.Network() {
+		return
+	}
+	m.chatList.SetNetwork(network)
+	m.saveUIState()
 }
 
 // tabAt returns the tab drawn at column x of the tab bar.
