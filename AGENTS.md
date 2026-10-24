@@ -120,6 +120,9 @@ mouse rows in the pane area are offset by `tabBarRows()`.
 
 **Never write to stdout.** The TUI owns it. `main.go` redirects `log` to
 `~/.imessage-tui.log`; use `log.Printf` for debugging, never `fmt.Println`.
+The one byte the app sends the terminal itself is the notification bell
+(`ringBell` in `tui/notify.go`), a BEL to `/dev/tty`, which is safe to land in
+the middle of a frame. Anything longer belongs in the frame.
 
 ## Backends
 
@@ -197,6 +200,8 @@ guard only alongside a bubbles version that fixes the loop.
 Which is why the program runs in **cell** mouse motion, not all motion: nothing
 reacts to hover, and all-motion emits a sequence per movement, flooding the
 reader that tears them. If a feature ever needs hover, weigh it against that.
+Focus reports (`\x1b[I`, `\x1b[O`) are asked for only while notifications are
+on (`AppModel.ReportsFocus`), for the same reason.
 
 ## Messages
 

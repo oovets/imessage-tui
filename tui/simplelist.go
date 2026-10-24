@@ -990,6 +990,52 @@ func (m *SimpleListModel) NewMessageCount() int {
 	return count
 }
 
+// NewestUnread returns the unread chat that heard last, or nil. MarkNewMessage
+// moves a chat to the top, and a reload comes back newest first, so that is
+// the first unread one. Ignored chats never count.
+func (m *SimpleListModel) NewestUnread() *models.Chat {
+	for _, chat := range m.items {
+		if chat.HasNewMessage && !m.ignoredSet[chat.GUID] {
+			return &chat
+		}
+	}
+	return nil
+}
+
+// Listed reports whether the chat is on one of the list's rows now, rather
+// than filtered out by network, by search, or as ignored or unknown.
+func (m *SimpleListModel) Listed(chatGUID string) bool {
+	for _, idx := range m.filteredIndices {
+		if m.items[idx].GUID == chatGUID {
+			return true
+		}
+	}
+	return false
+}
+
+// Quiet reports whether a new message in the chat should arrive without a
+// word: the chat is ignored, or from an unknown sender while those are
+// hidden. A chat the list does not hold yet is not quiet.
+func (m *SimpleListModel) Quiet(chatGUID string) bool {
+	if m.ignoredSet[chatGUID] {
+		return true
+	}
+	if chat, ok := m.ChatByGUID(chatGUID); ok {
+		return chat.UnknownSender && !m.showUnknown
+	}
+	return false
+}
+
+// ChatByGUID returns the list's copy of a chat.
+func (m *SimpleListModel) ChatByGUID(chatGUID string) (models.Chat, bool) {
+	for _, chat := range m.items {
+		if chat.GUID == chatGUID {
+			return chat, true
+		}
+	}
+	return models.Chat{}, false
+}
+
 func chatListPrefix(chat models.Chat) string {
 	if chat.IsGroup() {
 		n := len(chat.Participants)

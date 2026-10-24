@@ -93,8 +93,7 @@ func main() {
 		app.ShowError(err)
 	}
 
-	p := tea.NewProgram(
-		app,
+	options := []tea.ProgramOption{
 		tea.WithAltScreen(),
 		// Cell motion, not all motion: the app only reads motion while a
 		// button is held (dragging the sidebar edge and the pane dividers),
@@ -103,7 +102,12 @@ func main() {
 		// reader for no gain — and a flooded reader is what tears sequences
 		// in half and types them into the composer.
 		tea.WithMouseCellMotion(),
-	)
+	}
+	if app.ReportsFocus() {
+		// Notifications go out only while the terminal is not looked at.
+		options = append(options, tea.WithReportFocus())
+	}
+	p := tea.NewProgram(app, options...)
 	if _, err := p.Run(); err != nil {
 		fatal("running the tui: %v", err)
 	}

@@ -96,6 +96,7 @@ backend owns a conversation is never something you have to think about.
   server_url                BB_SERVER_URL               unset     bluebubbles url
   password                  BB_PASSWORD                 unset     api password
   theme                     BB_THEME                    auto      auto|light|dark
+  notifications             BB_NOTIFICATIONS            off       off|bell|desktop
   message_limit             BB_MESSAGE_LIMIT            50        messages per chat
   chat_limit                BB_CHAT_LIMIT               50        imessage chats listed
   poll_interval_sec         BB_POLL_INTERVAL_SEC        10        refresh; 0 disables
@@ -129,6 +130,7 @@ backend owns a conversation is never something you have to think about.
 server_url: "https://your-server:1234"
 password: "your-api-password"
 theme: auto
+notifications: off
 message_limit: 50
 chat_limit: 50
 poll_interval_sec: 10
@@ -154,6 +156,26 @@ max_previews_per_message: 2
   on a black-background xterm: set theme: dark, and make sure TERM is
   xterm-256color. a TERM without a colour suffix makes lipgloss strip every
   colour, so the palette never gets a chance.
+
+== notifications ==
+
+  off by default. inside the app a message always gets noticed: see
+  "chat list and status". this setting is for when the terminal itself is
+  out of sight.
+
+  bell       rings the terminal bell. terminals and window managers turn
+             that into an urgency hint, tmux flags the window, and over ssh
+             it is the one that reaches the machine in front of you.
+  desktop    a desktop notification: notify-send on linux (mako, dunst,
+             gnome, kde), osascript on macos.
+
+  either goes out only while the terminal window is not focused, which the
+  app learns by asking the terminal for focus reports. a terminal that never
+  sends any -- tmux needs `set -g focus-events on` -- is treated as watched,
+  and is alerted only for chats that are not on screen. a chat rings or
+  notifies once per 30 seconds however many messages it sends, and ignored
+  chats, your own messages, and unknown senders while those are hidden never
+  do.
 ```
 
 ---
@@ -319,6 +341,7 @@ max_previews_per_message: 2
     alt+, / alt+.          previous / next tab
     alt+r                  name the tab; an empty name goes back to naming
                            it after its networks
+    alt+n                  go to the newest unread chat
 
   toggles
     ctrl+s                 chat list
@@ -338,7 +361,8 @@ max_previews_per_message: 2
   mouse
     click to focus a pane, open an image or open a url where it is drawn,
     click a network chip to filter the chat list, click a tab on the tab bar
-    to show it, scroll to move through history,
+    to show it, click the unread badge to open the list on that chat, scroll
+    to move through history,
     drag the chat list edge or a pane divider to resize.
 ```
 
@@ -378,6 +402,14 @@ max_previews_per_message: 2
 
   unread chats are marked in the chat list and with a dot on pane headers.
   a pane you are looking at clears its own marker.
+
+  a message for a chat that is nowhere on screen -- in no pane of the tab
+  shown, and not in the list, because it is hidden or filtered to another
+  network -- shows as a toast on the bottom row: chat, sender, text. with
+  the list hidden, the top-right corner names the newest unread chat and
+  counts the rest (● Family +2); clicking it opens the list on that chat.
+  alt+n goes to the newest unread chat from anywhere: to the pane already
+  showing it, in another tab if need be, or else into the focused pane.
 
   with more than one tab open, a tab bar sits above the panes: each tab's
   number, then its name -- the one given with alt+r, or else the networks

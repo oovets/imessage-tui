@@ -205,6 +205,22 @@ func (m *ChatListModel) NewMessageCount() int {
 	return m.list.NewMessageCount()
 }
 
+func (m *ChatListModel) NewestUnread() *models.Chat {
+	return m.list.NewestUnread()
+}
+
+func (m *ChatListModel) Listed(chatGUID string) bool {
+	return m.list.Listed(chatGUID)
+}
+
+func (m *ChatListModel) Quiet(chatGUID string) bool {
+	return m.list.Quiet(chatGUID)
+}
+
+func (m *ChatListModel) ChatByGUID(chatGUID string) (models.Chat, bool) {
+	return m.list.ChatByGUID(chatGUID)
+}
+
 func (m ChatListModel) Update(msg tea.Msg) (ChatListModel, tea.Cmd) {
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)

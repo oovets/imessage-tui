@@ -193,6 +193,12 @@ type AppModel struct {
 	dividerDragging  bool
 	dividerNode      *LayoutNode
 
+	// Announcing messages beyond the screen: see notify.go.
+	notifyMode    notifyMode
+	terminalFocus terminalFocus
+	alert         alerter
+	alertedAt     map[string]time.Time
+
 	// All disk writes go through this so the Update loop never blocks on
 	// fsync/marshal. Blocking Update for even 50ms causes dropped
 	// keystrokes during fast typing.
@@ -214,7 +220,9 @@ func NewAppModelWithConfig(backends *provider.Registry, stream provider.Stream, 
 	pollInterval := defaultPollInterval
 	enableLinkPreviews := true
 	maxPreviewsPerMessage := 2
+	notifications := notifyOff
 	if cfg != nil {
+		notifications = parseNotifyMode(cfg.Notifications)
 		if cfg.MessageLimit > 0 {
 			messageLimit = cfg.MessageLimit
 		}
@@ -268,6 +276,9 @@ func NewAppModelWithConfig(backends *provider.Registry, stream provider.Stream, 
 		disableReadSync:       make(map[string]bool),
 		linkPreviewInFlight:   make(map[string]bool),
 		linkPreviewAttempted:  make(map[string]bool),
+		notifyMode:            notifications,
+		alert:                 systemAlert,
+		alertedAt:             make(map[string]time.Time),
 		chatOverrides:         chatOverrides,
 		persist:               newPersister(),
 		loading:               true,
@@ -405,6 +416,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case toastMsg:
 		m.toastText = msg.text
 		m.toastUntil = time.Now().Add(msg.duration)
+		return m, nil
+
+	case tea.FocusMsg:
+		m.terminalFocus = terminalFocused
+		return m, nil
+
+	case tea.BlurMsg:
+		m.terminalFocus = terminalBlurred
 		return m, nil
 
 	case pendingTimeoutMsg:
@@ -801,6 +820,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, m.afterTabChange()
+
+		case "alt+n":
+			return m, m.jumpToUnread()
 
 		case "alt+r":
 			m.chatAction = chatActionRenameTab
@@ -1390,7 +1412,7 @@ func (m AppModel) tabBarView() string {
 		return ""
 	}
 	infos := m.windowManager.Tabs()
-	return renderTabBar(infos, m.tabTitles(infos), m.windowManager.width)
+	return renderTabBar(infos, m.tabTitles(infos), m.tabBarWidth())
 }
 
 // afterTabChange settles the app on whichever tab is now on screen: the bar
@@ -1448,10 +1470,16 @@ func (m *AppModel) followTabNetwork() {
 	m.saveUIState()
 }
 
+// tabBarWidth is how much of the top row the tab bar may use: all of the pane
+// area's, less the corner the unread badge is drawn over.
+func (m AppModel) tabBarWidth() int {
+	return max(m.windowManager.width-lipgloss.Width(m.unreadBadge()), 1)
+}
+
 // tabAt returns the tab drawn at column x of the tab bar.
 func (m AppModel) tabAt(x int) (int, bool) {
 	infos := m.windowManager.Tabs()
-	_, spans := tabBarLabels(infos, m.tabTitles(infos), m.windowManager.width)
+	_, spans := tabBarLabels(infos, m.tabTitles(infos), m.tabBarWidth())
 	for _, span := range spans {
 		if x >= span.x0 && x < span.x1 {
 			return span.tab, true
@@ -1511,6 +1539,9 @@ func (m AppModel) frame() string {
 		)
 	}
 
+	if badge := m.unreadBadge(); badge != "" {
+		content = overlayTopRight(content, badge, m.frameWidth())
+	}
 	if line := m.statusLineView(); line != "" {
 		content = overlayBottomLine(content, line)
 	}
@@ -2974,11 +3005,7 @@ func (m *AppModel) handleProviderEvent(event provider.Event) (tea.Model, tea.Cmd
 			} else if !msg.IsFromMe {
 				m.chatList.MarkNewMessage(msg.ChatGUID)
 			}
-			preview := strings.TrimSpace(displayText(msg))
-			if preview == "" && len(msg.Attachments) > 0 {
-				preview = attachmentPreviewFromMessage(msg)
-			}
-			m.chatList.UpdateChatPreview(msg.ChatGUID, preview, msg.DateCreated)
+			m.chatList.UpdateChatPreview(msg.ChatGUID, messagePreview(msg), msg.DateCreated)
 		}
 
 		cmds := []tea.Cmd{m.waitForStreamEvent()}
@@ -2987,6 +3014,7 @@ func (m *AppModel) handleProviderEvent(event provider.Event) (tea.Model, tea.Cmd
 				cmds = append(cmds, cmd)
 			}
 		}
+		cmds = append(cmds, m.announce(msg)...)
 		if cmd := m.linkPreviewCmdsForMessages(msg.ChatGUID, []models.Message{msg}); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -3118,6 +3146,10 @@ func (m AppModel) handleMouseMsg(msg tea.MouseMsg) (AppModel, tea.Cmd) {
 	}
 
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+		if m.unreadBadgeAt(msg.X, msg.Y) {
+			m.revealUnread()
+			return m, nil
+		}
 		if m.showChatList && msg.X < m.chatListWidth {
 			// Content starts after the panel's padding, and after its left
 			// border too when the list was already the focused panel — the
@@ -3178,6 +3210,16 @@ func (m AppModel) handleMouseMsg(msg tea.MouseMsg) (AppModel, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// messagePreview is a message in a line, for the chat list and for notices:
+// its text, or what it carries when it has none.
+func messagePreview(msg models.Message) string {
+	preview := strings.TrimSpace(displayText(msg))
+	if preview == "" && len(msg.Attachments) > 0 {
+		preview = attachmentPreviewFromMessage(msg)
+	}
+	return preview
 }
 
 func attachmentPreviewFromMessage(msg models.Message) string {

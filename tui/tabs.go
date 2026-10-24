@@ -70,6 +70,32 @@ func (wm *WindowManager) WindowsInAllTabs() []*ChatWindow {
 	return result
 }
 
+// TabShowingChat finds a pane showing the chat — in the tab on screen if one
+// there does, else in the first other tab that has one — and returns its tab
+// and pane.
+func (wm *WindowManager) TabShowingChat(chatGUID string) (int, WindowID, bool) {
+	order := []int{wm.activeTab}
+	for i := range wm.tabs {
+		if i != wm.activeTab {
+			order = append(order, i)
+		}
+	}
+	for _, i := range order {
+		windows := wm.tabWindows(i)
+		ids := make([]WindowID, 0, len(windows))
+		for id := range windows {
+			ids = append(ids, id)
+		}
+		sort.Slice(ids, func(a, b int) bool { return ids[a] < ids[b] })
+		for _, id := range ids {
+			if chat := windows[id].Chat; chat != nil && chat.GUID == chatGUID {
+				return i, id, true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
 // Tabs describes every tab, in order.
 func (wm *WindowManager) Tabs() []TabInfo {
 	infos := make([]TabInfo, len(wm.tabs))

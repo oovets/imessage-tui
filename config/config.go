@@ -23,6 +23,10 @@ type Config struct {
 	// multiplexers like tmux/screen, which often answer the query
 	// themselves instead of forwarding it to the real terminal.
 	Theme string
+	// Notifications is how a message is announced outside the app while the
+	// terminal is not being looked at: "off" (the default), "bell" or
+	// "desktop".
+	Notifications string
 }
 
 const (
@@ -184,6 +188,7 @@ func newViper() *viper.Viper {
 	v.BindEnv("preview_proxy_url", "BB_PREVIEW_PROXY_URL")
 	v.BindEnv("oembed_endpoint", "BB_OEMBED_ENDPOINT")
 	v.BindEnv("theme", "BB_THEME")
+	v.BindEnv("notifications", "BB_NOTIFICATIONS")
 
 	v.SetDefault("poll_interval_sec", 10)
 	v.SetDefault("message_limit", 50)
@@ -193,6 +198,7 @@ func newViper() *viper.Viper {
 	v.SetDefault("preview_proxy_url", "")
 	v.SetDefault("oembed_endpoint", "https://noembed.com/embed")
 	v.SetDefault("theme", "auto")
+	v.SetDefault("notifications", "off")
 
 	return v
 }
@@ -216,6 +222,7 @@ func newLegacyViper() *viper.Viper {
 	v.BindEnv("preview_proxy_url", "BB_PREVIEW_PROXY_URL")
 	v.BindEnv("oembed_endpoint", "BB_OEMBED_ENDPOINT")
 	v.BindEnv("theme", "BB_THEME")
+	v.BindEnv("notifications", "BB_NOTIFICATIONS")
 
 	v.SetDefault("poll_interval_sec", 10)
 	v.SetDefault("message_limit", 50)
@@ -225,6 +232,7 @@ func newLegacyViper() *viper.Viper {
 	v.SetDefault("preview_proxy_url", "")
 	v.SetDefault("oembed_endpoint", "https://noembed.com/embed")
 	v.SetDefault("theme", "auto")
+	v.SetDefault("notifications", "off")
 
 	return v
 }
@@ -241,5 +249,6 @@ func loadFromViper(v *viper.Viper) *Config {
 		PreviewProxyURL:       v.GetString("preview_proxy_url"),
 		OEmbedEndpoint:        v.GetString("oembed_endpoint"),
 		Theme:                 v.GetString("theme"),
+		Notifications:         v.GetString("notifications"),
 	}
 }

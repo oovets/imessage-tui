@@ -83,6 +83,7 @@ func helpOverlayView(width, height int) string {
 				"Alt+1…9      Go to tab N",
 				"Alt+, / .    Previous / next tab",
 				"Alt+R        Name tab (empty: name it after its networks)",
+				"Alt+N        Go to the newest unread chat",
 				"Click        A tab on the bar: show it",
 			},
 		},
