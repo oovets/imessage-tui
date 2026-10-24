@@ -46,6 +46,7 @@ const (
 	chatActionNone chatActionMode = iota
 	chatActionDelete
 	chatActionRename
+	chatActionRenameTab
 )
 
 // Message types for Bubble Tea
@@ -769,6 +770,43 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.saveLayoutState()
 			return m, cmd
 
+		// Tabs. Alt, not ctrl: the ctrl keys are taken, and alt-modified
+		// keys never count as text, so these work mid-message too. alt+[ is
+		// not one of them — it is how a torn escape sequence arrives, and
+		// swallowEscapeSequenceTail drops it.
+		case "alt+t":
+			if err := m.windowManager.NewTab(); err != nil {
+				return m, showToastCmd(capitalize(err.Error()), 3*time.Second)
+			}
+			return m, m.afterTabChange()
+
+		case "alt+w":
+			if !m.windowManager.CloseTab() {
+				return m, showToastCmd("Last tab — alt+t opens another", 2*time.Second)
+			}
+			return m, m.afterTabChange()
+
+		case "alt+.", "alt+,":
+			step := 1
+			if msg.String() == "alt+," {
+				step = -1
+			}
+			if !m.windowManager.CycleTab(step) {
+				return m, nil
+			}
+			return m, m.afterTabChange()
+
+		case "alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":
+			if !m.windowManager.SwitchTab(int(msg.Runes[0] - '1')) {
+				return m, nil
+			}
+			return m, m.afterTabChange()
+
+		case "alt+r":
+			m.chatAction = chatActionRenameTab
+			m.renameText = m.windowManager.ActiveTabName()
+			return m, nil
+
 		case "ctrl+s":
 			// Toggle chat list visibility
 			m.showChatList = !m.showChatList
@@ -1254,7 +1292,7 @@ func (m AppModel) handleChatActionKey(msg tea.KeyMsg) (AppModel, tea.Cmd) {
 		default:
 			return m, nil
 		}
-	case chatActionRename:
+	case chatActionRename, chatActionRenameTab:
 		switch msg.String() {
 		case "esc", "escape":
 			m.clearChatAction()
@@ -1266,6 +1304,12 @@ func (m AppModel) handleChatActionKey(msg tea.KeyMsg) (AppModel, tea.Cmd) {
 			}
 			return m, nil
 		case "enter":
+			if m.chatAction == chatActionRenameTab {
+				m.windowManager.SetActiveTabName(m.renameText)
+				m.clearChatAction()
+				m.saveLayoutState()
+				return m, nil
+			}
 			chatGUID := m.actionChatGUID
 			displayName := strings.TrimSpace(m.renameText)
 			m.clearChatAction()
@@ -1305,12 +1349,92 @@ func (m *AppModel) updateLayout() {
 	if windowsWidth < 1 {
 		windowsWidth = 1
 	}
-	windowsHeight := contentHeight
+	windowsHeight := contentHeight - m.tabBarRows()
 	if windowsHeight < 1 {
 		windowsHeight = 1
 	}
 
 	m.windowManager.SetSize(windowsWidth, windowsHeight)
+}
+
+// tabBarRows is how many rows the tab bar takes above the panes. With a
+// single tab there is nothing to choose between, so there is no bar and the
+// panes keep the row.
+func (m AppModel) tabBarRows() int {
+	if m.windowManager.TabCount() > 1 && m.height > 1 {
+		return 1
+	}
+	return 0
+}
+
+// panesX is the screen column where the pane area starts.
+func (m AppModel) panesX() int {
+	if m.showChatList {
+		return m.chatListWidth
+	}
+	return 0
+}
+
+// tabTitles returns what the bar calls each tab.
+func (m AppModel) tabTitles(infos []TabInfo) []string {
+	titles := make([]string, len(infos))
+	for i, info := range infos {
+		titles[i] = tabTitle(info, m.providers.Label)
+	}
+	return titles
+}
+
+// tabBarView draws the tab bar over the pane area, or "" with one tab.
+func (m AppModel) tabBarView() string {
+	if m.tabBarRows() == 0 {
+		return ""
+	}
+	infos := m.windowManager.Tabs()
+	return renderTabBar(infos, m.tabTitles(infos), m.windowManager.width)
+}
+
+// afterTabChange settles the app on whichever tab is now on screen: the bar
+// may have appeared or gone, the composer focus follows the pane focus, and
+// the new tab's chats are fetched if they went stale while it was hidden —
+// the refresh timer only reloads the tab on screen.
+func (m *AppModel) afterTabChange() tea.Cmd {
+	m.dividerDragging = false
+	m.dividerNode = nil
+	m.updateLayout()
+	if m.focused == focusWindow {
+		if window := m.windowManager.FocusedWindow(); window != nil {
+			window.Input.textarea.Focus()
+		}
+	}
+	m.saveLayoutState()
+
+	cmds := []tea.Cmd{m.clearFocusedWindowNewMessageIndicator()}
+	seen := make(map[string]bool)
+	for _, window := range m.windowManager.AllWindows() {
+		if window.Chat == nil || seen[window.Chat.GUID] {
+			continue
+		}
+		chatGUID := window.Chat.GUID
+		seen[chatGUID] = true
+		if !m.shouldRefreshMessages(chatGUID) {
+			continue
+		}
+		m.messageFetchInFlight[chatGUID] = true
+		cmds = append(cmds, prefetchMessagesCmd(m.providerFor(chatGUID), chatGUID, m.messageLimit))
+	}
+	return tea.Batch(cmds...)
+}
+
+// tabAt returns the tab drawn at column x of the tab bar.
+func (m AppModel) tabAt(x int) (int, bool) {
+	infos := m.windowManager.Tabs()
+	_, spans := tabBarLabels(infos, m.tabTitles(infos), m.windowManager.width)
+	for _, span := range spans {
+		if x >= span.x0 && x < span.x1 {
+			return span.tab, true
+		}
+	}
+	return 0, false
 }
 
 func (m AppModel) View() string {
@@ -1350,6 +1474,9 @@ func (m AppModel) frame() string {
 
 	// Render windows area
 	windowsView := m.windowManager.Render()
+	if bar := m.tabBarView(); bar != "" {
+		windowsView = lipgloss.JoinVertical(lipgloss.Left, bar, windowsView)
+	}
 
 	// Join panels horizontally
 	content := windowsView
@@ -1420,6 +1547,8 @@ func (m AppModel) chatActionStatusText() string {
 		return fmt.Sprintf("Delete %q? Press D to confirm, Esc to cancel", m.actionChatName)
 	case chatActionRename:
 		return fmt.Sprintf("Rename %q: %s", m.actionChatName, m.renameText)
+	case chatActionRenameTab:
+		return fmt.Sprintf("Name tab %d (empty: name it after its networks): %s", m.windowManager.ActiveTab()+1, m.renameText)
 	default:
 		return ""
 	}
@@ -1809,7 +1938,11 @@ func (m *AppModel) restoreLayoutFromState(chats []models.Chat) bool {
 	}
 	m.didRestoreLayout = true
 
-	if m.savedLayoutState == nil || m.savedLayoutState.Root == nil {
+	if m.savedLayoutState == nil {
+		return false
+	}
+	states, active := m.savedLayoutState.TabStates()
+	if len(states) == 0 {
 		return false
 	}
 
@@ -1818,13 +1951,40 @@ func (m *AppModel) restoreLayoutFromState(chats []models.Chat) bool {
 		chatByGUID[chats[i].GUID] = &chats[i]
 	}
 
-	wm := m.windowManager
-	wm.windows = make(map[WindowID]*ChatWindow)
-	wm.root = nil
-	wm.focusedWindow = 0
-	wm.nextID = 0
+	// A tab that no longer parses is dropped rather than failing the rest.
+	var restored []restoredTab
+	restoredActive := -1
+	for i, state := range states {
+		tab, ok := m.buildTab(state, chatByGUID)
+		if !ok {
+			continue
+		}
+		if i == active {
+			restoredActive = len(restored)
+		}
+		restored = append(restored, tab)
+	}
+	if len(restored) == 0 {
+		return false
+	}
+	if restoredActive < 0 {
+		restoredActive = 0
+	}
 
+	m.windowManager.setTabs(restored, restoredActive)
+	m.focused = focusWindow
+	m.clearFocusedWindowNewMessageIndicator()
+	return true
+}
+
+// buildTab rebuilds one saved tab: its split tree, with each leaf showing the
+// chat it showed before, from the cache until the next fetch.
+func (m *AppModel) buildTab(state config.TabLayoutState, chatByGUID map[string]*models.Chat) (restoredTab, bool) {
+	wm := m.windowManager
+	windows := make(map[WindowID]*ChatWindow)
 	var leaves []*ChatWindow
+	var nextID WindowID
+
 	var build func(node *config.LayoutNodeState) *LayoutNode
 	build = func(node *config.LayoutNodeState) *LayoutNode {
 		if node == nil {
@@ -1833,13 +1993,9 @@ func (m *AppModel) restoreLayoutFromState(chats []models.Chat) bool {
 
 		dir := SplitDirection(node.Direction)
 		if dir == SplitNone {
-			id := wm.nextID
-			wm.nextID++
-			window := NewChatWindow(id)
-			window.Messages.SetShowTimestamps(wm.showTimestamps)
-			window.Messages.SetShowLineNumbers(wm.showLineNumbers)
-			window.Messages.SetShowSenderNames(wm.showSenderNames)
-			wm.windows[id] = window
+			window := wm.newWindow(nextID)
+			windows[nextID] = window
+			nextID++
 			leaves = append(leaves, window)
 			return NewLeafNode(window)
 		}
@@ -1854,26 +2010,16 @@ func (m *AppModel) restoreLayoutFromState(chats []models.Chat) bool {
 		return split
 	}
 
-	root := build(m.savedLayoutState.Root)
+	root := build(state.Root)
 	if root == nil || len(leaves) == 0 || len(leaves) > wm.maxWindows {
-		wm.windows = make(map[WindowID]*ChatWindow)
-		window := NewChatWindow(0)
-		window.Messages.SetShowTimestamps(wm.showTimestamps)
-		window.Messages.SetShowLineNumbers(wm.showLineNumbers)
-		window.Messages.SetShowSenderNames(wm.showSenderNames)
-		window.Focused = true
-		wm.windows[0] = window
-		wm.focusedWindow = 0
-		wm.root = NewLeafNode(window)
-		wm.nextID = 1
-		return false
+		return restoredTab{}, false
 	}
 
 	for i, window := range leaves {
-		if i >= len(m.savedLayoutState.LeafChatGUIDs) {
+		if i >= len(state.LeafChatGUIDs) {
 			continue
 		}
-		chatGUID := strings.TrimSpace(m.savedLayoutState.LeafChatGUIDs[i])
+		chatGUID := strings.TrimSpace(state.LeafChatGUIDs[i])
 		chat, ok := chatByGUID[chatGUID]
 		if !ok {
 			chat, ok = m.threadChat(chatGUID)
@@ -1887,30 +2033,68 @@ func (m *AppModel) restoreLayoutFromState(chats []models.Chat) bool {
 		}
 	}
 
-	for _, window := range leaves {
-		window.Focused = false
-	}
-	focusIdx := m.savedLayoutState.FocusedLeafIndex
+	focusIdx := state.FocusedLeafIndex
 	if focusIdx < 0 || focusIdx >= len(leaves) {
 		focusIdx = 0
 	}
-	leaves[focusIdx].Focused = true
-
-	wm.root = root
-	wm.focusedWindow = leaves[focusIdx].ID
-	m.focused = focusWindow
-	wm.recalculateLayout()
-	m.clearFocusedWindowNewMessageIndicator()
-	return true
+	return restoredTab{
+		name:    state.Name,
+		root:    root,
+		windows: windows,
+		focused: leaves[focusIdx].ID,
+	}, true
 }
 
 func (m *AppModel) saveLayoutState() {
+	if state, ok := m.layoutState(); ok {
+		m.persist.saveLayout(state)
+	}
+}
+
+// layoutState is every tab's layout in its saved form.
+func (m *AppModel) layoutState() (config.LayoutState, bool) {
 	wm := m.windowManager
 	if wm == nil || wm.root == nil {
-		return
+		return config.LayoutState{}, false
 	}
 
-	leafOrder := make([]WindowID, 0, wm.root.CountWindows())
+	var tabs []config.TabLayoutState
+	active := 0
+	for i, tab := range wm.tabs {
+		root, windows, focused := tab.root, tab.windows, tab.focusedWindow
+		if i == wm.activeTab {
+			root, windows, focused = wm.root, wm.windows, wm.focusedWindow
+		}
+		state, ok := encodeTabLayout(root, windows, focused)
+		if !ok {
+			continue
+		}
+		if i == wm.activeTab {
+			active = len(tabs)
+		}
+		state.Name = tab.name
+		tabs = append(tabs, state)
+	}
+	if len(tabs) == 0 {
+		return config.LayoutState{}, false
+	}
+
+	current := tabs[active]
+	return config.LayoutState{
+		Root:             current.Root,
+		LeafChatGUIDs:    current.LeafChatGUIDs,
+		FocusedLeafIndex: current.FocusedLeafIndex,
+		Tabs:             tabs,
+		ActiveTab:        active,
+	}, true
+}
+
+// encodeTabLayout turns one tab's split tree into its saved form.
+func encodeTabLayout(rootNode *LayoutNode, windows map[WindowID]*ChatWindow, focused WindowID) (config.TabLayoutState, bool) {
+	if rootNode == nil {
+		return config.TabLayoutState{}, false
+	}
+	leafOrder := make([]WindowID, 0, rootNode.CountWindows())
 	var encode func(node *LayoutNode) *config.LayoutNodeState
 	encode = func(node *LayoutNode) *config.LayoutNodeState {
 		if node == nil {
@@ -1933,29 +2117,28 @@ func (m *AppModel) saveLayoutState() {
 		return state
 	}
 
-	root := encode(wm.root)
+	root := encode(rootNode)
 	if root == nil || len(leafOrder) == 0 {
-		return
+		return config.TabLayoutState{}, false
 	}
 
 	leafChatGUIDs := make([]string, len(leafOrder))
 	focusedLeafIndex := 0
 	for i, id := range leafOrder {
-		window := wm.windows[id]
+		window := windows[id]
 		if window != nil && window.Chat != nil {
 			leafChatGUIDs[i] = window.Chat.GUID
 		}
-		if id == wm.focusedWindow {
+		if id == focused {
 			focusedLeafIndex = i
 		}
 	}
 
-	state := config.LayoutState{
+	return config.TabLayoutState{
 		Root:             root,
 		LeafChatGUIDs:    leafChatGUIDs,
 		FocusedLeafIndex: focusedLeafIndex,
-	}
-	m.persist.saveLayout(state)
+	}, true
 }
 
 func (m *AppModel) clearFocusedWindowNewMessageIndicator() tea.Cmd {
@@ -2311,7 +2494,7 @@ func (m *AppModel) openThread(window *ChatWindow, n int) tea.Cmd {
 	}
 	window.Input.Clear()
 
-	if showing := m.windowManager.WindowsShowingChat(thread.GUID); len(showing) > 0 {
+	if showing := m.windowManager.ActiveWindowsShowingChat(thread.GUID); len(showing) > 0 {
 		m.windowManager.SetFocus(showing[0].ID)
 		m.saveLayoutState()
 		return m.clearFocusedWindowNewMessageIndicator()
@@ -2643,6 +2826,11 @@ func refreshTickCmd(interval time.Duration) tea.Cmd {
 // refreshOpenChatsCmd periodically reconciles every chat currently visible in a
 // pane. WebSocket remains the fast path; this catches missed/delayed events and
 // keeps panes fresh when the socket is reconnecting.
+//
+// Only the tab on screen. Background tabs still take realtime events, and are
+// caught up when they come back (afterTabChange); polling them too would
+// multiply the calls by the number of tabs, against Slack's Tier 3 limit and
+// Telegram's FLOOD_WAIT.
 func (m *AppModel) refreshOpenChatsCmd() tea.Cmd {
 	seen := make(map[string]struct{})
 	var cmds []tea.Cmd
@@ -2696,7 +2884,7 @@ func (m *AppModel) resyncAllChatsCmd() tea.Cmd {
 		cmds = append(cmds, prefetchMessagesCmd(m.providerFor(chatGUID), chatGUID, m.messageLimit))
 	}
 
-	for _, window := range m.windowManager.AllWindows() {
+	for _, window := range m.windowManager.WindowsInAllTabs() {
 		if window.Chat != nil {
 			add(window.Chat.GUID)
 		}
@@ -2832,12 +3020,16 @@ func (m AppModel) scrollFocusedMessages(direction int) {
 }
 
 func (m AppModel) handleMouseMsg(msg tea.MouseMsg) (AppModel, tea.Cmd) {
-	contentY := msg.Y - 1
-	if contentY < 0 {
-		return m, nil
-	}
+	// Panes are laid out from the top of the pane area, which is the top of
+	// the screen unless the tab bar sits above it. This used to subtract one
+	// row unconditionally, a leftover that made every pane click land on the
+	// row above the pointer.
+	contentY := msg.Y - m.tabBarRows()
 
 	if mouseIsWheel(msg) {
+		if contentY < 0 {
+			return m, nil
+		}
 		relX := msg.X
 		if m.showChatList {
 			if msg.X < m.chatListWidth {
@@ -2927,9 +3119,13 @@ func (m AppModel) handleMouseMsg(msg tea.MouseMsg) (AppModel, tea.Cmd) {
 			return m, nil
 		}
 
-		relX := msg.X
-		if m.showChatList {
-			relX = msg.X - m.chatListWidth
+		relX := msg.X - m.panesX()
+		if contentY < 0 {
+			// The tab bar.
+			if tab, ok := m.tabAt(relX); ok && m.windowManager.SwitchTab(tab) {
+				return m, m.afterTabChange()
+			}
+			return m, nil
 		}
 		if divider := m.windowManager.DividerAt(relX, contentY); divider != nil {
 			m.dividerDragging = true

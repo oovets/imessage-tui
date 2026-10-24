@@ -63,6 +63,8 @@ backend owns a conversation is never something you have to think about.
 
   layout
     up to 8 panes, split horizontally or vertically, each with its own chat
+    up to 9 tabs, each its own set of panes -- slack in one, imessage in
+    another
     per-pane focus, resizable dividers, resizable chat list
     layout, ui state and message cache survive a restart
 
@@ -310,6 +312,14 @@ max_previews_per_message: 2
     ctrl+shift+left/right  resize the focused split
     ctrl+left / ctrl+right resize the chat list
 
+  tabs
+    alt+t                  new tab, with one empty pane
+    alt+w                  close the tab; its chats stay in the list
+    alt+1 ... alt+9        go to tab N
+    alt+, / alt+.          previous / next tab
+    alt+r                  name the tab; an empty name goes back to naming
+                           it after its networks
+
   toggles
     ctrl+s                 chat list
     ctrl+t                 timestamps
@@ -327,8 +337,8 @@ max_previews_per_message: 2
 
   mouse
     click to focus a pane, open an image or open a url where it is drawn,
-    click a network tab to filter the chat list, scroll to move through
-    history,
+    click a network chip to filter the chat list, click a tab on the tab bar
+    to show it, scroll to move through history,
     drag the chat list edge or a pane divider to resize.
 ```
 
@@ -369,9 +379,19 @@ max_previews_per_message: 2
   unread chats are marked in the chat list and with a dot on pane headers.
   a pane you are looking at clears its own marker.
 
-  with more than one network connected, a row of tabs under the title --
+  with more than one tab open, a tab bar sits above the panes: each tab's
+  number, then its name -- the one given with alt+r, or else the networks
+  its panes show, so a tab of slack channels reads as that workspace without
+  being named -- and a dot while a pane in it holds a message you have not
+  seen. a single tab has no bar. panes in a background tab keep taking
+  realtime messages; the periodic reload covers only the tab on screen, and
+  a tab coming back reloads whatever went stale while it was hidden. the
+  8-pane limit is per tab. tabs, their names and their panes survive a
+  restart.
+
+  with more than one network connected, a row of chips under the title --
   All, iMessage, each slack workspace -- picks which the list shows: click
-  one, or step through them with n and N. a tab with unread chats shows how
+  one, or step through them with n and N. a chip with unread chats shows how
   many. clicking a network's header in the grouped list filters to it too. s
   groups the list under a header per network, imessage first, then slack
   workspaces in config order; within a group a chat with a new message still

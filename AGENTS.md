@@ -105,6 +105,19 @@ that bakes a `Color*` value in at construction time must be added to
 `rebuildStyles`, or a pinned theme will not reach it — `TestDarkThemeBrightensWholeView`
 catches that.
 
+**Tabs park the layout they are not showing.** `WindowManager`'s `root`,
+`windows`, `nextID` and `focusedWindow` are always the *active* tab's; a
+background tab's sit in its `paneTab` (`tui/tabs.go`) until it comes back.
+So `AllWindows`, `WindowAt`, `SplitWindow` and the rest stay single-tab and
+need no tab argument, while anything that answers per chat — new messages,
+renames, display toggles — must use `WindowsShowingChat` /
+`WindowsInAllTabs`, which span every tab. The periodic refresh deliberately
+polls only the active tab (Tier 3 / FLOOD_WAIT); `afterTabChange` catches a
+tab up when it returns. Tab keys are alt keys, never `alt+[`: that is the
+head of a torn escape sequence and `swallowEscapeSequenceTail` eats it. The
+bar exists only with two or more tabs, and takes its row from the panes, so
+mouse rows in the pane area are offset by `tabBarRows()`.
+
 **Never write to stdout.** The TUI owns it. `main.go` redirects `log` to
 `~/.imessage-tui.log`; use `log.Printf` for debugging, never `fmt.Println`.
 

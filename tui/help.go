@@ -34,7 +34,7 @@ func helpOverlayView(width, height int) string {
 			lines: []string{
 				"/            Filter chats (Esc to clear)",
 				"n / N        Next / previous network (all → each network)",
-				"Click        A network tab or header: show only that network",
+				"Click        A network chip or header: show only that network",
 				"s            Sort by recent / group by network",
 				"p            Pin / unpin selected chat",
 				"K / J        Move a pinned chat up / down",
@@ -73,6 +73,17 @@ func helpOverlayView(width, height int) string {
 				"Ctrl+G       Split pane vertically",
 				"Ctrl+W       Close focused pane",
 				"Ctrl+Shift+←/→  Adjust split ratio",
+			},
+		},
+		{
+			title: "Tabs",
+			lines: []string{
+				"Alt+T        New tab, with its own panes",
+				"Alt+W        Close tab (its chats stay in the list)",
+				"Alt+1…9      Go to tab N",
+				"Alt+, / .    Previous / next tab",
+				"Alt+R        Name tab (empty: name it after its networks)",
+				"Click        A tab on the bar: show it",
 			},
 		},
 		{

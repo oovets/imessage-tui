@@ -19,13 +19,23 @@ const (
 	DirDown
 )
 
-// WindowManager manages multiple chat windows and their layout
+// WindowManager manages multiple chat windows and their layout.
+//
+// The layout fields below — root, windows, nextID, focusedWindow — are the
+// active tab's. Background tabs park theirs in tabs (see tabs.go), so every
+// pane operation works on "the layout" without knowing tabs exist. What is
+// per chat rather than per pane — the message cache, sender-name choices,
+// display toggles — is shared by every tab.
 type WindowManager struct {
-	root             *LayoutNode
-	windows          map[WindowID]*ChatWindow
-	nextID           WindowID
-	focusedWindow    WindowID
-	maxWindows       int
+	root          *LayoutNode
+	windows       map[WindowID]*ChatWindow
+	nextID        WindowID
+	focusedWindow WindowID
+	maxWindows    int
+
+	tabs      []*paneTab
+	activeTab int
+
 	showTimestamps   bool
 	showLineNumbers  bool
 	showSenderNames  bool
@@ -55,19 +65,26 @@ func NewWindowManager() *WindowManager {
 		showLineNumbers:  true,
 		showSenderNames:  true,
 		showPaneDividers: true,
+		tabs:             []*paneTab{{}},
 	}
 
 	// Create initial window
-	window := NewChatWindow(0)
-	window.Messages.SetShowTimestamps(wm.showTimestamps)
-	window.Messages.SetShowLineNumbers(wm.showLineNumbers)
-	window.Messages.SetShowSenderNames(wm.showSenderNames)
+	window := wm.newWindow(0)
 	window.Focused = true
 	wm.windows[0] = window
 	wm.focusedWindow = 0
 	wm.root = NewLeafNode(window)
 
 	return wm
+}
+
+// newWindow makes an empty pane that follows the current display toggles.
+func (wm *WindowManager) newWindow(id WindowID) *ChatWindow {
+	window := NewChatWindow(id)
+	window.Messages.SetShowTimestamps(wm.showTimestamps)
+	window.Messages.SetShowLineNumbers(wm.showLineNumbers)
+	window.Messages.SetShowSenderNames(wm.showSenderNames)
+	return window
 }
 
 // SetSize updates the available dimensions and recalculates layout
@@ -172,10 +189,7 @@ func (wm *WindowManager) SplitWindow(direction SplitDirection) error {
 	}
 
 	// Create new window
-	newWindow := NewChatWindow(wm.nextID)
-	newWindow.Messages.SetShowTimestamps(wm.showTimestamps)
-	newWindow.Messages.SetShowLineNumbers(wm.showLineNumbers)
-	newWindow.Messages.SetShowSenderNames(wm.showSenderNames)
+	newWindow := wm.newWindow(wm.nextID)
 	wm.windows[wm.nextID] = newWindow
 	wm.nextID++
 
@@ -453,7 +467,7 @@ func (wm *WindowManager) SetCachedLinkPreview(chatGUID, messageGUID string, prev
 
 func (wm *WindowManager) ClearChatFromWindows(chatGUID string) bool {
 	changed := false
-	for _, window := range wm.windows {
+	for _, window := range wm.WindowsInAllTabs() {
 		if window.Chat == nil || window.Chat.GUID != chatGUID {
 			continue
 		}
@@ -465,7 +479,7 @@ func (wm *WindowManager) ClearChatFromWindows(chatGUID string) bool {
 
 func (wm *WindowManager) SetLocalDisplayName(chatGUID, displayName string) bool {
 	changed := false
-	for _, window := range wm.windows {
+	for _, window := range wm.WindowsInAllTabs() {
 		if window.Chat == nil || window.Chat.GUID != chatGUID {
 			continue
 		}
@@ -487,10 +501,22 @@ func (wm *WindowManager) CachedMessagesSnapshot() map[string][]models.Message {
 	return out
 }
 
-// WindowsShowingChat returns all windows displaying a specific chat
+// WindowsShowingChat returns every window displaying a chat, in every tab: a
+// pane in a background tab still has to take in new messages, or it would
+// show a stale conversation when its tab comes back.
 func (wm *WindowManager) WindowsShowingChat(chatGUID string) []*ChatWindow {
+	return windowsShowing(wm.WindowsInAllTabs(), chatGUID)
+}
+
+// ActiveWindowsShowingChat is WindowsShowingChat for the active tab only, for
+// callers that go on to focus one of them.
+func (wm *WindowManager) ActiveWindowsShowingChat(chatGUID string) []*ChatWindow {
+	return windowsShowing(wm.AllWindows(), chatGUID)
+}
+
+func windowsShowing(windows []*ChatWindow, chatGUID string) []*ChatWindow {
 	var result []*ChatWindow
-	for _, window := range wm.windows {
+	for _, window := range windows {
 		if window.Chat != nil && window.Chat.GUID == chatGUID {
 			result = append(result, window)
 		}
@@ -498,7 +524,7 @@ func (wm *WindowManager) WindowsShowingChat(chatGUID string) []*ChatWindow {
 	return result
 }
 
-// AllWindows returns all windows
+// AllWindows returns the active tab's windows. WindowsInAllTabs has the rest.
 func (wm *WindowManager) AllWindows() []*ChatWindow {
 	result := make([]*ChatWindow, 0, len(wm.windows))
 	for _, w := range wm.windows {
@@ -518,7 +544,7 @@ func (wm *WindowManager) SetShowTimestamps(show bool) {
 		return
 	}
 	wm.showTimestamps = show
-	for _, w := range wm.windows {
+	for _, w := range wm.WindowsInAllTabs() {
 		w.Messages.SetShowTimestamps(show)
 	}
 }
@@ -529,7 +555,7 @@ func (wm *WindowManager) SetShowLineNumbers(show bool) {
 		return
 	}
 	wm.showLineNumbers = show
-	for _, w := range wm.windows {
+	for _, w := range wm.WindowsInAllTabs() {
 		w.Messages.SetShowLineNumbers(show)
 	}
 }
@@ -537,7 +563,7 @@ func (wm *WindowManager) SetShowLineNumbers(show bool) {
 // SetShowSenderNames toggles sender names for all windows.
 func (wm *WindowManager) SetShowSenderNames(show bool) {
 	wm.showSenderNames = show
-	for _, w := range wm.windows {
+	for _, w := range wm.WindowsInAllTabs() {
 		w.Messages.SetShowSenderNames(show)
 	}
 }
