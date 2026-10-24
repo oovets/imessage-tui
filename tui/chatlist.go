@@ -23,6 +23,24 @@ func (m *ChatListModel) SetChats(chats []models.Chat) {
 	m.list.SetItems(chats)
 }
 
+// AppendChats adds chats that arrived after the rest; see AppendItems.
+func (m *ChatListModel) AppendChats(chats []models.Chat) {
+	have := make(map[string]bool, len(m.chats))
+	for _, chat := range m.chats {
+		have[chat.GUID] = true
+	}
+	for _, chat := range chats {
+		if !have[chat.GUID] {
+			m.chats = append(m.chats, chat)
+		}
+	}
+	m.list.AppendItems(chats)
+}
+
+func (m *ChatListModel) Len() int {
+	return m.list.Len()
+}
+
 func (m *ChatListModel) RemoveChatByGUID(chatGUID string) bool {
 	removed := false
 	for i, chat := range m.chats {

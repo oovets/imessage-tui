@@ -51,7 +51,6 @@ const (
 
 // Message types for Bubble Tea
 type (
-	chatsLoadedMsg    []models.Chat
 	messagesLoadedMsg struct {
 		chatGUID string
 		messages []models.Message
@@ -193,6 +192,11 @@ type AppModel struct {
 	dividerDragging  bool
 	dividerNode      *LayoutNode
 
+	// unloadedBackends are the backends, by ID, whose chat list has not
+	// loaded yet: a timeout at startup, asked again on a timer. See
+	// chatload.go.
+	unloadedBackends map[string]bool
+
 	// Announcing messages beyond the screen: see notify.go.
 	notifyMode    notifyMode
 	terminalFocus terminalFocus
@@ -279,6 +283,7 @@ func NewAppModelWithConfig(backends *provider.Registry, stream provider.Stream, 
 		notifyMode:            notifications,
 		alert:                 systemAlert,
 		alertedAt:             make(map[string]time.Time),
+		unloadedBackends:      make(map[string]bool),
 		chatOverrides:         chatOverrides,
 		persist:               newPersister(),
 		loading:               true,
@@ -299,7 +304,7 @@ func NewAppModelWithConfig(backends *provider.Registry, stream provider.Stream, 
 
 func (m AppModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{
-		loadChatsCmd(m.providers.All(), m.chatLimit),
+		loadChatsCmd(m.providers.All(), m.chatLimit, 0),
 		noticeExpireCmd(),
 	}
 
@@ -323,17 +328,23 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case chatsLoadedMsg:
+		if msg.attempt > 0 {
+			return m, m.addRetriedChats(msg)
+		}
+		// Before the layout comes back: panes of a network that failed keep
+		// their chats (standInChat) instead of coming back empty.
+		retry := m.retryFailedChats(msg)
 		m.loading = false
-		m.chatList.SetLoading(false)
-		chats := []models.Chat(msg)
+		chats := msg.chats
+		m.chatList.SetLoading(len(chats) == 0 && retry != nil)
 		applyChatOverrides(chats, m.chatOverrides.Aliases)
 		m.chatList.SetChats(chats)
 		if m.restoreLayoutFromState(chats) {
 			m.updateLayout()
-			return m, nil
+			return m, retry
 		}
 		m.updateLayout()
-		var cmds []tea.Cmd
+		cmds := []tea.Cmd{retry}
 		// Auto-select first chat in focused window if available
 		if len(chats) > 0 {
 			window := m.windowManager.FocusedWindow()
@@ -352,11 +363,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd := m.prefetchTopChatsCmd(chats, ""); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-			if len(cmds) > 0 {
-				return m, tea.Batch(cmds...)
-			}
 		}
-		return m, nil
+		return m, tea.Batch(cmds...)
 
 	case messagesLoadedMsg:
 		// Merge API messages with any WS messages that arrived after the API snapshot.
@@ -1742,27 +1750,29 @@ func (m AppModel) providerFor(chatGUID string) provider.Provider {
 // loadChatsCmd fans out over every configured backend and concatenates the
 // result. One backend being down must not blank the list, so it is only an
 // error when nothing loaded at all.
-func loadChatsCmd(backends []provider.Provider, limit int) tea.Cmd {
+// chatsLoadedMsg is the chat lists of every backend asked. A backend that
+// failed is named rather than failing the rest, so it can be asked again.
+type chatsLoadedMsg struct {
+	chats   []models.Chat
+	loaded  []provider.Provider
+	failed  []provider.Provider
+	attempt int // 0 for the load at startup, then each retry's number
+}
+
+func loadChatsCmd(backends []provider.Provider, limit, attempt int) tea.Cmd {
 	return func() tea.Msg {
-		var (
-			all  []models.Chat
-			errs []error
-		)
+		msg := chatsLoadedMsg{attempt: attempt}
 		for _, backend := range backends {
 			chats, err := backend.Chats(limit)
 			if err != nil {
-				errs = append(errs, fmt.Errorf("%s: %w", backend.ID(), err))
+				log.Printf("chat load failed: %s: %v", backend.ID(), err)
+				msg.failed = append(msg.failed, backend)
 				continue
 			}
-			all = append(all, chats...)
+			msg.loaded = append(msg.loaded, backend)
+			msg.chats = append(msg.chats, chats...)
 		}
-		if len(all) == 0 && len(errs) > 0 {
-			return errMsg{err: fmt.Errorf("failed to load chats: %v", errors.Join(errs...))}
-		}
-		for _, err := range errs {
-			log.Printf("chat load failed: %v", err)
-		}
-		return chatsLoadedMsg(all)
+		return msg
 	}
 }
 
@@ -2077,6 +2087,9 @@ func (m *AppModel) buildTab(state config.TabLayoutState, chatByGUID map[string]*
 		chat, ok := chatByGUID[chatGUID]
 		if !ok {
 			chat, ok = m.threadChat(chatGUID)
+		}
+		if !ok && chatGUID != "" && m.unloadedBackends[m.backendIDFor(chatGUID)] {
+			chat, ok = m.standInChat(chatGUID), true
 		}
 		if !ok {
 			continue

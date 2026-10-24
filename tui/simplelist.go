@@ -132,6 +132,28 @@ func (m *SimpleListModel) SetItems(chats []models.Chat) {
 	m.clampCursor()
 }
 
+// AppendItems adds chats that arrived after the rest — a network whose list
+// came in on a retry — keeping the cursor on its chat. Chats already listed
+// stay as they are.
+func (m *SimpleListModel) AppendItems(chats []models.Chat) {
+	have := make(map[string]bool, len(m.items))
+	for _, chat := range m.items {
+		have[chat.GUID] = true
+	}
+	for _, chat := range chats {
+		if !have[chat.GUID] {
+			have[chat.GUID] = true
+			m.items = append(m.items, chat)
+		}
+	}
+	m.refreshKeepingSelection()
+}
+
+// Len is how many chats the list holds, shown or not.
+func (m *SimpleListModel) Len() int {
+	return len(m.items)
+}
+
 func (m *SimpleListModel) RemoveByGUID(chatGUID string) bool {
 	for i, chat := range m.items {
 		if chat.GUID != chatGUID {

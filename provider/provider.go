@@ -173,7 +173,7 @@ func (r *Registry) For(chatGUID string) Provider {
 // Label names the backend owning chatGUID for the user: its Labeler label, or
 // its ID when it has none. Empty when no backend owns the GUID.
 func (r *Registry) Label(chatGUID string) string {
-	return labelOf(r.For(chatGUID))
+	return LabelOf(r.For(chatGUID))
 }
 
 // Labels returns every backend's label in registry order, fallback first, so
@@ -182,12 +182,13 @@ func (r *Registry) Labels() []string {
 	all := r.All()
 	labels := make([]string, 0, len(all))
 	for _, p := range all {
-		labels = append(labels, labelOf(p))
+		labels = append(labels, LabelOf(p))
 	}
 	return labels
 }
 
-func labelOf(p Provider) string {
+// LabelOf names a backend for the user: its Labeler label, or its ID.
+func LabelOf(p Provider) string {
 	if p == nil {
 		return ""
 	}

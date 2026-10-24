@@ -174,6 +174,13 @@ flag bits that only decoding sets, so they lie about objects built in tests.
 Logins run as subcommands (`commands.go`) before Bubble Tea starts, which is
 the one place the program may print to stdout.
 
+The chat list loads once, at startup. A backend whose list fails then is
+asked again on a timer (`tui/chatload.go`), and a restored pane of that
+backend holds a stand-in chat until it arrives. A chat missing from a list
+that *did* load is gone, and its pane comes back empty; one missing from a
+list that did not load must not be — the next layout save would write the
+empty pane over the user's.
+
 **One emoji table, both directions.** `emojiset` merges the generated Slack set
 with `enescakir/emoji`, and both the composer's autocomplete and the Slack
 mrkdwn decoder read it. Two tables would mean receiving glyphs you cannot type,

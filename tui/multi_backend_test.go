@@ -108,7 +108,7 @@ func TestChatListMergesEveryBackend(t *testing.T) {
 	if msg == nil {
 		t.Fatal("no chats loaded")
 	}
-	chats := []models.Chat(*msg)
+	chats := msg.chats
 	if len(chats) != 2 {
 		t.Fatalf("got %d chats, want one from each backend: %+v", len(chats), chats)
 	}

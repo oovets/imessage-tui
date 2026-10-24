@@ -35,7 +35,10 @@ backend owns a conversation is never something you have to think about.
   every network is optional; the app needs one. a bluebubbles server that
   is configured but unreachable at startup is reported in the status line
   and left out until the next start, so it never keeps slack or telegram
-  from loading.
+  from loading. one that answers but does not hand over its chat list in
+  time (15 seconds) is asked again after 5s, 15s, 30s, a minute, then every
+  two minutes; the status line says so, and its panes keep their chats from
+  the cache until the list arrives.
   with nothing configured at all, the app says so on stderr and exits.
 
   build and run
