@@ -680,17 +680,22 @@ func TestChatNamesCarryTheWorkspaceWhenAsked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	p.ShowWorkspaceInNames(true)
-
-	chats, err := p.Chats(50)
-	if err != nil {
-		t.Fatalf("Chats: %v", err)
-	}
-	got := []string{chats[0].DisplayName, chats[1].DisplayName}
-	want := []string{"Acme Anna", "Acme #general"}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("chats = %v, want %v", got, want)
+	for _, show := range []bool{true, false} {
+		p.ShowWorkspaceInNames(show)
+		chats, err := p.Chats(50)
+		if err != nil {
+			t.Fatalf("Chats: %v", err)
+		}
+		// The short name is what the chat list shows under a header that
+		// already names the workspace; with nothing in front, there is no
+		// short name to give.
+		got := [2][2]string{{chats[0].DisplayName, chats[0].ShortName}, {chats[1].DisplayName, chats[1].ShortName}}
+		want := [2][2]string{{"Acme Anna", "Anna"}, {"Acme #general", "#general"}}
+		if !show {
+			want = [2][2]string{{"Anna", ""}, {"#general", ""}}
+		}
+		if got != want {
+			t.Errorf("workspace shown %v: names = %q, want %q", show, got, want)
 		}
 	}
 }

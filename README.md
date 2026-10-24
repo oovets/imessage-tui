@@ -239,7 +239,9 @@ max_previews_per_message: 2
     last-activity timestamp, and getting one would cost a history call per
     conversation, so recency ordering is not on offer.
     with more than one workspace connected, names are prefixed with the
-    workspace so two "#general" stay apart.
+    workspace so two "#general" stay apart -- in pane headers, toasts and
+    the plain recent list. the chat list leaves it out where a group header
+    or the network filter already names the workspace.
 
   if conversations are missing, the log says what was fetched
     grep "conversations" ~/.imessage-tui.log

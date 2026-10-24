@@ -267,11 +267,16 @@ func (p *Provider) Chats(_ int) ([]models.Chat, error) {
 		}
 		name := p.chatName(channel, conversationKind)
 		names[channel.ID] = name
+		short := p.bareChatName(channel, conversationKind)
+		if short == name {
+			short = ""
+		}
 		listed = append(listed, ranked{
 			kind: conversationKind,
 			chat: models.Chat{
 				GUID:           ChatGUID(p.ws.ID, channel.ID),
 				DisplayName:    name,
+				ShortName:      short,
 				ChatIdentifier: channel.ID,
 				UnreadCount:    channel.UnreadCount,
 			},
@@ -807,8 +812,10 @@ func (p *Provider) classify(channel *slackapi.Channel) kind {
 	}
 }
 
-// chatName is what the chat list shows. Channels keep Slack's own '#' so they
-// read as channels at a glance; people keep their names.
+// chatName is the chat's name wherever it appears. Channels keep Slack's own
+// '#' so they read as channels at a glance; people keep their names. With
+// several workspaces the workspace goes in front, except in the chat list
+// under a header that already names it (models.Chat.ShortName).
 func (p *Provider) chatName(channel *slackapi.Channel, kind kind) string {
 	name := p.bareChatName(channel, kind)
 	if p.labelWorkspace && p.ws.Name != "" {

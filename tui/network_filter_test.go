@@ -759,3 +759,64 @@ func TestTKeyTogglesChatListTimeAndRemembersIt(t *testing.T) {
 		t.Fatal("t toggled the times while typing in the search box")
 	}
 }
+
+// A Slack chat's name carries its workspace when several are connected, so two
+// "#general" stay apart. Under a header or a filter that already names the
+// workspace the list leaves it out; where nothing else says it — the plain
+// list across networks, the Pinned section — it stays. The rows read
+// "general": the list draws names without symbols (stripEmojis).
+func TestListLeavesOutTheNetworkItAlreadyNames(t *testing.T) {
+	workspaceOf := func(guid string) string {
+		switch {
+		case strings.HasPrefix(guid, "sl:acme:"):
+			return "Slack · Acme"
+		case strings.HasPrefix(guid, "sl:beta:"):
+			return "Slack · Beta"
+		}
+		return "iMessage"
+	}
+	tests := []struct {
+		name    string
+		group   bool
+		network string
+		pin     string
+		alias   string
+		want    []string
+	}{
+		{name: "grouped", group: true,
+			want: []string{" iMessage", " Family", " Slack · Acme", " general", " Slack · Beta", " general"}},
+		{name: "recent, every network",
+			want: []string{" Acme general", " Family", " Beta general"}},
+		{name: "filtered to one workspace", network: "Slack · Acme",
+			want: []string{" general"}},
+		{name: "grouped, one pinned", group: true, pin: "sl:acme:C1",
+			want: []string{" Pinned", " Acme general", " iMessage", " Family", " Slack · Beta", " general"}},
+		{name: "grouped, renamed", group: true, alias: "Jobbet",
+			want: []string{" iMessage", " Family", " Slack · Acme", " Jobbet", " Slack · Beta", " general"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewSimpleListModel()
+			m.SetShowPreview(false)
+			m.SetSize(30, 20)
+			m.SetNetworks(workspaceOf, []string{"iMessage", "Slack · Acme", "Slack · Beta"})
+			m.SetItems([]models.Chat{
+				{GUID: "sl:acme:C1", DisplayName: "Acme #general", ShortName: "#general"},
+				{GUID: "chat-a", DisplayName: "Family"},
+				{GUID: "sl:beta:C1", DisplayName: "Beta #general", ShortName: "#general"},
+			})
+			m.SetGroupByNetwork(tt.group)
+			m.SetNetwork(tt.network)
+			if tt.pin != "" {
+				m.SetPinned([]string{tt.pin})
+			}
+			if tt.alias != "" {
+				m.SetLocalDisplayName("sl:acme:C1", tt.alias)
+			}
+			got := listBody(m)
+			if strings.Join(got, "|") != strings.Join(tt.want, "|") {
+				t.Errorf("rows = %q\nwant   %q", got, tt.want)
+			}
+		})
+	}
+}

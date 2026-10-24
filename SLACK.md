@@ -118,7 +118,7 @@ credentials; `main.go` registers one provider per workspace.
 | Files | `slack.go` `DownloadAttachment` | Fetched with the token, never handed to the system opener |
 | Read state | `slack.go` `MarkRead`; `tui/app.go` `markFocusedChatRead` | `conversations.mark` up to the newest ts this client has seen — on open, when the history arrives, and on each message that lands in the focused pane |
 | Realtime | `stream.go` | Socket Mode: new, edited; deletions reconcile on the next refresh |
-| Several workspaces | `main.go` `connectSlack` | One provider each, names prefixed when more than one is connected |
+| Several workspaces | `main.go` `connectSlack` | One provider each, names prefixed when more than one is connected; `Chat.ShortName` carries the bare name for the chat list under a header that names the workspace |
 
 ### Decisions worth knowing
 

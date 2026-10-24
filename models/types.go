@@ -23,11 +23,25 @@ type Chat struct {
 	LastMessageText  string `json:"-"` // Preview of latest message (not from API)
 	LastMessageTime  int64  `json:"-"` // Milliseconds epoch of latest message preview
 	LocalDisplayName string `json:"-"` // local user alias
+	// ShortName is the name without what tells it apart from chats on other
+	// networks — a Slack channel without its workspace in front, when more
+	// than one is connected. Empty when there is nothing to leave out.
+	ShortName string `json:"-"`
 }
 
 // IsGroup returns true when the chat has more than one participant (group chat).
 func (c *Chat) IsGroup() bool {
 	return len(c.Participants) > 1
+}
+
+// NameInNetwork is the chat's name where its network is already plain, as
+// under a chat list header that names it: the user's alias if there is one,
+// else the short name, else the full one.
+func (c *Chat) NameInNetwork() string {
+	if strings.TrimSpace(c.LocalDisplayName) == "" && c.ShortName != "" {
+		return c.ShortName
+	}
+	return c.GetDisplayName()
 }
 
 // GetDisplayName returns a suitable name for the chat

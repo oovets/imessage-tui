@@ -37,6 +37,10 @@ type listRow struct {
 	header  string // set on header rows only
 	network string // on a network section's header: the network it names
 	item    int    // index into filteredIndices; -1 on header rows
+	// short is set on a chat row whose network is already plain — under its
+	// network's header, or with the list filtered to it — so its name can
+	// leave the network out.
+	short bool
 }
 
 // networkTab is one clickable chip in the row of network filters under the
@@ -657,8 +661,9 @@ func (m *SimpleListModel) rebuildRows() {
 		if headers {
 			m.rows = append(m.rows, listRow{header: section.title, network: section.network, item: -1})
 		}
+		short := section.network != "" || active != "" || len(networks) < 2
 		for _, idx := range section.items {
-			m.rows = append(m.rows, listRow{item: len(ordered)})
+			m.rows = append(m.rows, listRow{item: len(ordered), short: short})
 			ordered = append(ordered, idx)
 		}
 	}
@@ -1165,7 +1170,11 @@ func (m SimpleListModel) View() string {
 		fi := row.item
 		idx := m.filteredIndices[fi]
 		chat := m.items[idx]
-		displayName := chatListPrefix(chat) + stripEmojis(chat.GetDisplayName())
+		name := chat.GetDisplayName()
+		if row.short {
+			name = chat.NameInNetwork()
+		}
+		displayName := chatListPrefix(chat) + stripEmojis(name)
 
 		linePrefix := ""
 		if chat.HasNewMessage {
