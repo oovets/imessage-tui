@@ -211,6 +211,10 @@ func (m *ChatListModel) ClickAt(x, y int) bool {
 	return m.list.ClickAt(x, y)
 }
 
+func (m *ChatListModel) ChatAt(y int) (string, bool) {
+	return m.list.ChatAt(y)
+}
+
 func (m *ChatListModel) ClearNewMessage(chatGUID string) {
 	m.list.ClearNewMessage(chatGUID)
 }

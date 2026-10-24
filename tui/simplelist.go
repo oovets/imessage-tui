@@ -858,15 +858,11 @@ func (m *SimpleListModel) MarkNewMessage(chatGUID string) {
 // same, and clicking the header of the network already shown goes back to
 // all of them. Pinned and Recent headers select nothing.
 func (m *SimpleListModel) ClickAt(x, y int) bool {
-	if m.searchActive {
-		searchY := m.height - 1
-		if y >= searchY {
-			return false
-		}
+	if m.searchActive && y >= m.height-1 {
+		return false
 	}
 	tabs := m.networkTabs()
-	tabRows := tabLineCount(tabs)
-	if y >= 1 && y < 1+tabRows {
+	if y >= 1 && y < 1+tabLineCount(tabs) {
 		for _, tab := range tabs {
 			if tab.line == y-1 && x >= tab.x0 && x < tab.x1 {
 				return m.selectNetwork(tab.network)
@@ -874,30 +870,52 @@ func (m *SimpleListModel) ClickAt(x, y int) bool {
 		}
 		return false
 	}
-	line := y - 1 - tabRows
-	if line < 0 {
+	row, ok := m.rowAt(y)
+	switch {
+	case !ok:
 		return false
+	case row.item >= 0:
+		m.cursor = row.item
+		return false
+	case row.network == "":
+		return false
+	}
+	target := row.network
+	if m.activeNetwork() == target {
+		target = ""
+	}
+	return m.selectNetwork(target)
+}
+
+// rowAt returns the row drawn at row y of the list's content — a chat or a
+// section header; never the title, the network chips or the search bar.
+func (m *SimpleListModel) rowAt(y int) (listRow, bool) {
+	if m.searchActive && y >= m.height-1 {
+		return listRow{}, false
+	}
+	line := y - 1 - m.tabLineCount()
+	if line < 0 {
+		return listRow{}, false
 	}
 	for ri := m.offset; ri < len(m.rows); ri++ {
 		row := m.rows[ri]
 		h := m.rowLines(row)
 		if line < h {
-			if row.item >= 0 {
-				m.cursor = row.item
-				return false
-			}
-			if row.network == "" {
-				return false
-			}
-			target := row.network
-			if m.activeNetwork() == target {
-				target = ""
-			}
-			return m.selectNetwork(target)
+			return row, true
 		}
 		line -= h
 	}
-	return false
+	return listRow{}, false
+}
+
+// ChatAt returns the chat drawn at row y of the list's content, if a chat is
+// drawn there.
+func (m *SimpleListModel) ChatAt(y int) (string, bool) {
+	row, ok := m.rowAt(y)
+	if !ok || row.item < 0 {
+		return "", false
+	}
+	return m.items[m.filteredIndices[row.item]].GUID, true
 }
 
 func (m *SimpleListModel) selectNetwork(network string) bool {

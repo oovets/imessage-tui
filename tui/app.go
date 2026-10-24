@@ -192,6 +192,10 @@ type AppModel struct {
 	dividerDragging  bool
 	dividerNode      *LayoutNode
 
+	// The last click on a chat in the list, to tell a double click by.
+	listClickGUID string
+	listClickAt   time.Time
+
 	// unloadedBackends are the backends, by ID, whose chat list has not
 	// loaded yet: a timeout at startup, asked again on a timer. See
 	// chatload.go.
@@ -1060,18 +1064,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.focused == focusChatList {
-				// Select chat and load in focused window
-				selected := m.chatList.SelectedChat()
-				if selected != nil {
-					window := m.windowManager.FocusedWindow()
-					if window != nil {
-						// Switch focus to window input
-						m.focused = focusWindow
-						window.Input.textarea.Focus()
-						return m, m.selectChat(selected, window)
-					}
-				}
-				return m, nil
+				return m, m.openSelectedChat()
 			} else if m.focused == focusWindow {
 				// Send message from focused window
 				window := m.windowManager.FocusedWindow()
@@ -1800,6 +1793,39 @@ func prefetchMessagesCmd(backend provider.Provider, chatGUID string, limit int) 
 		}
 		return messagesLoadedMsg{chatGUID: chatGUID, messages: messages}
 	}
+}
+
+// openSelectedChat opens the chat under the list's cursor in the focused pane
+// and moves to its composer: Enter in the list, or a double click on a chat.
+func (m *AppModel) openSelectedChat() tea.Cmd {
+	selected := m.chatList.SelectedChat()
+	window := m.windowManager.FocusedWindow()
+	if selected == nil || window == nil {
+		return nil
+	}
+	m.focused = focusWindow
+	m.chatList.SetFocused(false)
+	window.Input.textarea.Focus()
+	return m.selectChat(selected, window)
+}
+
+// doubleClickWindow is how close together two clicks on one chat in the list
+// must be to open it.
+const doubleClickWindow = 500 * time.Millisecond
+
+// listDoubleClick notes a click on a chat in the list ("" for a click on
+// anything else) and reports whether it completes a double click: the second
+// of two on the same chat in quick succession. A third click starts over
+// rather than counting as another double.
+func (m *AppModel) listDoubleClick(chatGUID string) bool {
+	now := time.Now()
+	double := chatGUID != "" && chatGUID == m.listClickGUID && now.Sub(m.listClickAt) <= doubleClickWindow
+	if double {
+		m.listClickGUID, m.listClickAt = "", time.Time{}
+		return true
+	}
+	m.listClickGUID, m.listClickAt = chatGUID, now
+	return false
 }
 
 func (m *AppModel) selectChat(chat *models.Chat, window *ChatWindow) tea.Cmd {
@@ -3181,8 +3207,12 @@ func (m AppModel) handleMouseMsg(msg tea.MouseMsg) (AppModel, tea.Cmd) {
 			// The list is drawn from the top row, so it takes the screen row
 			// as it is. contentY is a row too high: every click landed on the
 			// chat above the one under the pointer.
+			chatGUID, _ := m.chatList.ChatAt(msg.Y)
 			if m.chatList.ClickAt(contentX, msg.Y) {
 				m.saveUIState()
+			}
+			if m.listDoubleClick(chatGUID) {
+				return m, m.openSelectedChat()
 			}
 			return m, nil
 		}

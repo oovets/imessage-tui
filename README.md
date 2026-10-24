@@ -365,6 +365,7 @@ max_previews_per_message: 2
 
   mouse
     click to focus a pane, open an image or open a url where it is drawn,
+    double-click a chat in the list to open it in the focused pane,
     click a network chip to filter the chat list, click a tab on the tab bar
     to show it, click the unread badge to open the list on that chat, scroll
     to move through history,

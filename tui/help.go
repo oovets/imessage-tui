@@ -35,6 +35,7 @@ func helpOverlayView(width, height int) string {
 				"/            Filter chats (Esc to clear)",
 				"n / N        Next / previous network (all → each network)",
 				"Click        A network chip or header: show only that network",
+				"Double-click A chat: open it in the active pane",
 				"s            Sort by recent / group by network",
 				"p            Pin / unpin selected chat",
 				"K / J        Move a pinned chat up / down",
