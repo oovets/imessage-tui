@@ -157,6 +157,10 @@ type AppModel struct {
 	enableLinkPreviews    bool
 	maxPreviewsPerMessage int
 
+	// searchShowedList is set while the chat list is on screen only for a
+	// ctrl+k search, which hides it again when it ends.
+	searchShowedList bool
+
 	messageFetchInFlight map[string]bool
 	messageFetchedAt     map[string]time.Time
 	pendingOutgoing      map[string][]models.Message
@@ -770,16 +774,27 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showHelp = !m.showHelp
 			return m, nil
 
-		case "pgup":
-			if m.focused == focusWindow {
+		// shift+↑/↓ page too, for keyboards that have no page keys.
+		case "pgup", "shift+up":
+			switch m.focused {
+			case focusWindow:
 				m.scrollFocusedMessages(-1)
+			case focusChatList:
+				m.chatList.PageUp()
 			}
 			return m, nil
 
-		case "pgdown":
-			if m.focused == focusWindow {
+		case "pgdown", "shift+down":
+			switch m.focused {
+			case focusWindow:
 				m.scrollFocusedMessages(1)
+			case focusChatList:
+				m.chatList.PageDown()
 			}
+			return m, nil
+
+		case "ctrl+k":
+			m.beginChatSearch()
 			return m, nil
 
 		case "end":
@@ -866,6 +881,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+s":
 			// Toggle chat list visibility
 			m.showChatList = !m.showChatList
+			m.searchShowedList = false
 			if !m.showChatList && m.focused == focusChatList {
 				m.focused = focusWindow
 				if window := m.windowManager.FocusedWindow(); window != nil {
@@ -933,6 +949,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Bubble Tea names this key "esc"; matching only "escape" made this
 			// branch unreachable, so the documented "esc returns to the chat
 			// list" silently did nothing.
+			if m.focused == focusChatList && m.chatList.SearchActive() {
+				return m, m.endChatSearch()
+			}
 			// Always go to chat list from a window
 			if m.focused == focusWindow && m.showChatList {
 				if window := m.windowManager.FocusedWindow(); window != nil {
@@ -1082,8 +1101,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "enter":
 			if m.focused == focusChatList && m.chatList.SearchActive() {
-				m.chatList.ClearSearch()
-				return m, nil
+				if m.chatList.SelectedChat() == nil {
+					return m, nil // nothing matches yet
+				}
+				// Open before ending the search: a list hidden again puts its
+				// cursor on the pane's chat, which is the old one until then.
+				open := m.openSelectedChat()
+				end := m.endChatSearch()
+				return m, tea.Batch(open, end)
 			}
 			if m.focused == focusChatList {
 				return m, m.openSelectedChat()
@@ -1180,7 +1205,7 @@ func (m *AppModel) saveUIState() {
 	m.persist.saveUI(config.UIState{
 		ShowTimestamps:   m.showTimestamps,
 		ShowLineNumbers:  m.showLineNumbers,
-		ShowChatList:     m.showChatList,
+		ShowChatList:     m.showChatList && !m.searchShowedList,
 		ShowSenderNames:  m.showSenderNames,
 		ShowPaneDividers: m.showPaneDividers,
 		ShowChatPreview:  m.showChatPreview,
@@ -3157,6 +3182,48 @@ func (m AppModel) scrollFocusedMessages(direction int) {
 	}
 }
 
+// listWheelRows is how many rows of the chat list one wheel step scrolls.
+const listWheelRows = 3
+
+// beginChatSearch starts a search of the chat list from anywhere, showing
+// the list for as long as the search lasts when it is hidden.
+func (m *AppModel) beginChatSearch() {
+	if m.focused == focusWindow {
+		if window := m.windowManager.FocusedWindow(); window != nil {
+			window.Input.textarea.Blur()
+		}
+	}
+	if !m.showChatList {
+		m.showChatList = true
+		m.searchShowedList = true
+	}
+	m.focused = focusChatList
+	if !m.chatList.SearchActive() {
+		m.chatList.StartSearch()
+	}
+	m.updateLayout()
+}
+
+// endChatSearch ends the chat list's search with the cursor on the chat it
+// found. A list shown only for the search goes away again, and the focus
+// back to the pane.
+func (m *AppModel) endChatSearch() tea.Cmd {
+	m.chatList.ClearSearch()
+	if !m.searchShowedList {
+		return nil
+	}
+	m.searchShowedList = false
+	m.showChatList = false
+	m.focused = focusWindow
+	var cmd tea.Cmd
+	if window := m.windowManager.FocusedWindow(); window != nil {
+		window.Input.textarea.Focus()
+		cmd = m.clearFocusedWindowNewMessageIndicator()
+	}
+	m.updateLayout()
+	return cmd
+}
+
 func (m AppModel) handleMouseMsg(msg tea.MouseMsg) (AppModel, tea.Cmd) {
 	// Panes are laid out from the top of the pane area, which is the top of
 	// the screen unless the tab bar sits above it. This used to subtract one
@@ -3165,14 +3232,22 @@ func (m AppModel) handleMouseMsg(msg tea.MouseMsg) (AppModel, tea.Cmd) {
 	contentY := msg.Y - m.tabBarRows()
 
 	if mouseIsWheel(msg) {
+		// The list is drawn from the top row, beside the tab bar, so it
+		// takes the wheel before the pane area's rows are worked out.
+		if m.showChatList && msg.X < m.chatListWidth {
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.chatList.ScrollBy(-listWheelRows)
+			case tea.MouseButtonWheelDown:
+				m.chatList.ScrollBy(listWheelRows)
+			}
+			return m, nil
+		}
 		if contentY < 0 {
 			return m, nil
 		}
 		relX := msg.X
 		if m.showChatList {
-			if msg.X < m.chatListWidth {
-				return m, nil
-			}
 			relX = msg.X - m.chatListWidth
 		}
 		if window := m.windowManager.WindowAt(relX, contentY); window != nil {

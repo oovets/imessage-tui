@@ -210,6 +210,18 @@ func (m *ChatListModel) SearchActive() bool {
 	return m.list.SearchActive()
 }
 
+func (m *ChatListModel) PageUp() {
+	m.list.PageUp()
+}
+
+func (m *ChatListModel) PageDown() {
+	m.list.PageDown()
+}
+
+func (m *ChatListModel) ScrollBy(n int) {
+	m.list.ScrollBy(n)
+}
+
 func (m *ChatListModel) UpdateChatPreview(chatGUID, text string, when int64) {
 	m.list.UpdateChatPreview(chatGUID, text, when)
 }

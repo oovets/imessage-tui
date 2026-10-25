@@ -72,6 +72,9 @@ type SimpleListModel struct {
 	showTime        bool
 	searchActive    bool
 	searchQuery     string
+	// searchFrom is the chat selected when the search began, which the
+	// cursor goes back to when the search ends with nothing matching.
+	searchFrom string
 	// The GUID is opaque here, so which network a chat belongs to is asked of
 	// networkOf; networkOrder is the order groups appear in.
 	networkOf      func(chatGUID string) string
@@ -577,6 +580,7 @@ func (m *SimpleListModel) refreshSelecting(guid string) {
 }
 
 func (m *SimpleListModel) StartSearch() {
+	m.searchFrom = m.selectedGUID()
 	m.searchActive = true
 	m.searchQuery = ""
 	m.rebuildFilter()
@@ -584,11 +588,18 @@ func (m *SimpleListModel) StartSearch() {
 	m.offset = 0
 }
 
+// ClearSearch ends the search with the cursor on the chat it found. The
+// cursor indexes the filtered rows, so keeping it as it was put it on
+// whichever chat happened to be at the same place in the whole list.
 func (m *SimpleListModel) ClearSearch() {
+	selected := m.selectedGUID()
+	if selected == "" {
+		selected = m.searchFrom
+	}
 	m.searchActive = false
 	m.searchQuery = ""
-	m.rebuildFilter()
-	m.clampCursor()
+	m.searchFrom = ""
+	m.refreshSelecting(selected)
 }
 
 func (m *SimpleListModel) SearchActive() bool {
@@ -840,6 +851,80 @@ func (m *SimpleListModel) ensureCursorVisible() {
 		used -= m.rowLines(m.rows[m.offset])
 		m.offset++
 	}
+}
+
+// moveCursor moves the cursor step chats down, or up when step is negative,
+// stopping at either end.
+func (m *SimpleListModel) moveCursor(step int) {
+	if len(m.filteredIndices) == 0 {
+		return
+	}
+	m.cursor = min(max(m.cursor+step, 0), len(m.filteredIndices)-1)
+	m.ensureCursorVisible()
+}
+
+// PageDown moves the cursor down by as many chats as are on screen.
+func (m *SimpleListModel) PageDown() {
+	m.moveCursor(m.pageSize())
+}
+
+// PageUp moves the cursor up by as many chats as are on screen.
+func (m *SimpleListModel) PageUp() {
+	m.moveCursor(-m.pageSize())
+}
+
+func (m *SimpleListModel) pageSize() int {
+	first, last, ok := m.visibleItems()
+	if !ok {
+		return 1
+	}
+	return last - first + 1
+}
+
+// ScrollBy scrolls the list n rows down, or up when n is negative, no
+// further than either end, and keeps the cursor on screen: one whose row
+// scrolls out moves to the nearest chat still in view. What the wheel does.
+func (m *SimpleListModel) ScrollBy(n int) {
+	m.offset = min(max(m.offset+n, 0), m.maxOffset())
+	if first, last, ok := m.visibleItems(); ok {
+		m.cursor = min(max(m.cursor, first), last)
+	}
+}
+
+// visibleItems returns the first and last chat drawn from the current
+// offset, counting rows the way View does.
+func (m *SimpleListModel) visibleItems() (first, last int, ok bool) {
+	budget := m.bodyLines()
+	used := 0
+	for ri := m.offset; ri < len(m.rows); ri++ {
+		row := m.rows[ri]
+		if used+m.rowLines(row) > budget {
+			break
+		}
+		used += m.rowLines(row)
+		if row.item < 0 {
+			continue
+		}
+		if !ok {
+			first, ok = row.item, true
+		}
+		last = row.item
+	}
+	return first, last, ok
+}
+
+// maxOffset is as far as the list scrolls: its last row at the bottom of
+// the screen.
+func (m *SimpleListModel) maxOffset() int {
+	budget := m.bodyLines()
+	used := 0
+	for ri := len(m.rows) - 1; ri >= 0; ri-- {
+		used += m.rowLines(m.rows[ri])
+		if used > budget {
+			return min(ri+1, len(m.rows)-1)
+		}
+	}
+	return 0
 }
 
 func (m *SimpleListModel) SelectedItem() *models.Chat {
@@ -1172,6 +1257,12 @@ func (m SimpleListModel) Update(msg tea.Msg) (SimpleListModel, tea.Cmd) {
 			case "esc":
 				m.ClearSearch()
 				return m, nil
+			case "up":
+				m.moveCursor(-1)
+				return m, nil
+			case "down":
+				m.moveCursor(1)
+				return m, nil
 			case "backspace", "ctrl+h":
 				m.BackspaceSearch()
 				return m, nil
@@ -1192,15 +1283,9 @@ func (m SimpleListModel) Update(msg tea.Msg) (SimpleListModel, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-				m.ensureCursorVisible()
-			}
+			m.moveCursor(-1)
 		case "down", "j":
-			if m.cursor < len(m.filteredIndices)-1 {
-				m.cursor++
-				m.ensureCursorVisible()
-			}
+			m.moveCursor(1)
 		case "g":
 			m.cursor = 0
 			m.offset = 0

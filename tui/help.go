@@ -26,13 +26,15 @@ func helpOverlayView(width, height int) string {
 				"Up/Down j/k  Navigate chats or (in list) scroll",
 				"g / G        Top / bottom of chat list",
 				"Enter        Open chat / send message",
+				"Ctrl+K       Find a chat from anywhere (Enter opens it)",
 				"Shift+Enter  Newline in input",
 			},
 		},
 		{
 			title: "Chat list",
 			lines: []string{
-				"/            Filter chats (Esc to clear)",
+				"/            Find a chat: ↑/↓ pick, Enter opens, Esc closes",
+				"PgUp/PgDn    Page through chats (or Shift+↑/↓, mouse wheel)",
 				"n / N        Next / previous network (all → each network)",
 				"Click        A network chip or header: show only that network",
 				"Double-click A chat: open it in the active pane",
@@ -54,7 +56,7 @@ func helpOverlayView(width, height int) string {
 		{
 			title: "Messages",
 			lines: []string{
-				"PgUp/PgDn    Scroll message history",
+				"PgUp/PgDn    Scroll message history (or Shift+↑/↓)",
 				"End / G      Jump to newest messages",
 				"<3 :) ;) 8)  Become emojis as you type",
 				":D :P xD :/  Become emojis once you type a space or send",

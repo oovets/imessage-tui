@@ -319,8 +319,12 @@ max_previews_per_message: 2
     up / down, k / j       navigate chats, or scroll messages
     g / G                  top / bottom of the chat list; in a pane, G and
                            end both jump to the newest message
-    pgup / pgdown          scroll the focused pane
-    /                      search the chat list
+    pgup / pgdown          page through the chat list, or scroll the
+                           focused pane; shift+up / shift+down do the same
+    /                      search the chat list: up / down pick a match,
+                           enter opens it, esc closes the search
+    ctrl+k                 search the chat list from anywhere, mid-message
+                           too; a hidden list shows for the search only
     n / N                  filter the chat list to the next / previous
                            network: all, imessage, each slack workspace
     s                      group the chat list by network, or back to recent
@@ -375,7 +379,7 @@ max_previews_per_message: 2
     double-click a chat in the list to open it in the focused pane,
     click a network chip to filter the chat list, click a tab on the tab bar
     to show it, click the unread badge to open the list on that chat, scroll
-    to move through history,
+    to move through history or the chat list,
     drag the chat list edge or a pane divider to resize.
 ```
 
