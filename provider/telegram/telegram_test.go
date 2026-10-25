@@ -589,3 +589,47 @@ func TestReactionUpdateDropsTheCachedHistory(t *testing.T) {
 		t.Fatal("cached history survived a reaction, so the refresh would keep the old counts")
 	}
 }
+
+// A reply names the message it answers, and the part it quotes when the
+// sender picked one. The header is built here the way decoding would leave
+// it, without the flag bits, so reading it through the Get… accessors would
+// find nothing.
+func TestRepliesNameTheMessageTheyAnswer(t *testing.T) {
+	p, _ := newTestProvider(t)
+	group := Peer{Kind: kindGroup, ID: 400}
+	tests := []struct {
+		name      string
+		reply     tg.MessageReplyHeaderClass
+		wantGUID  string
+		wantQuote string
+	}{
+		{name: "not a reply"},
+		{name: "a reply", reply: &tg.MessageReplyHeader{ReplyToMsgID: 31},
+			wantGUID: "tg:100:g400:31"},
+		{name: "a reply quoting part of the message",
+			reply:    &tg.MessageReplyHeader{ReplyToMsgID: 31, Quote: true, QuoteText: " vid torget "},
+			wantGUID: "tg:100:g400:31", wantQuote: "vid torget"},
+		{name: "quote text without the quote flag is not a quote",
+			reply:    &tg.MessageReplyHeader{ReplyToMsgID: 31, QuoteText: "vid torget"},
+			wantGUID: "tg:100:g400:31"},
+		{name: "a message in a forum topic answers nothing",
+			reply: &tg.MessageReplyHeader{ReplyToMsgID: 7, ForumTopic: true}},
+		{name: "a reply inside a forum topic",
+			reply:    &tg.MessageReplyHeader{ReplyToMsgID: 31, ForumTopic: true, ReplyToTopID: 7},
+			wantGUID: "tg:100:g400:31"},
+		{name: "a reply to a message in another chat",
+			reply:    &tg.MessageReplyHeader{ReplyToMsgID: 5, ReplyToPeerID: &tg.PeerChannel{ChannelID: 900}},
+			wantGUID: "tg:100:c900:5"},
+		{name: "a story reply has no message to name",
+			reply: &tg.MessageReplyStoryHeader{StoryID: 3}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &tg.Message{ID: 40, Message: "ja", Out: true, Date: 1700000000, ReplyTo: tt.reply}
+			got := p.toMessage(group, msg)
+			if got.ReplyToGUID != tt.wantGUID || got.ReplyQuote != tt.wantQuote {
+				t.Errorf("answers %q quoting %q, want %q quoting %q", got.ReplyToGUID, got.ReplyQuote, tt.wantGUID, tt.wantQuote)
+			}
+		})
+	}
+}

@@ -183,6 +183,9 @@ func messageFingerprint(msg models.Message) string {
 		associatedGUID,
 		associatedType,
 		strings.Join(attachmentKeys, "\x1e"),
+		// The same "ok" sent at the same moment to two different
+		// messages is two replies.
+		strings.TrimSpace(msg.ReplyToGUID),
 	}
 	return strings.Join(parts, "\x1f")
 }

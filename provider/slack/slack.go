@@ -582,11 +582,7 @@ func (p *Provider) resolveSenders(msgs []slackapi.Msg) map[string]string {
 }
 
 func (p *Provider) toMessage(chatGUID, channelID string, msg *slackapi.Msg, names map[string]string) models.Message {
-	content := messageContent
-	if threadOf(chatGUID) != "" {
-		content = threadContent
-	}
-	text, accents := content(msg, names)
+	text, accents := messageContent(msg, names)
 	out := models.Message{
 		GUID:        MessageGUID(p.ws.ID, channelID, msg.Timestamp),
 		Text:        text,
@@ -602,6 +598,18 @@ func (p *Provider) toMessage(chatGUID, channelID string, msg *slackapi.Msg, name
 	}
 	if counts := reactionCounts(msg); len(counts) > 0 {
 		out.ReactionCounts = counts
+	}
+	if isReply(msg) {
+		// In the channel a reply sits among everything else and is drawn
+		// with the root it answers. In the thread's own pane every message
+		// answers the root, so saying so would only be noise.
+		if threadOf(chatGUID) == "" {
+			out.ReplyToGUID = MessageGUID(p.ws.ID, channelID, msg.ThreadTimestamp)
+		}
+		// Slack names the root's author on every reply, which is what tells
+		// a reply to the user's own post from the rest of the channel even
+		// when the post is far too old to be loaded.
+		out.RepliesToMe = msg.ParentUserId != "" && msg.ParentUserId == p.selfID
 	}
 	return out
 }

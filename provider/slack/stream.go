@@ -177,6 +177,13 @@ func (s *Stream) emit(event provider.Event) {
 // Slack puts the fields at the top level for a new message and inside a nested
 // object for a change, and slackevents mirrors that split.
 func msgFromEvent(event *slackevents.MessageEvent) slackapi.Msg {
+	// slackevents keeps the whole decoded message beside the top-level
+	// fields, and only there is the thread's author, which is what makes a
+	// reply one to the user's own post.
+	parentUser := ""
+	if event.Message != nil {
+		parentUser = event.Message.ParentUserId
+	}
 	return slackapi.Msg{
 		ClientMsgID:     event.ClientMsgID,
 		Type:            event.Type,
@@ -185,6 +192,7 @@ func msgFromEvent(event *slackevents.MessageEvent) slackapi.Msg {
 		Text:            event.Text,
 		Timestamp:       event.TimeStamp,
 		ThreadTimestamp: event.ThreadTimeStamp,
+		ParentUserId:    parentUser,
 		SubType:         event.SubType,
 		BotID:           event.BotID,
 		Username:        event.Username,

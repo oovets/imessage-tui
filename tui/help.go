@@ -61,6 +61,7 @@ func helpOverlayView(width, height int) string {
 				"/open        Open the newest link in the pane",
 				"/open #N [K] Open link K (default 1) on message row N",
 				"Click a URL  Open it in the browser",
+				"Click ↱      Jump to the message a reply answers",
 				"/r #N text   Reply to message row N (Slack: in its thread)",
 				"/t #N        Open row N's thread in a new pane (Slack)",
 				"/h /lol      React to latest message",

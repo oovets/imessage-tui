@@ -329,3 +329,129 @@ func TestJumpToUnread(t *testing.T) {
 		t.Errorf("alt+n did not open the chat in the focused pane: %v", w.Chat)
 	}
 }
+
+// deliverMessage hands the app msg as realtime news in chatGUID and returns
+// the toast it raised, or "".
+func deliverMessage(t *testing.T, app AppModel, chatGUID string, msg models.Message) (AppModel, string) {
+	t.Helper()
+	model, cmd := app.Update(providerEventMsg(provider.Event{Kind: provider.EventNewMessage, ChatGUID: chatGUID, Message: msg}))
+	app = *model.(*AppModel)
+	toast := ""
+	for _, m := range cmdMessages(cmd) {
+		if tm, ok := m.(toastMsg); ok {
+			toast = tm.text
+		}
+	}
+	return app, toast
+}
+
+// A reply to the user's own message says so, and notifies even in the middle
+// of a burst that has already notified: in a busy channel it is the one
+// message about them.
+func TestReplyToTheUserNotifiesThroughTheCooldown(t *testing.T) {
+	annaHandle := &models.Handle{Address: "UANNA", DisplayName: "Anna"}
+	tests := []struct {
+		name      string
+		chat      string
+		setup     func(app *AppModel)
+		reply     models.Message
+		wantToast string
+		wantBody  string
+	}{
+		{
+			// Slack names the thread's author on the reply itself; the
+			// post is often far older than anything loaded.
+			name:      "the backend says so",
+			chat:      "sl:acme:C1",
+			reply:     models.Message{Text: "ja", Handle: annaHandle, ReplyToGUID: "sl:acme:C1:1.0", RepliesToMe: true},
+			wantToast: "● Engineering · Anna replied to you: ja",
+			wantBody:  "Anna replied to you: ja",
+		},
+		{
+			name: "the answered message is at hand",
+			chat: "sl:acme:C1",
+			setup: func(app *AppModel) {
+				app.windowManager.CacheMessage("sl:acme:C1", models.Message{GUID: "mine", ChatGUID: "sl:acme:C1", Text: "lunch?", IsFromMe: true, DateCreated: 1})
+			},
+			reply:     models.Message{Text: "ja", Handle: annaHandle, ReplyToGUID: "mine"},
+			wantToast: "● Engineering · Anna replied to you: ja",
+			wantBody:  "Anna replied to you: ja",
+		},
+		{
+			// The chat's name already says who wrote.
+			name:      "in a chat named after the sender",
+			chat:      "im-1",
+			reply:     models.Message{Text: "ja", Handle: &models.Handle{Address: "x", DisplayName: "Family"}, RepliesToMe: true},
+			wantToast: "● Family · Replied to you: ja",
+			wantBody:  "Replied to you: ja",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app, alerts := noticeApp(t)
+			app.notifyMode = notifyDesktop
+			model, _ := app.Update(tea.BlurMsg{})
+			app = model.(AppModel)
+			if tt.setup != nil {
+				tt.setup(&app)
+			}
+
+			app, _ = deliver(t, app, tt.chat, "Bo", "något annat", false)
+			reply := tt.reply
+			reply.GUID, reply.ChatGUID, reply.DateCreated = "reply", tt.chat, 5000
+			app, toast := deliverMessage(t, app, tt.chat, reply)
+			deliver(t, app, tt.chat, "Bo", "och mer", false)
+
+			if toast != tt.wantToast {
+				t.Errorf("toast = %q, want %q", toast, tt.wantToast)
+			}
+			if len(*alerts) != 2 {
+				t.Fatalf("%d notifications, want the burst's first and the reply: %+v", len(*alerts), *alerts)
+			}
+			if got := (*alerts)[1].body(); got != tt.wantBody {
+				t.Errorf("notice body = %q, want %q", got, tt.wantBody)
+			}
+		})
+	}
+}
+
+// A reply to someone else is any other message, cooldown and all.
+func TestReplyToSomeoneElseWaitsForTheCooldown(t *testing.T) {
+	app, alerts := noticeApp(t)
+	app.notifyMode = notifyDesktop
+	model, _ := app.Update(tea.BlurMsg{})
+	app = model.(AppModel)
+	app.windowManager.CacheMessage("sl:acme:C1", models.Message{GUID: "theirs", ChatGUID: "sl:acme:C1", Text: "lunch?",
+		Handle: &models.Handle{Address: "UBO", DisplayName: "Bo"}, DateCreated: 1})
+
+	app, _ = deliver(t, app, "sl:acme:C1", "Bo", "något annat", false)
+	deliverMessage(t, app, "sl:acme:C1", models.Message{GUID: "reply", ChatGUID: "sl:acme:C1", Text: "ja", DateCreated: 5000,
+		Handle: &models.Handle{Address: "UANNA", DisplayName: "Anna"}, ReplyToGUID: "theirs"})
+	if len(*alerts) != 1 {
+		t.Errorf("%d notifications, want only the burst's first", len(*alerts))
+	}
+}
+
+// A Slack reply is news in its channel and, with the thread open in a pane,
+// in its thread too. That is one message, and it is announced once.
+func TestOneMessageInTwoConversationsIsAnnouncedOnce(t *testing.T) {
+	app, alerts := noticeApp(t)
+	app.notifyMode = notifyDesktop
+	model, _ := app.Update(tea.BlurMsg{})
+	app = model.(AppModel)
+
+	reply := models.Message{GUID: "sl:acme:C1:2.0", Text: "ja", DateCreated: 5000,
+		Handle: &models.Handle{Address: "UANNA", DisplayName: "Anna"}}
+	inChannel, inThread := reply, reply
+	inChannel.ChatGUID = "sl:acme:C1"
+	inThread.ChatGUID = "sl:acme:C1:1.0"
+
+	app, first := deliverMessage(t, app, inChannel.ChatGUID, inChannel)
+	_, second := deliverMessage(t, app, inThread.ChatGUID, inThread)
+	if len(*alerts) != 1 {
+		t.Errorf("%d notifications, want 1", len(*alerts))
+	}
+	if first == "" || second != "" {
+		t.Errorf("toasts %q then %q, want one, the first", first, second)
+	}
+}

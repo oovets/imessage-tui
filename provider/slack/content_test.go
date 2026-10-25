@@ -210,16 +210,10 @@ func TestMessageContentMarksAttachments(t *testing.T) {
 			color: []string{"#2eb886"},
 		},
 		{
-			name:  "a reply that is all attachment carries its marker inside the bar",
-			json:  `{"ts": "2.0", "thread_ts": "1.0", "attachments": [{"color": "#abc", "title": "firing"}]}`,
-			text:  "↳ firing",
-			cards: []string{"↳ firing"},
-			color: []string{"#aabbcc"},
-		},
-		{
-			name:  "a reply with a body keeps the marker on the body",
+			// That it is a reply travels beside the text, as ReplyToGUID.
+			name:  "a reply's text says nothing of its thread",
 			json:  `{"ts": "2.0", "thread_ts": "1.0", "text": "se här", "attachments": [{"title": "firing"}]}`,
-			text:  "↳ se här\nfiring",
+			text:  "se här\nfiring",
 			cards: []string{"firing"},
 			color: []string{""},
 		},

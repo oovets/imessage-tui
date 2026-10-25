@@ -164,6 +164,16 @@ func (w *ChatWindow) LinkAt(x, y int) (string, bool) {
 	return w.Messages.LinkAtViewport(x-FocusedWindowStyle.GetPaddingLeft(), viewportY)
 }
 
+// QuoteAt returns, when row y quotes what a reply answers, the answered
+// message's GUID and the reply's number. y counts from the window's top.
+func (w *ChatWindow) QuoteAt(y int) (string, int, bool) {
+	viewportY, ok := w.messageViewportY(y)
+	if !ok {
+		return "", 0, false
+	}
+	return w.Messages.QuoteAtViewportY(viewportY)
+}
+
 func (w *ChatWindow) messageViewportY(y int) (int, bool) {
 	if y < 0 || w.height <= 0 {
 		return 0, false

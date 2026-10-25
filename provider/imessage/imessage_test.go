@@ -51,6 +51,31 @@ func TestParseMessageEventFindsChatGUIDInEitherShape(t *testing.T) {
 	}
 }
 
+// BlueBubbles names the message a reply answers threadOriginatorGuid, and
+// sends null for everything that answers nothing.
+func TestParseMessageEventReadsWhatAReplyAnswers(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want string
+	}{
+		{name: "a reply", data: `{"guid":"m2","text":"ja","threadOriginatorGuid":"m1","threadOriginatorPart":"0:0:5"}`, want: "m1"},
+		{name: "not a reply", data: `{"guid":"m2","text":"ja","threadOriginatorGuid":null}`},
+		{name: "an older server", data: `{"guid":"m2","text":"ja"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, err := parseMessageEvent(models.WSEvent{Type: "new-message", Data: json.RawMessage(tt.data)})
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if msg.ReplyToGUID != tt.want {
+				t.Errorf("ReplyToGUID = %q, want %q", msg.ReplyToGUID, tt.want)
+			}
+		})
+	}
+}
+
 func TestEventKindMapping(t *testing.T) {
 	cases := map[string]provider.EventKind{
 		"new-message":              provider.EventNewMessage,

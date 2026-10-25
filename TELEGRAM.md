@@ -170,6 +170,7 @@ waits a minute reads as a hung app.
 | Chats | `telegram.go` `Chats` | Dialogs in Telegram's order, unread counts, previews; the archive folder is skipped |
 | History | `telegram.go` `Messages` | Service messages skipped, stickers as `[sticker 😀]`, other media as a bracketed label |
 | Sending, replies | `telegram.go` `Send` | A reply target in another chat is ignored, not sent across |
+| Receiving replies | `telegram.go` `replyTo` | The reply header as `ReplyToGUID`, a picked passage as `ReplyQuote` |
 | Reactions | `telegram.go` `React` | Tapback mapping above |
 | Read state | `telegram.go` `MarkRead` | `channels.readHistory` for channels, `messages.readHistory` otherwise |
 | Photos, files | `telegram.go` `DownloadAttachment` | Message re-read for a fresh file reference; largest photo size |
@@ -201,10 +202,14 @@ drops the chat's cached history, and the next refresh, at most
 `poll_interval_sec` later, brings the new counts. Edits are published as
 `EventUpdatedMessage` like Slack's, so they apply as soon as the UI does.
 
-**Replies carry no marker.** Slack marks thread replies with `↳` because they
-live outside the channel's flow. A Telegram reply sits in order where it was
-sent, and a marker would also break the optimistic echo, which matches on
-text.
+**A reply names what it answers; its text says nothing.** The reply header
+becomes `ReplyToGUID`, and the passage the sender picked, when they picked
+one, `ReplyQuote`; the pane draws them (`tui/messages.go` `replyQuote`). The
+text stays as sent, which is what the optimistic echo matches on. In a forum
+every message of a topic carries a header naming the topic's first message —
+where it was posted, not what it answers — so only a header that also names
+its topic (`ReplyToTopID`) counts as a reply. The fields are read directly:
+the generated `Get…` accessors check flag bits that only decoding sets.
 
 **Startup waits for each account**, up to 20 seconds, the way it waits for
 each Slack workspace: the chat list is loaded once and needs the peers.
@@ -212,9 +217,8 @@ each Slack workspace: the chat list is loaded once and needs the peers.
 ## Still to do
 
 1. Map formatting entities, so labelled links keep their URL.
-2. Show where a reply points (the quoted message), not just the reply.
-3. Persist the peer table if restored panes turn out to race the chat list.
-4. Connect accounts and workspaces in parallel at startup.
+2. Persist the peer table if restored panes turn out to race the chat list.
+3. Connect accounts and workspaces in parallel at startup.
 
 ## Known limits
 

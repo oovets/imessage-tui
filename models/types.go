@@ -125,6 +125,20 @@ type Message struct {
 	// get a coloured bar beside them the way Slack draws one. In order, not
 	// overlapping.
 	Accents []Accent `json:"accents,omitempty"`
+
+	// ReplyToGUID is the message this one answers, when it is a reply.
+	// BlueBubbles calls it the thread originator: an iMessage reply to a
+	// reply names the message the thread started from, as a Slack reply
+	// names its thread's root.
+	ReplyToGUID string `json:"threadOriginatorGuid,omitempty"`
+	// ReplyQuote is the stretch of the answered message the sender quoted,
+	// when they picked one rather than answering all of it (Telegram).
+	ReplyQuote string `json:"replyQuote,omitempty"`
+	// RepliesToMe says the answered message is the user's own. A backend
+	// sets it when it knows without having the message at hand — Slack
+	// names the thread's author on every reply — because the answered
+	// message is often too old to be loaded.
+	RepliesToMe bool `json:"repliesToMe,omitempty"`
 }
 
 // TextFormat names the markup a message's text is written in. The marks stay

@@ -1,6 +1,7 @@
 package slack
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/oovets/imessage-tui/provider"
@@ -102,14 +103,17 @@ func TestMessagesForAThreadReadTheThreadUnmarked(t *testing.T) {
 	if len(msgs) != 2 {
 		t.Fatalf("got %d messages, want root + reply", len(msgs))
 	}
-	// In the thread's own pane every message is in the thread; the channel's
-	// reply marker would only be noise.
 	if msgs[0].Text != "rot" || msgs[1].Text != "svar i tråd" {
-		t.Errorf("texts = %q, %q, want them without the reply marker", msgs[0].Text, msgs[1].Text)
+		t.Errorf("texts = %q, %q", msgs[0].Text, msgs[1].Text)
 	}
 	for _, msg := range msgs {
 		if msg.ChatGUID != threadGUID {
 			t.Errorf("chat guid = %q, want the thread's", msg.ChatGUID)
+		}
+		// In the thread's own pane every message answers the root; saying
+		// so on each would only be noise.
+		if msg.ReplyToGUID != "" {
+			t.Errorf("%q answers %q in the thread's own pane, want nothing", msg.Text, msg.ReplyToGUID)
 		}
 	}
 }
@@ -196,12 +200,83 @@ func TestStreamPublishesAReplyToAnOpenThreadThereToo(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("got %d events, want one for the channel and one for the thread", len(got))
 	}
-	if got[0].ChatGUID != "sl:acme:C1" || got[0].Message.Text != "↳ nytt svar" {
-		t.Errorf("channel event = %q %q", got[0].ChatGUID, got[0].Message.Text)
+	if got[0].ChatGUID != "sl:acme:C1" || got[0].Message.ReplyToGUID != threadGUID {
+		t.Errorf("channel event = %q answering %q, want the channel's, answering the root",
+			got[0].ChatGUID, got[0].Message.ReplyToGUID)
 	}
-	if got[1].ChatGUID != threadGUID || got[1].Message.ChatGUID != threadGUID || got[1].Message.Text != "nytt svar" {
-		t.Errorf("thread event = %q %q %q, want the thread's, unmarked",
-			got[1].ChatGUID, got[1].Message.ChatGUID, got[1].Message.Text)
+	if got[1].ChatGUID != threadGUID || got[1].Message.ChatGUID != threadGUID || got[1].Message.ReplyToGUID != "" {
+		t.Errorf("thread event = %q %q answering %q, want the thread's, answering nothing",
+			got[1].ChatGUID, got[1].Message.ChatGUID, got[1].Message.ReplyToGUID)
+	}
+}
+
+// A reply to the user's own post is told apart by the thread's author, which
+// Slack puts on every reply: the post itself is often far older than anything
+// loaded. The event goes through the real decoder, since that is the only
+// place the author survives.
+func TestStreamSaysWhenAReplyAnswersTheUsersOwnPost(t *testing.T) {
+	_, p := threadFixture(t)
+	tests := []struct {
+		name       string
+		parentUser string
+		want       bool
+	}{
+		{name: "the user's post", parentUser: "USELF", want: true},
+		{name: "someone else's post", parentUser: "UANNA", want: false},
+		{name: "no author given", parentUser: "", want: false},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, _ := json.Marshal(map[string]any{
+				"type": "message", "channel": "C1", "user": "UBO", "text": "svar",
+				"ts": "1700000600.00010" + string(rune('0'+i)), "thread_ts": threadRootTS,
+				"parent_user_id": tt.parentUser,
+			})
+			var event slackevents.MessageEvent
+			if err := json.Unmarshal(raw, &event); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			stream := newTestStream(t, p)
+			stream.handleEventsAPI(eventsAPI(&event), nil)
+			got := drainEvents(stream)
+			if len(got) != 1 {
+				t.Fatalf("got %d events, want one", len(got))
+			}
+			if got[0].Message.RepliesToMe != tt.want {
+				t.Errorf("RepliesToMe = %v, want %v", got[0].Message.RepliesToMe, tt.want)
+			}
+		})
+	}
+}
+
+func TestHistorySaysWhenAReplyAnswersTheUsersOwnPost(t *testing.T) {
+	fake, p := threadFixture(t)
+	fake.route("conversations.history", func(map[string]string) any {
+		return map[string]any{"ok": true, "messages": []any{
+			map[string]any{"type": "message", "user": "USELF", "text": "min post",
+				"ts": threadRootTS, "reply_count": 1, "thread_ts": threadRootTS},
+		}}
+	})
+	fake.route("conversations.replies", func(map[string]string) any {
+		return map[string]any{"ok": true, "messages": []any{
+			map[string]any{"type": "message", "user": "USELF", "text": "min post",
+				"ts": threadRootTS, "thread_ts": threadRootTS, "reply_count": 2},
+			map[string]any{"type": "message", "user": "UBO", "text": "svar",
+				"ts": threadReplyTS, "thread_ts": threadRootTS, "parent_user_id": "USELF"},
+		}}
+	})
+	msgs, err := p.Messages(threadGUID, 50)
+	if err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("got %d messages, want root + reply", len(msgs))
+	}
+	if msgs[0].RepliesToMe {
+		t.Error("the root itself is marked as a reply to the user")
+	}
+	if !msgs[1].RepliesToMe {
+		t.Error("a reply to the user's own post is not marked as one")
 	}
 }
 

@@ -226,6 +226,13 @@ the server confirms or the timeout fires. Rendering is incremental —
 through `appendLineIndex`, so a new render path must keep one entry per
 *visual* line, including blank and separator lines.
 
+A reply names what it answers in `ReplyToGUID` (and Telegram's picked
+passage in `ReplyQuote`), never in its text: echo matching and the dedupe
+compare text, and a marker there made every Slack `/r` show twice. The pane
+draws the quote (`replyQuote` in `tui/messages.go`) as rows of their own
+above the reply, cut to the pane rather than wrapped, each with its own
+`lineQuotes` entry, which is what a click there jumps from.
+
 A URL in message text opens only where it is drawn: `lineLinkSpans` holds its
 columns on each visual line, found after wrapping (`wrappedLinkSpans` in
 `tui/links.go`), so a long URL that breaks across rows is clickable on each

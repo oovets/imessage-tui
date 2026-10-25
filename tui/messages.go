@@ -46,6 +46,13 @@ type MessagesModel struct {
 	lineMessages  []int
 	lineLinks     []string
 	lineLinkSpans [][]linkSpan
+	// lineQuotes is, on a line quoting what a reply answers, the GUID of the
+	// answered message, which a click there jumps to; "" on every other line.
+	lineQuotes []string
+
+	// highlightGUID is the message just jumped to, drawn reversed for a
+	// moment so the eye finds it.
+	highlightGUID string
 
 	// Cached render so a single appended message doesn't re-render the whole
 	// history. renderedBody is the full viewport content; lastRenderedDay is
@@ -374,6 +381,63 @@ func (m *MessagesModel) LatestLink() (string, bool) {
 	return "", false
 }
 
+// QuoteAtViewportY returns, when viewport row y quotes what a reply answers,
+// the answered message's GUID and the reply's number.
+func (m *MessagesModel) QuoteAtViewportY(y int) (string, int, bool) {
+	if y < 0 {
+		return "", 0, false
+	}
+	line := m.viewport.YOffset + y
+	if line < 0 || line >= len(m.lineQuotes) || m.lineQuotes[line] == "" {
+		return "", 0, false
+	}
+	return m.lineQuotes[line], m.lineMessages[line], true
+}
+
+// JumpToMessage scrolls the message with guid into view and flashes it. It
+// reports false when the pane does not hold that message.
+func (m *MessagesModel) JumpToMessage(guid string) bool {
+	j := m.indexOfGUID(guid)
+	if j < 0 {
+		return false
+	}
+	m.highlightGUID = guid
+	m.stickToBottom = false
+	m.renderContent()
+	for line, n := range m.lineMessages {
+		if n == j+1 {
+			// A third of the way down, so what came before it is in view too.
+			m.viewport.SetYOffset(max(0, line-m.viewport.Height/3))
+			break
+		}
+	}
+	m.stickToBottom = m.viewport.AtBottom()
+	return true
+}
+
+// ClearHighlight ends the flash on guid, if it is still the one flashing.
+func (m *MessagesModel) ClearHighlight(guid string) {
+	if guid == "" || m.highlightGUID != guid {
+		return
+	}
+	m.highlightGUID = ""
+	m.renderContent()
+}
+
+// indexOfGUID is the position of the message with guid, or -1. What a reply
+// answers is almost always just above it, so the search starts at the end.
+func (m *MessagesModel) indexOfGUID(guid string) int {
+	if guid == "" {
+		return -1
+	}
+	for i := len(m.messages) - 1; i >= 0; i-- {
+		if m.messages[i].GUID == guid {
+			return i
+		}
+	}
+	return -1
+}
+
 func (m *MessagesModel) messageNumberAtViewportY(y int) int {
 	if y < 0 {
 		return 0
@@ -397,6 +461,7 @@ func (m *MessagesModel) renderContent() {
 	m.lineMessages = m.lineMessages[:0]
 	m.lineLinks = m.lineLinks[:0]
 	m.lineLinkSpans = m.lineLinkSpans[:0]
+	m.lineQuotes = m.lineQuotes[:0]
 	if len(m.messages) == 0 {
 		if m.loading {
 			m.viewport.SetContent(lipgloss.NewStyle().Foreground(ColorWindowPlaceholder).Render("Loading messages…"))
@@ -484,6 +549,17 @@ func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg model
 			bodyLines[len(bodyLines)-1] += " " + attLabel
 		}
 	}
+	quote, answersAbove := m.replyQuote(i, msg, wrapWidth)
+	if answersAbove {
+		// What it answers is right above it, so a quote would repeat it;
+		// the marker is enough to say this is a reply.
+		if len(bodyLines) == 0 {
+			bodyLines = append(bodyLines, strings.TrimSpace(replyMarker))
+			bodyLineLinks = append(bodyLineLinks, "")
+		} else {
+			bodyLines[0] = replyMarker + bodyLines[0]
+		}
+	}
 	reactionLabel := formatReactionCounts(msg.ReactionCounts)
 	for _, preview := range previews {
 		label := linkPreviewLabel(preview)
@@ -512,13 +588,28 @@ func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg model
 		fullLineLinks = append(fullLineLinks, "")
 	}
 
+	highlighted := msg.GUID != "" && msg.GUID == m.highlightGUID
+
 	if msg.IsFromMe {
 		msgStyle := MyMessageStyle
 		if msg.Pending {
 			msgStyle = msgStyle.Faint(true)
 		}
+		if highlighted {
+			msgStyle = msgStyle.Reverse(true)
+		}
 		reopen := styleOpenSequence(msgStyle)
 		wroteLine := false
+		for _, row := range quote {
+			if wroteLine {
+				sb.WriteString("\n")
+			}
+			// Mirrored: the indent that sets a quote apart is on the right.
+			sb.WriteString(strings.Repeat(" ", max(0, wrapWidth-lipgloss.Width(row)-lipgloss.Width(quoteIndent))))
+			sb.WriteString(msgStyle.Render(reopenAfterResets(row+quoteIndent, reopen)))
+			m.appendQuoteLineIndex(i+1, msg.ReplyToGUID)
+			wroteLine = true
+		}
 		for li, rawLine := range fullLines {
 			bar := barAt(bodyLineBars, li)
 			lines := messageWrappedLines(rawLine, wrapWidth-barWidth(bar), fullLineLinks[li] == "")
@@ -538,11 +629,19 @@ func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg model
 		sb.WriteString("\n")
 	} else {
 		style := TheirMessageStyle
-		if _, unseen := m.unseenGUIDs[msg.GUID]; unseen {
+		if _, unseen := m.unseenGUIDs[msg.GUID]; unseen || highlighted {
 			style = style.Reverse(true)
 		}
 		reopen := styleOpenSequence(style)
 		wroteLine := false
+		for _, row := range quote {
+			if wroteLine {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(style.Width(wrapWidth).Render(reopenAfterResets(quoteIndent+row, reopen)))
+			m.appendQuoteLineIndex(i+1, msg.ReplyToGUID)
+			wroteLine = true
+		}
 		for li, rawLine := range fullLines {
 			bar := barAt(bodyLineBars, li)
 			lines := messageWrappedLines(rawLine, wrapWidth-barWidth(bar), fullLineLinks[li] == "")
@@ -568,6 +667,107 @@ func (m *MessagesModel) appendLineIndex(messageNumber int, link string, spans []
 	m.lineMessages = append(m.lineMessages, messageNumber)
 	m.lineLinks = append(m.lineLinks, link)
 	m.lineLinkSpans = append(m.lineLinkSpans, spans)
+	m.lineQuotes = append(m.lineQuotes, "")
+}
+
+// appendQuoteLineIndex records a line quoting what message messageNumber
+// answers, which is answeredGUID.
+func (m *MessagesModel) appendQuoteLineIndex(messageNumber int, answeredGUID string) {
+	m.appendLineIndex(messageNumber, "", nil)
+	m.lineQuotes[len(m.lineQuotes)-1] = answeredGUID
+}
+
+const (
+	// quoteMarker opens the line quoting what a reply answers.
+	quoteMarker = "↱ "
+	// quoteIndent sets a quote apart from the messages around it.
+	quoteIndent = "  "
+	// replyMarker starts a reply whose answered message is right above it.
+	replyMarker = "↳ "
+	// maxQuoteRows caps a quoted passage. The rest is in the message it was
+	// taken from, a click away.
+	maxQuoteRows = 3
+)
+
+// replyQuote is how message i shows what it answers: the rows to draw above
+// it, each one visual line, or — when the answered message is right above,
+// itself or answered by the message there too — no rows, and answersAbove.
+//
+// A reply that quotes a passage it picked (Telegram) shows the passage beside
+// a bar wherever it is: the passage is what it is answering. Anything else
+// gets one line with the answered message's sender and start, or a word that
+// it answers one not loaded here.
+func (m *MessagesModel) replyQuote(i int, msg models.Message, width int) (rows []string, answersAbove bool) {
+	if msg.ReplyToGUID == "" {
+		return nil, false
+	}
+	j := m.indexOfGUID(msg.ReplyToGUID)
+	if msg.ReplyQuote == "" && i > 0 && (j == i-1 || m.messages[i-1].ReplyToGUID == msg.ReplyToGUID) {
+		return nil, true
+	}
+
+	width = max(1, width-lipgloss.Width(quoteIndent))
+	lead, name := "", ""
+	var answered *models.Message
+	if j >= 0 {
+		answered = &m.messages[j]
+		if m.showLineNumbers {
+			lead = fmt.Sprintf("#%d ", j+1)
+		}
+		name = senderName(*answered)
+	}
+
+	if msg.ReplyQuote != "" {
+		text := oneLine(msg.ReplyQuote)
+		if name != "" {
+			text = lead + name + ": " + text
+		}
+		width = max(1, width-lipgloss.Width(accentBar))
+		wrapped := strings.Split(lipgloss.NewStyle().Width(width).Render(text), "\n")
+		if len(wrapped) > maxQuoteRows {
+			wrapped = wrapped[:maxQuoteRows]
+			wrapped[maxQuoteRows-1] = truncateToWidth(strings.TrimRight(wrapped[maxQuoteRows-1], " "), width-1) + "…"
+		}
+		for r, row := range wrapped {
+			row = strings.TrimRight(row, " ")
+			if r == 0 {
+				row = m.styleQuoteRow(row, lead, name, answered)
+			} else {
+				row = quoteStyle().Render(row)
+			}
+			rows = append(rows, renderBar(ColorMuted)+row)
+		}
+		return rows, false
+	}
+
+	text := "reply to an earlier message"
+	if answered != nil {
+		text = lead + name + ": " + oneLine(messagePreview(*answered))
+	}
+	row := truncateToWidth(quoteMarker+text, width)
+	return []string{m.styleQuoteRow(row, quoteMarker+lead, name, answered)}, false
+}
+
+// styleQuoteRow mutes a quote row. Where the row starts with lead and the
+// answered message's sender, the name takes the colour it has on that
+// sender's own messages, so it reads as the same person.
+func (m *MessagesModel) styleQuoteRow(row, lead, name string, answered *models.Message) string {
+	muted := quoteStyle()
+	if answered == nil || answered.IsFromMe || !m.colorSenders || name == "" || !strings.HasPrefix(row, lead+name) {
+		return muted.Render(row)
+	}
+	rest := strings.TrimPrefix(row, lead+name)
+	out := nickStyle(name).Render(name) + muted.Render(rest)
+	if lead != "" {
+		out = muted.Render(lead) + out
+	}
+	return out
+}
+
+// quoteStyle is built on use rather than once, so a theme pinned after
+// startup reaches it.
+func quoteStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(ColorMuted)
 }
 
 // lineTextLinkSpans finds the URLs written in one logical line across the

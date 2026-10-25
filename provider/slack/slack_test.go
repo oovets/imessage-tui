@@ -360,8 +360,11 @@ func TestMessagesExpandsThreadsInline(t *testing.T) {
 	if msgs[0].Text != "rot" {
 		t.Errorf("first message = %q, want the thread root", msgs[0].Text)
 	}
-	if msgs[1].Text != "↳ svar i tråd" {
-		t.Errorf("reply = %q, want it marked as a thread reply", msgs[1].Text)
+	if msgs[1].Text != "svar i tråd" || msgs[1].ReplyToGUID != "sl:acme:C1:1700000100.000100" {
+		t.Errorf("reply = %q answering %q, want it to answer the root", msgs[1].Text, msgs[1].ReplyToGUID)
+	}
+	if msgs[0].ReplyToGUID != "" {
+		t.Errorf("the root answers %q, want nothing", msgs[0].ReplyToGUID)
 	}
 }
 

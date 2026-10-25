@@ -110,7 +110,7 @@ credentials; `main.go` registers one provider per workspace.
 | Conversations | `slack.go` `Chats` | `users.conversations`, paginated, bot DMs filtered out |
 | History | `slack.go` `Messages` | `conversations.history`, oldest-first, mrkdwn converted |
 | App messages | `content.go` | Block Kit blocks and legacy attachments drawn as text |
-| Threads | `slack.go` `threadReplies` | `conversations.replies`, inline, marked `↳` |
+| Threads | `slack.go` `threadReplies` | `conversations.replies`, inline, each answering its root (`ReplyToGUID`) |
 | Reading a thread | `slack.go` `Thread`, `threadMessages`; `tui/app.go` `/t #N` | The thread as a conversation of its own, in a pane beside the channel |
 | Sending | `slack.go` `Send` | `chat.postMessage`, threaded when given a message GUID or sent to a thread |
 | Replying in a thread | `tui/app.go` `/r #N` | Posts under the root, also when row N is itself a reply |
@@ -137,8 +137,8 @@ the root message's, `sl:<workspace>:<channel>:<root ts>`, so the same thread is
 reached from the root or from any reply, and a restored layout gets it back
 from the GUID alone — the chat list never holds threads. `Messages`, `Send` and
 `MarkRead` all take it: one `conversations.replies` call per load, replies
-without the `↳` marker, posts under the root, and no read marking, since the
-Web API has none for threads.
+that name nothing they answer (every one answers the root), posts under the
+root, and no read marking, since the Web API has none for threads.
 
 Two costs keep that bounded. The refresh timer loads a thread pane like any
 other, and the reply-count cache cannot help there — the count comes with the
@@ -147,6 +147,16 @@ is one Tier 3 call per poll interval. And realtime replies reach a thread's
 GUID only for threads that have been loaded that way (`watched`): publishing
 every live reply under its thread too would make each one a chat the UI
 caches, persists and resyncs after every reconnect.
+
+**A reply says what it answers beside its text, not in it.** In the channel a
+reply carries its root as `ReplyToGUID`, and the pane draws the root above it.
+The text stays what was sent: the `↳ ` it used to start with made every `/r`
+from the channel miss its optimistic copy, which is matched on text, and show
+twice until that copy timed out thirty seconds later. Slack also names the root's author on every
+reply (`parent_user_id`), which becomes `RepliesToMe` — that is how a reply to
+the user's own post notifies as one when the post is far older than anything
+loaded. Over Socket Mode the author is only on slackevents' decoded
+`Message`, not on the top-level fields `msgFromEvent` otherwise copies.
 
 **Deletions are not applied.** There is no "remove one message" path in the UI,
 and adding one for a single backend would mean a delete iMessage can never

@@ -93,7 +93,7 @@ func TestSentMessageEventReplacesPendingEcho(t *testing.T) {
 	window := app.windowManager.FocusedWindow()
 	window.SetChat(&chat)
 
-	pending := app.addPendingOutgoing(chat.GUID, "hej")
+	pending := app.addPendingOutgoing(chat.GUID, "hej", "")
 	if !app.hasPendingOutgoing(chat.GUID, pending.GUID) {
 		t.Fatal("no optimistic copy")
 	}

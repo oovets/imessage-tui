@@ -322,7 +322,33 @@ func (p *Provider) toMessage(peer Peer, msg *tg.Message) models.Message {
 	if counts := reactionCounts(msg.Reactions); len(counts) > 0 {
 		out.ReactionCounts = counts
 	}
+	out.ReplyToGUID, out.ReplyQuote = p.replyTo(peer, msg)
 	return out
+}
+
+// replyTo is the message msg answers, and the part of it msg quotes when the
+// sender picked one.
+//
+// In a forum every message of a topic carries a reply header naming the
+// topic's first message; that is where it was posted, not something it
+// answers. Only one that also names its topic answers a message in it.
+func (p *Provider) replyTo(peer Peer, msg *tg.Message) (string, string) {
+	header, ok := msg.ReplyTo.(*tg.MessageReplyHeader)
+	if !ok || header.ReplyToMsgID == 0 {
+		return "", ""
+	}
+	if header.ForumTopic && header.ReplyToTopID == 0 {
+		return "", ""
+	}
+	target := peer
+	if other, ok := peerOf(header.ReplyToPeerID); ok {
+		target = other
+	}
+	quote := ""
+	if header.Quote {
+		quote = strings.TrimSpace(header.QuoteText)
+	}
+	return MessageGUID(p.account.ID, target, header.ReplyToMsgID), quote
 }
 
 // authorOf is who wrote a message. In a private chat the sender is often left

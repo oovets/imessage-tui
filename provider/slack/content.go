@@ -31,16 +31,9 @@ type card struct {
 // bars. Each part is converted on its own: TextToPlain changes lengths, so the
 // offsets can only be taken once a part is in its final form.
 //
-// A thread reply is marked as one. That is for the channel view, where replies
-// sit among everything else; a thread read in its own pane uses threadContent.
+// A thread reply's text says nothing about its thread: that it answers the
+// root travels as models.Message.ReplyToGUID, and the pane draws it.
 func messageContent(msg *slackapi.Msg, userNames map[string]string) (string, []models.Accent) {
-	text, accents := threadContent(msg, userNames)
-	return markReply(msg, text, accents)
-}
-
-// threadContent is messageContent without the reply marker: in a thread's own
-// pane every message is in the thread, so the marker would only be noise.
-func threadContent(msg *slackapi.Msg, userNames map[string]string) (string, []models.Accent) {
 	text := strings.TrimSpace(TextToPlain(messageBody(msg), userNames))
 	var accents []models.Accent
 	for _, c := range messageCards(msg) {
@@ -57,26 +50,11 @@ func threadContent(msg *slackapi.Msg, userNames map[string]string) (string, []mo
 	return text, accents
 }
 
-// markReply prefixes a thread reply with the reply marker. A reply carries no
-// visual link to its root in a flat message list, so it gets a marker there.
-// When the reply is all attachment, the marker joins the first bar rather than
-// sitting on a line of its own.
-func markReply(msg *slackapi.Msg, text string, accents []models.Accent) (string, []models.Accent) {
-	if msg.ThreadTimestamp == "" || msg.ThreadTimestamp == msg.Timestamp {
-		return text, accents
-	}
-	text = replyMarker + text
-	for i := range accents {
-		accents[i].Start += len(replyMarker)
-		accents[i].End += len(replyMarker)
-	}
-	if len(accents) > 0 && accents[0].Start == len(replyMarker) {
-		accents[0].Start = 0
-	}
-	return text, accents
+// isReply reports whether msg answers a thread rather than starting one or
+// standing alone. Slack gives a root its own ts as thread_ts.
+func isReply(msg *slackapi.Msg) bool {
+	return msg.ThreadTimestamp != "" && msg.ThreadTimestamp != msg.Timestamp
 }
-
-const replyMarker = "↳ "
 
 func messageCards(msg *slackapi.Msg) []card {
 	var cards []card

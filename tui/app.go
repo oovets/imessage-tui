@@ -86,6 +86,8 @@ type (
 		chatGUID    string
 		pendingGUID string
 	}
+	// highlightExpiredMsg ends the flash on a message jumped to.
+	highlightExpiredMsg  struct{ messageGUID string }
 	linkPreviewLoadedMsg struct {
 		chatGUID    string
 		messageGUID string
@@ -206,6 +208,8 @@ type AppModel struct {
 	terminalFocus terminalFocus
 	alert         alerter
 	alertedAt     map[string]time.Time
+	// announcedAt is when each recent message was announced, by GUID.
+	announcedAt map[string]time.Time
 
 	// All disk writes go through this so the Update loop never blocks on
 	// fsync/marshal. Blocking Update for even 50ms causes dropped
@@ -287,6 +291,7 @@ func NewAppModelWithConfig(backends *provider.Registry, stream provider.Stream, 
 		notifyMode:            notifications,
 		alert:                 systemAlert,
 		alertedAt:             make(map[string]time.Time),
+		announcedAt:           make(map[string]time.Time),
 		unloadedBackends:      make(map[string]bool),
 		chatOverrides:         chatOverrides,
 		persist:               newPersister(),
@@ -411,6 +416,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sendReactionErrMsg:
 		m.setAppError(msg.err)
+		return m, nil
+
+	case highlightExpiredMsg:
+		for _, window := range m.windowManager.WindowsInAllTabs() {
+			window.Messages.ClearHighlight(msg.messageGUID)
+		}
 		return m, nil
 
 	case noticeExpireMsg:
@@ -1079,7 +1090,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						// Clear immediately to avoid visible input lag while waiting for
 						// network confirmation.
 						window.Input.Clear()
-						pending := m.addPendingOutgoing(window.Chat.GUID, text)
+						pending := m.addPendingOutgoing(window.Chat.GUID, text, "")
 						return m, tea.Batch(
 							sendMessageCmd(m.providerFor(window.Chat.GUID), window.Chat.GUID, text, "", window.ID, pending.GUID),
 							pendingTimeoutCmd(window.Chat.GUID, pending.GUID),
@@ -2400,7 +2411,9 @@ func errNoCapability(backend provider.Provider, what string) error {
 	return fmt.Errorf("%s cannot %s", backend.ID(), what)
 }
 
-func (m *AppModel) addPendingOutgoing(chatGUID, text string) models.Message {
+// addPendingOutgoing shows text as sent before the server says so. A reply
+// names what it answers, so it is drawn with its quote from the start.
+func (m *AppModel) addPendingOutgoing(chatGUID, text, replyToGUID string) models.Message {
 	pending := models.Message{
 		GUID:        uuid.New().String(),
 		Text:        text,
@@ -2408,6 +2421,7 @@ func (m *AppModel) addPendingOutgoing(chatGUID, text string) models.Message {
 		DateCreated: time.Now().UnixMilli(),
 		ChatGUID:    chatGUID,
 		Pending:     true,
+		ReplyToGUID: replyToGUID,
 	}
 
 	m.pendingOutgoing[chatGUID] = append(m.pendingOutgoing[chatGUID], pending)
@@ -2518,7 +2532,7 @@ func (m *AppModel) handleLocalInputCommand(window *ChatWindow, raw string) (tea.
 			return nil, true
 		}
 		window.Input.Clear()
-		pending := m.addPendingOutgoing(window.Chat.GUID, text)
+		pending := m.addPendingOutgoing(window.Chat.GUID, text, targetGUID)
 		return tea.Batch(
 			sendMessageCmd(m.providerFor(window.Chat.GUID), window.Chat.GUID, text, targetGUID, window.ID, pending.GUID),
 			pendingTimeoutCmd(window.Chat.GUID, pending.GUID),
@@ -2597,6 +2611,25 @@ func (m *AppModel) openThread(window *ChatWindow, n int) tea.Cmd {
 	}
 	m.updateLayout()
 	return m.selectChat(&thread, m.windowManager.FocusedWindow())
+}
+
+// highlightDuration is how long a message jumped to stays flashed.
+const highlightDuration = 1500 * time.Millisecond
+
+// followQuote goes to the message a reply on row n answers: scrolled to and
+// flashed when the pane holds it. When it does not, a backend with threads
+// opens the reply's thread, which starts with that message; anything else
+// can only say so.
+func (m *AppModel) followQuote(window *ChatWindow, answeredGUID string, n int) tea.Cmd {
+	if window.Messages.JumpToMessage(answeredGUID) {
+		return tea.Tick(highlightDuration, func(time.Time) tea.Msg {
+			return highlightExpiredMsg{messageGUID: answeredGUID}
+		})
+	}
+	if _, ok := m.providerFor(windowChatGUID(window)).(provider.Threader); ok {
+		return m.openThread(window, n)
+	}
+	return showToastCmd("The message it answers is not loaded here", 3*time.Second)
 }
 
 // threadChat resolves a GUID the chat list does not have into the thread it
@@ -3244,6 +3277,11 @@ func (m AppModel) handleMouseMsg(msg tea.MouseMsg) (AppModel, tea.Cmd) {
 			// link itself, while the image answers for every row of the message.
 			if rawURL, ok := window.LinkAt(relX-window.x, localY); ok {
 				return m, tea.Batch(cmd, openURLCmd(rawURL))
+			}
+			// Before the image, which answers for every row of the reply,
+			// the quote's own row included.
+			if answered, reply, ok := window.QuoteAt(localY); ok {
+				return m, tea.Batch(cmd, m.followQuote(window, answered, reply))
 			}
 			if att, ok := window.FirstImageAttachmentAtContentY(localY); ok {
 				return m, tea.Batch(cmd, openImageAttachmentCmd(m.providerFor(windowChatGUID(window)), att))

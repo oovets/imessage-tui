@@ -176,9 +176,12 @@ max_previews_per_message: 2
   app learns by asking the terminal for focus reports. a terminal that never
   sends any -- tmux needs `set -g focus-events on` -- is treated as watched,
   and is alerted only for chats that are not on screen. a chat rings or
-  notifies once per 30 seconds however many messages it sends, and ignored
-  chats, your own messages, and unknown senders while those are hidden never
-  do.
+  notifies once per 30 seconds however many messages it sends -- except for
+  a reply to one of your own messages, a slack thread on your post included
+  however old the post is, which always does and says "replied to you". a
+  message is announced once, also a slack reply that arrives in its channel
+  and in its open thread at the same time. ignored chats, your own messages,
+  and unknown senders while those are hidden never do.
 ```
 
 ---
@@ -208,7 +211,8 @@ max_previews_per_message: 2
   what works
     channels, private channels, dms, group dms
     threads. the replies to the ten newest are shown inline in the channel,
-    marked ↳, in time order among everything else. /t #N opens a thread in
+    in time order among everything else, each with the post it answers (see
+    "replies"). /t #N opens a thread in
     a pane beside the channel -- the root, then every reply in order --
     where anything you send posts in the thread. /r #N answers in a thread
     from the channel itself
@@ -365,6 +369,7 @@ max_previews_per_message: 2
 
   mouse
     click to focus a pane, open an image or open a url where it is drawn,
+    jump to the message a reply answers by clicking its ↱ line,
     double-click a chat in the list to open it in the focused pane,
     click a network chip to filter the chat list, click a tab on the tab bar
     to show it, click the unread badge to open the list on that chat, scroll
@@ -490,6 +495,21 @@ max_previews_per_message: 2
     ctrl+b flips the chat in the focused pane, in every pane showing it, and
     is remembered in chat_overrides.json. flipping it back to what the chat
     would show anyway forgets the choice, so it follows alt+m again.
+
+  replies
+    a reply shows what it answers on a muted line above it, with that
+    message's row number and sender:
+
+        ↱ #12 Erik: ska vi ta lunch kl 12?
+      14:05 #14 Anna: ja, kör!
+
+    when the answered message is right above -- or the reply above answers
+    it too, as a thread reads when nobody talks in between -- that line would
+    only repeat it, and the reply starts with ↳ instead. a telegram reply
+    that quotes part of a message shows that part beside a bar, up to three
+    rows. clicking the line scrolls to the answered message and flashes it;
+    when it is not loaded, a slack reply opens its thread, and anything else
+    says "reply to an earlier message".
 
   links
     a url in a message opens in the browser when you click the url itself --

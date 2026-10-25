@@ -83,6 +83,9 @@ type notice struct {
 	chat   string // the chat's name
 	sender string // who wrote, when that is not just the chat's name
 	text   string
+	// toMe marks a reply to one of the user's own messages, which says so:
+	// it is the one message in a busy channel that is about them.
+	toMe bool
 }
 
 func (n notice) title() string {
@@ -90,18 +93,30 @@ func (n notice) title() string {
 }
 
 func (n notice) body() string {
-	if n.sender != "" {
-		return n.sender + ": " + n.text
+	if who := n.who(); who != "" {
+		return who + ": " + n.text
 	}
 	return n.text
 }
 
 func (n notice) toast() string {
 	head := n.chat
-	if n.sender != "" {
-		head += " · " + n.sender
+	if who := n.who(); who != "" {
+		head += " · " + who
 	}
 	return "● " + head + ": " + n.text
+}
+
+// who is what the notice says about the sender, "" when the chat's name says
+// it already.
+func (n notice) who() string {
+	switch {
+	case n.toMe && n.sender != "":
+		return n.sender + " replied to you"
+	case n.toMe:
+		return "Replied to you"
+	}
+	return n.sender
 }
 
 // noticeFor names a message's chat and sender for a notice.
@@ -124,7 +139,25 @@ func (m *AppModel) noticeFor(msg models.Message) notice {
 		n.text = "New message"
 	}
 	n.text = truncateToWidth(n.text, noticeTextWidth)
+	n.toMe = m.repliesToMe(msg)
 	return n
+}
+
+// repliesToMe reports whether msg answers one of the user's own messages:
+// because its backend said so, or because the answered message is at hand.
+func (m *AppModel) repliesToMe(msg models.Message) bool {
+	if msg.RepliesToMe {
+		return true
+	}
+	if msg.ReplyToGUID == "" {
+		return false
+	}
+	for _, cached := range m.windowManager.GetCachedMessages(msg.ChatGUID) {
+		if cached.GUID == msg.ReplyToGUID {
+			return cached.IsFromMe
+		}
+	}
+	return false
 }
 
 // oneLine flattens text for a single row: whitespace runs, newlines included,
@@ -151,6 +184,9 @@ func (m *AppModel) announce(msg models.Message) []tea.Cmd {
 	if msg.IsFromMe || msg.ChatGUID == "" || m.chatList.Quiet(msg.ChatGUID) {
 		return nil
 	}
+	if m.announcedBefore(msg.GUID) {
+		return nil
+	}
 	onScreen := len(m.windowManager.ActiveWindowsShowingChat(msg.ChatGUID)) > 0 ||
 		(m.showChatList && m.chatList.Listed(msg.ChatGUID))
 	n := m.noticeFor(msg)
@@ -158,15 +194,40 @@ func (m *AppModel) announce(msg models.Message) []tea.Cmd {
 	if !onScreen {
 		cmds = append(cmds, showToastCmd(n.toast(), noticeToastDuration))
 	}
-	if m.shouldAlert(msg.ChatGUID, onScreen) {
+	if m.shouldAlert(msg.ChatGUID, onScreen, n.toMe) {
 		cmds = append(cmds, alertCmd(m.alert, m.notifyMode, n))
 	}
 	return cmds
 }
 
+// announcedBefore reports whether the message with guid was announced a
+// moment ago, and remembers that it now has been.
+//
+// One message can arrive as news in two conversations: a Slack reply in its
+// channel and in its thread, when the thread is open in a pane. Each
+// conversation has its own cooldown, so without this one reply rang twice.
+func (m *AppModel) announcedBefore(guid string) bool {
+	if guid == "" {
+		return false
+	}
+	now := time.Now()
+	for seen, at := range m.announcedAt {
+		if now.Sub(at) >= alertCooldown {
+			delete(m.announcedAt, seen)
+		}
+	}
+	if _, ok := m.announcedAt[guid]; ok {
+		return true
+	}
+	m.announcedAt[guid] = now
+	return false
+}
+
 // shouldAlert decides whether a message rings or notifies outside the app,
-// and starts the chat's cooldown when it does.
-func (m *AppModel) shouldAlert(chatGUID string, onScreen bool) bool {
+// and starts the chat's cooldown when it does. A reply to the user's own
+// message alerts through the cooldown: it is the message the rest of a burst
+// would otherwise bury.
+func (m *AppModel) shouldAlert(chatGUID string, onScreen, toMe bool) bool {
 	switch {
 	case m.notifyMode == notifyOff || m.alert == nil:
 		return false
@@ -176,7 +237,7 @@ func (m *AppModel) shouldAlert(chatGUID string, onScreen bool) bool {
 		return false
 	}
 	now := time.Now()
-	if last, ok := m.alertedAt[chatGUID]; ok && now.Sub(last) < alertCooldown {
+	if last, ok := m.alertedAt[chatGUID]; ok && now.Sub(last) < alertCooldown && !toMe {
 		return false
 	}
 	m.alertedAt[chatGUID] = now
