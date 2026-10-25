@@ -667,6 +667,73 @@ func TestIgnoreKeysPersistAcrossRestarts(t *testing.T) {
 	}
 }
 
+// A muted chat keeps its place, pinned and listed, and a new message there
+// still marks its row — drawn muted, and counted nowhere else.
+func TestMutedChatStaysListedButCountsAsNothingNew(t *testing.T) {
+	forceColor(t)
+	m := networkTestList(20)
+	m.TogglePin("sl:acme:C1")
+	if !m.ToggleMute("sl:acme:C1") {
+		t.Fatal("ToggleMute did not report the chat as muted")
+	}
+	m.MarkNewMessage("sl:acme:C1")
+	m.SelectByGUID("chat-a")
+
+	if got, want := sectionedRows(m), "[Pinned],General,[Recent],Slack Anna,Family,Bob"; got != want {
+		t.Fatalf("rows = %s, want %s", got, want)
+	}
+	if got := m.NewMessageCount(); got != 0 {
+		t.Errorf("NewMessageCount = %d, want the muted chat not counted", got)
+	}
+	if chat := m.NewestUnread(); chat != nil {
+		t.Errorf("NewestUnread = %s, want nothing", chat.GUID)
+	}
+	if tabs := stripANSI(strings.Join(m.tabLines(), " ")); strings.Contains(tabs, "Slack 1") {
+		t.Errorf("tabs = %q, want no unread count for a muted chat", tabs)
+	}
+	view := m.View()
+	if !strings.Contains(view, m.previewStyle.Render(" ● General")) || strings.Contains(view, m.newMessageStyle.Render(" ● General")) {
+		t.Errorf("muted row is not drawn muted: %q", view)
+	}
+
+	if m.ToggleMute("sl:acme:C1") {
+		t.Fatal("second toggle left the chat muted")
+	}
+	if got := m.NewMessageCount(); got != 1 {
+		t.Errorf("NewMessageCount = %d after unmuting, want the new message counted", got)
+	}
+}
+
+func TestMuteKeyPersistsAcrossRestarts(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	chats := []models.Chat{
+		{GUID: "chat-a", DisplayName: "Family"},
+		{GUID: "sl:acme:C1", DisplayName: "General"},
+	}
+	app := NewAppModelWithConfig(nil, nil, nil)
+	app.focused = focusChatList
+	app.chatList.SetChats(chats)
+	app.chatList.SelectChatByGUID("sl:acme:C1")
+
+	app = typeRunes(app, "m")
+	if got := app.chatList.SelectedChat(); got == nil || got.GUID != "sl:acme:C1" {
+		t.Fatalf("selected = %v after m, want the cursor left on the muted chat", got)
+	}
+
+	restarted := NewAppModelWithConfig(nil, nil, nil)
+	restarted.focused = focusChatList
+	restarted.chatList.SetChats(chats)
+	if !restarted.chatList.IsMuted("sl:acme:C1") || restarted.chatList.IsMuted("chat-a") {
+		t.Fatalf("after restart muted = %v, want only sl:acme:C1", restarted.chatList.Muted())
+	}
+
+	restarted.chatList.SelectChatByGUID("sl:acme:C1")
+	restarted = typeRunes(restarted, "m")
+	if got := config.LoadChatOverrides().Muted; len(got) != 0 {
+		t.Fatalf("saved mutes = %v, want none after m on the muted chat", got)
+	}
+}
+
 func unknownSenderList() SimpleListModel {
 	m := NewSimpleListModel()
 	m.SetShowPreview(false)

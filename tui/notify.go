@@ -180,8 +180,15 @@ func oneLine(s string) string {
 // another network. Outside it, with notifications on, a bell or desktop
 // notification when the terminal is not being looked at — or, from a terminal
 // that has never said whether it is, when the chat is not on screen.
+//
+// A muted chat announces only a reply to the user's own message, the way
+// Slack and Telegram still announce a mention there.
 func (m *AppModel) announce(msg models.Message) []tea.Cmd {
 	if msg.IsFromMe || msg.ChatGUID == "" || m.chatList.Quiet(msg.ChatGUID) {
+		return nil
+	}
+	n := m.noticeFor(msg)
+	if m.chatList.IsMuted(msg.ChatGUID) && !n.toMe {
 		return nil
 	}
 	if m.announcedBefore(msg.GUID) {
@@ -189,7 +196,6 @@ func (m *AppModel) announce(msg models.Message) []tea.Cmd {
 	}
 	onScreen := len(m.windowManager.ActiveWindowsShowingChat(msg.ChatGUID)) > 0 ||
 		(m.showChatList && m.chatList.Listed(msg.ChatGUID))
-	n := m.noticeFor(msg)
 	var cmds []tea.Cmd
 	if !onScreen {
 		cmds = append(cmds, showToastCmd(n.toast(), noticeToastDuration))

@@ -92,7 +92,7 @@ backend owns a conversation is never something you have to think about.
   read from env vars and ~/.config/imessage-tui/imessage.yaml; env wins.
   credentials prefer the os keyring and fall back to the config file.
   ui state, layout, message cache and per-chat overrides -- aliases, pins,
-  ignores, sender-name choices -- live in ~/.config/imessage-tui/
+  mutes, ignores, sender-name choices -- live in ~/.config/imessage-tui/
 
   setting                   env var                     default   what it does
   ----------------------------------------------------------------------------
@@ -180,8 +180,9 @@ max_previews_per_message: 2
   a reply to one of your own messages, a slack thread on your post included
   however old the post is, which always does and says "replied to you". a
   message is announced once, also a slack reply that arrives in its channel
-  and in its open thread at the same time. ignored chats, your own messages,
-  and unknown senders while those are hidden never do.
+  and in its open thread at the same time. muted chats announce only replies
+  to you; ignored chats, your own messages, and unknown senders while those
+  are hidden never announce anything.
 ```
 
 ---
@@ -325,6 +326,7 @@ max_previews_per_message: 2
     s                      group the chat list by network, or back to recent
     p                      pin or unpin the selected chat
     K / J                  move a pinned chat up / down in Pinned
+    m                      mute or unmute the selected chat
     x                      ignore the selected chat, or stop ignoring it
     I                      show or hide ignored chats
     U                      show or hide chats from unknown senders
@@ -453,6 +455,15 @@ max_previews_per_message: 2
   the order you give them -- new pins go last, K and J move one -- rather than
   moving with each new message, and still answer to the network filter and
   search. pins live in chat_overrides.json beside the local aliases.
+
+  m mutes the selected chat -- a noisy slack channel, a telegram group: it
+  keeps its place in the list, pinned or not, but a new message there raises
+  no toast, bell or desktop notification and is left out of the unread
+  counts, the badge and alt+n. its row is drawn grey, with the ● still
+  saying something came in. a reply to one of your own messages there still
+  notifies, the way slack and telegram announce a mention in a muted chat.
+  mutes are local to the app -- nothing is muted in slack or telegram
+  themselves -- and kept in chat_overrides.json.
 
   x ignores the selected chat: it leaves the list, the Pinned section and
   every unread count, and stays gone when new messages arrive. this is local

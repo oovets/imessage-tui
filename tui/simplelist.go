@@ -88,6 +88,10 @@ type SimpleListModel struct {
 	ignored     []string
 	ignoredSet  map[string]bool
 	showIgnored bool
+	// muted chats keep their row but have nothing new to say: they are drawn
+	// muted and left out of every unread count, so the network tabs, the
+	// badge and alt+n pass them by.
+	muted map[string]bool
 	// showUnknown lists every chat from an unknown sender in its own section.
 	// Hidden, the only ones listed are those with a new message — a code
 	// that just arrived has to be findable — and those pinned.
@@ -373,6 +377,49 @@ func (m *SimpleListModel) SetShowIgnored(show bool) {
 
 func (m *SimpleListModel) ShowIgnored() bool {
 	return m.showIgnored
+}
+
+// SetMuted replaces the muted chats.
+func (m *SimpleListModel) SetMuted(guids []string) {
+	m.muted = make(map[string]bool, len(guids))
+	for _, guid := range guids {
+		m.muted[guid] = true
+	}
+}
+
+// Muted returns the muted chat GUIDs, sorted, so the same mutes save the
+// same file.
+func (m *SimpleListModel) Muted() []string {
+	guids := make([]string, 0, len(m.muted))
+	for guid := range m.muted {
+		guids = append(guids, guid)
+	}
+	sort.Strings(guids)
+	return guids
+}
+
+func (m *SimpleListModel) IsMuted(chatGUID string) bool {
+	return m.muted[chatGUID]
+}
+
+// ToggleMute mutes a chat, or unmutes it, and reports whether it is muted
+// now. Unlike ignoring, the chat keeps its row, its pin and the cursor.
+func (m *SimpleListModel) ToggleMute(chatGUID string) bool {
+	if m.muted[chatGUID] {
+		delete(m.muted, chatGUID)
+		return false
+	}
+	if m.muted == nil {
+		m.muted = make(map[string]bool)
+	}
+	m.muted[chatGUID] = true
+	return true
+}
+
+// unread reports whether a chat has something new that counts. Ignored and
+// muted chats never do.
+func (m *SimpleListModel) unread(chat models.Chat) bool {
+	return chat.HasNewMessage && !m.ignoredSet[chat.GUID] && !m.muted[chat.GUID]
 }
 
 // SetShowUnknown shows or hides the Unknown senders section.
@@ -940,7 +987,7 @@ func (m SimpleListModel) networkTabs() []networkTab {
 	}
 	unread := make(map[string]int, len(nets))
 	for _, chat := range m.items {
-		if chat.HasNewMessage && !m.ignoredSet[chat.GUID] {
+		if m.unread(chat) {
 			unread[m.chatNetwork(chat)]++
 		}
 	}
@@ -1028,7 +1075,7 @@ func (m *SimpleListModel) ClearNewMessage(chatGUID string) {
 func (m *SimpleListModel) NewMessageCount() int {
 	count := 0
 	for _, chat := range m.items {
-		if chat.HasNewMessage && !m.ignoredSet[chat.GUID] {
+		if m.unread(chat) {
 			count++
 		}
 	}
@@ -1037,10 +1084,10 @@ func (m *SimpleListModel) NewMessageCount() int {
 
 // NewestUnread returns the unread chat that heard last, or nil. MarkNewMessage
 // moves a chat to the top, and a reload comes back newest first, so that is
-// the first unread one. Ignored chats never count.
+// the first unread one. Ignored and muted chats never count.
 func (m *SimpleListModel) NewestUnread() *models.Chat {
 	for _, chat := range m.items {
-		if chat.HasNewMessage && !m.ignoredSet[chat.GUID] {
+		if m.unread(chat) {
 			return &chat
 		}
 	}
@@ -1254,6 +1301,10 @@ func (m SimpleListModel) View() string {
 
 		if fi == m.cursor {
 			line1 = m.selectedStyle.Render(" " + line1 + timeStr)
+		} else if m.muted[chat.GUID] {
+			// Muted whether or not something new came in: the ● still says
+			// it did, without asking to be read.
+			line1 = m.previewStyle.Render(" "+line1) + timeStr
 		} else if chat.HasNewMessage {
 			line1 = m.newMessageStyle.Render(" "+line1) + timeStr
 		} else {

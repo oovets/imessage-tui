@@ -119,6 +119,9 @@ func TestNewMessageToast(t *testing.T) {
 		{name: "ignored chat",
 			setup: func(_ *testing.T, app *AppModel) { app.chatList.ToggleIgnore("im-1") },
 			chat:  "im-1", sender: "Family", text: "middag?"},
+		{name: "muted chat",
+			setup: func(_ *testing.T, app *AppModel) { app.chatList.ToggleMute("im-1") },
+			chat:  "im-1", sender: "Family", text: "middag?"},
 		{name: "own message",
 			chat: "im-1", text: "middag?", fromMe: true},
 		{name: "sender is not the chat, text on several lines",
@@ -453,5 +456,39 @@ func TestOneMessageInTwoConversationsIsAnnouncedOnce(t *testing.T) {
 	}
 	if first == "" || second != "" {
 		t.Errorf("toasts %q then %q, want one, the first", first, second)
+	}
+}
+
+// A muted chat neither toasts nor notifies, except for a reply to one of the
+// user's own messages: the one message there that is about them.
+func TestMutedChatAnnouncesOnlyRepliesToTheUser(t *testing.T) {
+	app, alerts := noticeApp(t)
+	app.notifyMode = notifyDesktop
+	model, _ := app.Update(tea.BlurMsg{})
+	app = model.(AppModel)
+	app.chatList.ToggleMute("sl:acme:C1")
+
+	app, toast := deliver(t, app, "sl:acme:C1", "Anna", "lunch?", false)
+	if toast != "" || len(*alerts) != 0 {
+		t.Fatalf("muted chat announced a message: toast %q, %d notifications", toast, len(*alerts))
+	}
+
+	reply := models.Message{
+		GUID: "reply", ChatGUID: "sl:acme:C1", Text: "ja", DateCreated: 5000,
+		Handle:      &models.Handle{Address: "UANNA", DisplayName: "Anna"},
+		ReplyToGUID: "sl:acme:C1:1.0", RepliesToMe: true,
+	}
+	app, toast = deliverMessage(t, app, "sl:acme:C1", reply)
+	if want := "● Engineering · Anna replied to you: ja"; toast != want {
+		t.Errorf("toast = %q, want %q", toast, want)
+	}
+	if len(*alerts) != 1 {
+		t.Fatalf("%d notifications, want the reply's: %+v", len(*alerts), *alerts)
+	}
+
+	// The other chat is not muted along with it.
+	deliver(t, app, "im-1", "Family", "middag?", false)
+	if len(*alerts) != 2 {
+		t.Errorf("%d notifications, want Family's too", len(*alerts))
 	}
 }

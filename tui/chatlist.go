@@ -162,6 +162,22 @@ func (m *ChatListModel) ToggleIgnore(chatGUID string) bool {
 	return m.list.ToggleIgnore(chatGUID)
 }
 
+func (m *ChatListModel) SetMuted(guids []string) {
+	m.list.SetMuted(guids)
+}
+
+func (m *ChatListModel) Muted() []string {
+	return m.list.Muted()
+}
+
+func (m *ChatListModel) IsMuted(chatGUID string) bool {
+	return m.list.IsMuted(chatGUID)
+}
+
+func (m *ChatListModel) ToggleMute(chatGUID string) bool {
+	return m.list.ToggleMute(chatGUID)
+}
+
 func (m *ChatListModel) SetShowIgnored(show bool) {
 	m.list.SetShowIgnored(show)
 }

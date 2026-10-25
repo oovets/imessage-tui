@@ -307,6 +307,7 @@ func NewAppModelWithConfig(backends *provider.Registry, stream provider.Stream, 
 	app.chatList.SetGroupByNetwork(ui.ChatListSort == config.ChatListSortNetwork)
 	app.chatList.SetPinned(chatOverrides.Pinned)
 	app.chatList.SetIgnored(chatOverrides.Ignored)
+	app.chatList.SetMuted(chatOverrides.Muted)
 	app.restoreMessageCache()
 	return app
 }
@@ -655,6 +656,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					toast := "No longer ignoring " + name
 					if m.chatList.ToggleIgnore(chat.GUID) {
 						toast = "Ignored " + name + " — I shows ignored chats"
+					}
+					m.savePins()
+					return m, showToastCmd(toast, 3*time.Second)
+				}
+			case "m":
+				if chat := m.chatList.SelectedChat(); chat != nil {
+					name := chat.GetDisplayName()
+					toast := "Unmuted " + name
+					if m.chatList.ToggleMute(chat.GUID) {
+						toast = "Muted " + name + " — only replies to you notify"
 					}
 					m.savePins()
 					return m, showToastCmd(toast, 3*time.Second)
@@ -1264,6 +1275,9 @@ func (m *AppModel) removeChatLocalState(chatGUID string) {
 	if m.chatList.IsIgnored(chatGUID) {
 		m.chatList.ToggleIgnore(chatGUID)
 	}
+	if m.chatList.IsMuted(chatGUID) {
+		m.chatList.ToggleMute(chatGUID)
+	}
 	m.savePins()
 }
 
@@ -1278,11 +1292,12 @@ func (m *AppModel) togglePin(chat *models.Chat) tea.Cmd {
 	return showToastCmd(toast, 2*time.Second)
 }
 
-// savePins writes the chat list's pins and ignores. Both live beside the
-// aliases in chat_overrides.json, and ignoring a chat can unpin it.
+// savePins writes the chat list's pins, ignores and mutes. They live beside
+// the aliases in chat_overrides.json, and ignoring a chat can unpin it.
 func (m *AppModel) savePins() {
 	m.chatOverrides.Pinned = m.chatList.Pinned()
 	m.chatOverrides.Ignored = m.chatList.Ignored()
+	m.chatOverrides.Muted = m.chatList.Muted()
 	_ = config.SaveChatOverrides(m.chatOverrides)
 }
 

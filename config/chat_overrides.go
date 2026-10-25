@@ -13,6 +13,9 @@ type ChatOverridesState struct {
 	Pinned []string `json:"pinned,omitempty"`
 	// Ignored lists chats by GUID that the chat list never shows.
 	Ignored []string `json:"ignored,omitempty"`
+	// Muted lists chats by GUID that stay in the list but whose messages
+	// are not announced, except a reply to one of the user's own.
+	Muted []string `json:"muted,omitempty"`
 	// SenderNames holds the chats whose sender names were toggled by hand
 	// away from the default, by GUID: true shows them, false hides them.
 	SenderNames map[string]bool `json:"sender_names,omitempty"`
