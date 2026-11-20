@@ -349,6 +349,9 @@ func (w *ChatWindow) paneHeaderLine(width int) string {
 		name := stripEmojis(w.Chat.GetDisplayName())
 		label += " " + name
 	}
+	if hidden := w.Messages.HiddenCount(); hidden > 0 {
+		label += fmt.Sprintf(" (%d filtered)", hidden)
+	}
 	if w.Messages.HasUnseenIncoming() {
 		label += " ●"
 	}

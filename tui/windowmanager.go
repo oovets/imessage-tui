@@ -36,6 +36,9 @@ type WindowManager struct {
 	tabs      []*paneTab
 	activeTab int
 
+	// filters is what /filter and /ignore hide; every pane shares it.
+	filters *messageFilters
+
 	showTimestamps   bool
 	showLineNumbers  bool
 	showSenderNames  bool
@@ -84,7 +87,24 @@ func (wm *WindowManager) newWindow(id WindowID) *ChatWindow {
 	window.Messages.SetShowTimestamps(wm.showTimestamps)
 	window.Messages.SetShowLineNumbers(wm.showLineNumbers)
 	window.Messages.SetShowSenderNames(wm.showSenderNames)
+	window.Messages.SetFilters(wm.filters)
 	return window
+}
+
+// SetMessageFilters gives every pane, in every tab, the filters it hides
+// lines by, and the ones made later too.
+func (wm *WindowManager) SetMessageFilters(filters *messageFilters) {
+	wm.filters = filters
+	for _, w := range wm.WindowsInAllTabs() {
+		w.Messages.SetFilters(filters)
+	}
+}
+
+// Refilter redraws every pane, in every tab, after the filters changed.
+func (wm *WindowManager) Refilter() {
+	for _, w := range wm.WindowsInAllTabs() {
+		w.Messages.Refilter()
+	}
 }
 
 // SetSize updates the available dimensions and recalculates layout

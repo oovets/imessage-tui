@@ -657,3 +657,28 @@ func TestLimiterLetsABurstThroughThenSpacesLines(t *testing.T) {
 		t.Fatal("a line that cannot go before its deadline was let through")
 	}
 }
+
+func TestBufferNamesAreWeeChats(t *testing.T) {
+	p, _ := newTestProvider(t, fullCaps...)
+	tests := map[string]string{
+		"irc:libera:#go":  "irc.libera.#go",
+		"irc:libera:bob":  "irc.libera.bob",
+		"irc:oftc:#go":    "",
+		"sl:acme:C1":      "",
+		"not-a-guid-here": "",
+	}
+	for guid, want := range tests {
+		if got := p.BufferName(guid); got != want {
+			t.Errorf("BufferName(%q) = %q, want %q", guid, got, want)
+		}
+	}
+
+	registry := provider.NewRegistry(nil)
+	registry.Register(p.GUIDPrefix(), p)
+	if got := registry.BufferName("irc:libera:#go"); got != "irc.libera.#go" {
+		t.Errorf("registry.BufferName = %q", got)
+	}
+	if got := registry.BufferName("chat-a"); got != "" {
+		t.Errorf("a chat no backend names got %q", got)
+	}
+}

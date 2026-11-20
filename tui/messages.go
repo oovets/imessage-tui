@@ -62,6 +62,11 @@ type MessagesModel struct {
 	renderedBody    string
 	lastRenderedDay string
 	contentRendered bool
+
+	// filters hides the lines /filter and /ignore say to; shared by every
+	// pane. hiddenCount is how many the last render left out.
+	filters     *messageFilters
+	hiddenCount int
 }
 
 func NewMessagesModel() MessagesModel {
@@ -457,7 +462,23 @@ func (m *MessagesModel) wrapWidth() int {
 	return w
 }
 
+// SetFilters gives the pane the filters it hides lines by.
+func (m *MessagesModel) SetFilters(filters *messageFilters) {
+	m.filters = filters
+}
+
+// Refilter draws the pane again after the filters changed.
+func (m *MessagesModel) Refilter() {
+	m.renderContent()
+}
+
+// HiddenCount is how many messages the filters keep out of the pane.
+func (m *MessagesModel) HiddenCount() int {
+	return m.hiddenCount
+}
+
 func (m *MessagesModel) renderContent() {
+	m.hiddenCount = 0
 	m.lineMessages = m.lineMessages[:0]
 	m.lineLinks = m.lineLinks[:0]
 	m.lineLinkSpans = m.lineLinkSpans[:0]
@@ -494,6 +515,12 @@ func (m *MessagesModel) renderContent() {
 // into sb, appending one entry per visual line to the line-index slices, and
 // returns the day key the next message should compare against.
 func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg models.Message, lastDay string, wrapWidth int) string {
+	if m.filters.hidden(msg) {
+		// Nothing drawn, so no line-index entries either. The message keeps
+		// its number: /r #N and /img #N still mean what the pane showed.
+		m.hiddenCount++
+		return lastDay
+	}
 	msgTime := msg.ParsedTime()
 	dayKey := msgTime.Format("2006-01-02")
 	if dayKey != lastDay {
@@ -1092,6 +1119,10 @@ func (m *MessagesModel) rebuildMessageIndex() {
 
 func (m *MessagesModel) LatestMessageGUID() string {
 	for i := len(m.messages) - 1; i >= 0; i-- {
+		if m.filters.hidden(m.messages[i]) {
+			// A reaction goes to the latest message the user can see.
+			continue
+		}
 		if guid := strings.TrimSpace(m.messages[i].GUID); guid != "" {
 			return guid
 		}

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -67,6 +68,8 @@ func helpOverlayView(width, height int) string {
 				"Click ↱      Jump to the message a reply answers",
 				"/r #N text   Reply to message row N (Slack: in its thread)",
 				"/t #N        Open row N's thread in a new pane (Slack)",
+				"/filter ...  Hide lines in IRC chats (/filter list, as WeeChat)",
+				"/ignore ...  Hide a nick in IRC chats for good",
 				"/h /lol      React to latest message",
 				"/tu /te      Thumbs up / down latest message",
 			},
@@ -100,6 +103,7 @@ func helpOverlayView(width, height int) string {
 				"Ctrl+N       Toggle line numbers",
 				"Ctrl+B       Toggle sender names (this chat, remembered)",
 				"Alt+M        Sender names in 1:1 chats too",
+				"Alt+= / -    Filtering off/on: everywhere / this pane's chat",
 				"Ctrl+E       Toggle pane dividers",
 				"Ctrl+P       Toggle chat previews",
 				"F1           Toggle this help",
@@ -139,6 +143,12 @@ func helpOverlayView(width, height int) string {
 		BorderForeground(ColorChatListSelectedBackground).
 		Render(content)
 
+	return centerOverlay(box, width, height)
+}
+
+// centerOverlay places a bordered box in the middle of a width × height
+// screen, which it replaces.
+func centerOverlay(box string, width, height int) string {
 	boxWidth := lipgloss.Width(box)
 	boxHeight := lipgloss.Height(box)
 	if boxWidth > width-2 {
@@ -167,4 +177,45 @@ func helpOverlayView(width, height int) string {
 		return lipgloss.JoinVertical(lipgloss.Left, append(rows, row)...)
 	}
 	return row
+}
+
+// textOverlayView shows lines in a box like the help's, for listings a
+// command asks for (/filter list). Lines that do not fit are counted rather
+// than drawn, so the box never runs off the screen.
+func textOverlayView(title string, lines []string, width, height int) string {
+	if width < 20 || height < 10 {
+		return ""
+	}
+	room := height - 9
+	if room < 1 {
+		room = 1
+	}
+	shown := lines
+	more := 0
+	if len(shown) > room {
+		more = len(shown) - room + 1
+		shown = shown[:room-1]
+	}
+	maxLine := width - 10
+	var body strings.Builder
+	body.WriteString(lipgloss.NewStyle().Bold(true).Render(title))
+	body.WriteString("\n\n")
+	for _, line := range shown {
+		body.WriteString(truncateToWidth(line, maxLine))
+		body.WriteString("\n")
+	}
+	note := lipgloss.NewStyle().Foreground(ColorWindowPlaceholder)
+	if more > 0 {
+		body.WriteString(note.Render(fmt.Sprintf("… %d more", more)))
+		body.WriteString("\n")
+	}
+	body.WriteString("\n")
+	body.WriteString(note.Render("Press any key to close"))
+
+	content := lipgloss.NewStyle().Padding(1, 2).Render(body.String())
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorChatListSelectedBackground).
+		Render(content)
+	return centerOverlay(box, width, height)
 }

@@ -184,6 +184,15 @@ may block. A multi-line send comes back as several echoed lines; they are
 folded into one message (`outgoing` in `handlers.go`) so the optimistic copy
 matches. `IRC.md` has the rest.
 
+`/filter` and `/ignore` (`tui/filters.go`) follow WeeChat's syntax and hide
+lines in the UI rather than dropping them in a backend, so toggling filtering
+off (alt+=, alt+-) brings them back. They match a chat by its WeeChat buffer
+name, which only a backend implementing `provider.BufferNamer` gives — IRC,
+today — so a filter can never reach a chat without one, `*` or not. A hidden
+message is still cached and appended; `renderMessageBlock` skips it without
+touching the line index, and the event path skips its unread marker,
+preview and notification.
+
 Logins run as subcommands (`commands.go`) before Bubble Tea starts, which is
 the one place the program may print to stdout.
 

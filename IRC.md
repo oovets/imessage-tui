@@ -174,6 +174,16 @@ clear by default.
 | Read state | `irc.go` `MarkRead`, `handlers.go` `onMarkRead` | Shared with `draft/read-marker` |
 | Several networks | `main.go` `connectIRC` | Names and the network label carry the network name |
 
+### Filters and ignores
+
+`/filter` and `/ignore` work as in WeeChat, and they live in the UI
+(`tui/filters.go`), not here: a filtered line is hidden, not dropped, so
+alt+= can bring it back, and the log and the UI's cache keep it either way.
+What this package gives them is the buffer name — `irc.<network>.<target>`,
+the target casefolded as in the GUID — through `provider.BufferNamer`, so the
+UI can scope a filter to a network or a channel without reading a GUID. An
+ignore matches the nick alone: messages here carry no user@host.
+
 ## Known limits
 
 - A private conversation that starts while the program runs is not added to

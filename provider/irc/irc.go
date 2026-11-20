@@ -173,8 +173,9 @@ type Provider struct {
 }
 
 var (
-	_ provider.Provider = (*Provider)(nil)
-	_ provider.Labeler  = (*Provider)(nil)
+	_ provider.Provider    = (*Provider)(nil)
+	_ provider.Labeler     = (*Provider)(nil)
+	_ provider.BufferNamer = (*Provider)(nil)
 )
 
 // newProvider is the one place a Provider is assembled, for New and tests.
@@ -260,6 +261,17 @@ func (p *Provider) GUIDPrefix() string { return Prefix + p.net.ID + sep }
 // network, where it is noise, and the only way to tell two #general apart
 // with more.
 func (p *Provider) ShowNetworkInNames(show bool) { p.labelNetwork = show }
+
+// BufferName is the conversation's name as WeeChat writes it:
+// irc.<network>.<target>, the target casefolded as in the GUID. /filter and
+// /ignore match against it.
+func (p *Provider) BufferName(chatGUID string) string {
+	fold, err := p.targetOf(chatGUID)
+	if err != nil {
+		return ""
+	}
+	return "irc." + p.net.ID + "." + fold
+}
 
 // Close quits the server.
 func (p *Provider) Close() { p.wire.Quit() }

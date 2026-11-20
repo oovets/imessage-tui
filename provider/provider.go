@@ -82,6 +82,15 @@ type Labeler interface {
 	Label() string
 }
 
+// BufferNamer is implemented by backends that can name a conversation the way
+// WeeChat names a buffer — plugin.server.target, such as irc.libera.#go.
+// That name is what /filter and /ignore match against, so the UI can scope a
+// filter to a network or a channel without ever reading a GUID. A backend
+// without it has no buffer name, and no filter reaches its chats.
+type BufferNamer interface {
+	BufferName(chatGUID string) string
+}
+
 // EventKind is what happened to a message, normalized across backends.
 type EventKind int
 
@@ -174,6 +183,15 @@ func (r *Registry) For(chatGUID string) Provider {
 // its ID when it has none. Empty when no backend owns the GUID.
 func (r *Registry) Label(chatGUID string) string {
 	return LabelOf(r.For(chatGUID))
+}
+
+// BufferName is the WeeChat-style name of a conversation, from the backend
+// that owns it, or "" when that backend has none.
+func (r *Registry) BufferName(chatGUID string) string {
+	if namer, ok := r.For(chatGUID).(BufferNamer); ok {
+		return namer.BufferName(chatGUID)
+	}
+	return ""
 }
 
 // Labels returns every backend's label in registry order, fallback first, so

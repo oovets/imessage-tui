@@ -185,6 +185,13 @@ type AppModel struct {
 	// of the sequence to be parsed as text. See swallowEscapeSequenceTail.
 	lastEscapeAt time.Time
 
+	// overlayTitle and overlayLines are a listing a command asked for, shown
+	// over everything until a key is pressed; nil lines when none is open.
+	overlayTitle string
+	overlayLines []string
+	// filters is what /filter and /ignore hide, shared with every pane.
+	filters *messageFilters
+
 	showHelp         bool
 	chatAction       chatActionMode
 	actionChatGUID   string
@@ -262,7 +269,10 @@ func NewAppModelWithConfig(backends *provider.Registry, stream provider.Stream, 
 	wm.SetShowSenderNames(ui.ShowSenderNames)
 	wm.SetSenderNameChoices(chatOverrides.SenderNames)
 	wm.SetShowPaneDividers(ui.ShowPaneDividers)
+	filters := newMessageFilters(config.LoadFilters(), backends.BufferName)
+	wm.SetMessageFilters(filters)
 	app := AppModel{
+		filters:               filters,
 		chatList:              NewChatListModel(),
 		windowManager:         wm,
 		providers:             backends,
@@ -600,6 +610,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.overlayLines != nil {
+			// A listing is read and dismissed; any key does it, and none
+			// of them falls through to act on what is underneath.
+			m.overlayLines = nil
+			return m, nil
+		}
 		if m.chatAction != chatActionNone {
 			return m.handleChatActionKey(msg)
 		}
@@ -918,6 +934,25 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			show := m.windowManager.ToggleFocusedSenderNames()
 			m.saveSenderNameChoices()
 			return m, showToastCmd(senderNameToast(show, "this chat"), 2*time.Second)
+
+		case "alt+=":
+			// WeeChat's key for the same thing: every filter off, or on
+			// again. Ignores stay in force either way.
+			result, err := m.filters.runFilterCommand("toggle", "")
+			if err != nil {
+				m.setAppError(err)
+				return m, nil
+			}
+			return m, m.applyFilterResult(result)
+
+		case "alt+-":
+			// Filtering off, or on again, in the focused pane's buffer only.
+			result, err := m.filters.runFilterCommand("toggle @", m.focusedBuffer())
+			if err != nil {
+				m.setAppError(err)
+				return m, nil
+			}
+			return m, m.applyFilterResult(result)
 
 		case "alt+m", "ctrl+m":
 			// The same toggle for every pane, and the default new panes start
@@ -1553,6 +1588,9 @@ func (m AppModel) frame() string {
 
 	if m.showHelp {
 		return helpOverlayView(m.width, m.height)
+	}
+	if m.overlayLines != nil {
+		return textOverlayView(m.overlayTitle, m.overlayLines, m.width, m.height)
 	}
 
 	// Render chat list panel over the full frame height: there is no status
@@ -2551,6 +2589,10 @@ func (m *AppModel) matchAndRemovePendingOutgoing(msg models.Message) {
 }
 
 func (m *AppModel) handleLocalInputCommand(window *ChatWindow, raw string) (tea.Cmd, bool) {
+	if cmd, handled := m.handleFilterCommand(window, raw); handled {
+		return cmd, true
+	}
+
 	if reaction, handled := parseReactionCommand(raw); handled {
 		targetGUID := window.Messages.LatestMessageGUID()
 		if targetGUID == "" {
@@ -3098,13 +3140,21 @@ func (m *AppModel) handleProviderEvent(event provider.Event) (tea.Model, tea.Cmd
 			// WS may have left behind.
 			m.saveMessageCacheChat(msg.ChatGUID)
 
+			// A filtered message is kept — turning the filter off shows it —
+			// but it is as if it never came: no unread marker, no preview,
+			// no notification.
+			hidden := m.filters.hidden(msg)
+
 			// Update ALL windows showing this chat
 			windowsShowing := m.windowManager.WindowsShowingChat(msg.ChatGUID)
 			for _, window := range windowsShowing {
 				window.Messages.AppendMessage(msg)
-				if !msg.IsFromMe && !window.Focused {
+				if !msg.IsFromMe && !window.Focused && !hidden {
 					window.Messages.MarkIncomingUnseen(msg.GUID)
 				}
+			}
+			if hidden {
+				return m, m.waitForStreamEvent()
 			}
 
 			// Local read/unread policy:
@@ -3483,4 +3533,63 @@ func loadLinkPreviewCmd(previewer provider.LinkPreviewer, chatGUID, messageGUID,
 			preview:     preview,
 		}
 	}
+}
+
+// handleFilterCommand runs /filter and /ignore typed in a pane. handled is
+// false for anything else. On an error the text stays in the composer, so a
+// long /filter add with a typo can be fixed rather than typed again.
+func (m *AppModel) handleFilterCommand(window *ChatWindow, raw string) (tea.Cmd, bool) {
+	s := strings.TrimSpace(raw)
+	var (
+		result filterResult
+		err    error
+	)
+	switch {
+	case s == "/filter" || strings.HasPrefix(s, "/filter "):
+		buffer := ""
+		if window != nil && window.Chat != nil {
+			buffer = m.providers.BufferName(window.Chat.GUID)
+		}
+		result, err = m.filters.runFilterCommand(strings.TrimPrefix(s, "/filter"), buffer)
+	case s == "/ignore" || strings.HasPrefix(s, "/ignore "):
+		result, err = m.filters.runIgnoreCommand(strings.TrimPrefix(s, "/ignore"))
+	default:
+		return nil, false
+	}
+	if err != nil {
+		m.setAppError(err)
+		return nil, true
+	}
+	if window != nil {
+		window.Input.Clear()
+	}
+	return m.applyFilterResult(result), true
+}
+
+// applyFilterResult shows what a filter command did, and redraws and saves
+// when it changed something.
+func (m *AppModel) applyFilterResult(result filterResult) tea.Cmd {
+	if result.changed {
+		m.windowManager.Refilter()
+		if err := config.SaveFilters(m.filters.state); err != nil {
+			log.Printf("saving filters failed: %v", err)
+		}
+	}
+	if result.listing {
+		m.overlayTitle = "Filters and ignores"
+		m.overlayLines = m.filters.listing()
+	}
+	if result.toast != "" {
+		return showToastCmd(result.toast, 2*time.Second)
+	}
+	return nil
+}
+
+// focusedBuffer is the buffer name of the focused pane's chat, or "".
+func (m *AppModel) focusedBuffer() string {
+	window := m.windowManager.FocusedWindow()
+	if window == nil || window.Chat == nil {
+		return ""
+	}
+	return m.providers.BufferName(window.Chat.GUID)
 }

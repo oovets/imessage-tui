@@ -17,7 +17,7 @@ backend owns a conversation is never something you have to think about.
   slack                tokens, what works, what does not
   telegram             logging in, what works, what does not
   irc                  adding a network, bouncers, what works, what does not
-  using it             keys, composer commands, chat list
+  using it             keys, composer commands, filters, chat list
   behaviour            link previews, emoticons, chat management
   development          layout, checks, troubleshooting
 ```
@@ -428,6 +428,8 @@ max_previews_per_message: 2
     ctrl+p                 chat previews in the list
     ctrl+b                 sender names for this chat, remembered
     alt+m                  sender names in one-to-one chats too
+    alt+=                  filtering off or on, everywhere (ignores stay)
+    alt+-                  filtering off or on, in the focused pane's buffer
 
   chat actions
     d, then D              delete the selected chat, esc cancels
@@ -470,6 +472,56 @@ max_previews_per_message: 2
 
   on slack the six reactions map onto :heart: :joy: :+1: :-1: :bangbang:
   :question:
+```
+
+```
+== filters and ignores ==
+
+  hide lines from irc channels by nick or by what they say, the way
+  weechat's /filter and /ignore do, with the same syntax. hidden lines are
+  kept, not deleted: alt+= shows everything again, alt+- does it in one
+  buffer, and the pane header says how many lines a filter hides. a hidden
+  line never marks a chat unread, updates its preview or notifies.
+
+  buffers are named as in weechat: irc.<network>.<channel or nick>, the
+  network being its id from imessage-tui irc networks. only irc chats have
+  buffer names, so no filter or ignore ever reaches imessage, slack or
+  telegram, even with * as the buffer.
+
+    /filter add <name> <buffer>[,<buffer>...] <tags> <regex>
+    /filter addreplace ...          the same, replacing a filter of that name
+    /filter del <name|mask>...      delete
+    /filter enable|disable|toggle [<name|mask>|@]
+                                    a filter, every filter (no name), or
+                                    filtering in this buffer (@)
+    /filter rename <name> <new>
+    /filter list                    filters and ignores; any key closes it
+
+    /ignore add [re:]<nick> [<network> [<channel>]]
+    /ignore addreplace ...
+    /ignore del <number>|-all       numbers as in /ignore list
+    /ignore list
+
+  buffer   irc.libera.#go, irc.* (masks with *), !irc.libera.#test to
+           leave one out
+  tags     * for any line, nick_<nick> (masks with *), self_msg for your
+           own; , is or, + is and, ! is not
+  regex    * for any text. matched against the message, ignoring case
+           unless it starts with (?-i). with \t it is nick\tmessage, the
+           left side matched against the nick. a leading ! reverses it, \!
+           is a literal !
+
+  examples
+    /filter add bots irc.* nick_*bot *
+    /filter add spam irc.libera.#go * crypto|airdrop
+    /filter add quiet irc.libera.#go !nick_alice *
+    /ignore add troll libera #go
+    /ignore add re:^spam[0-9]+$
+
+  an ignore hides a nick's lines whatever the toggles say. it matches the
+  nick only: user@host masks are refused, since messages here carry no
+  host. filters and ignores are saved in ~/.config/imessage-tui/filters.json;
+  the toggles last until the app exits.
 ```
 
 ```
