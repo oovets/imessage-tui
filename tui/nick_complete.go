@@ -16,6 +16,23 @@ import (
 // nickCompleter is the suffix after a nick that starts the message.
 const nickCompleter = ": "
 
+// nickIgnoreChars are left out when a typed word is compared with nicks, as
+// WeeChat's weechat.completion.nick_ignore_chars: the decoration around a
+// nick is not what anyone types first, so "k" completes to [k], "foo" to
+// _foo_ and "away" to ^away.
+const nickIgnoreChars = "[]`_-^"
+
+// completionKey is a nick or a typed word as completion compares them:
+// without nickIgnoreChars, and ignoring case.
+func completionKey(s string) string {
+	return strings.ToLower(strings.Map(func(r rune) rune {
+		if strings.ContainsRune(nickIgnoreChars, r) {
+			return -1
+		}
+		return r
+	}, s))
+}
+
 // nickCompletion is a completion in progress: Tab pressed and nothing else
 // typed since.
 type nickCompletion struct {
@@ -59,10 +76,16 @@ func (m *InputModel) CompleteNick(candidates []string, backward bool) bool {
 		return false
 	}
 
-	prefix := strings.ToLower(word)
+	// Compared without the decoration nicks carry; a word that is nothing
+	// but decoration ("[", "_") is compared as typed instead, or it would
+	// match every nick there is.
+	key, keyOf := completionKey(word), completionKey
+	if key == "" {
+		key, keyOf = strings.ToLower(word), strings.ToLower
+	}
 	var matches []string
 	for _, candidate := range candidates {
-		if strings.HasPrefix(strings.ToLower(candidate), prefix) {
+		if strings.HasPrefix(keyOf(candidate), key) {
 			matches = append(matches, candidate)
 		}
 	}

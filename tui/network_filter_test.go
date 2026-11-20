@@ -831,7 +831,7 @@ func TestTKeyTogglesChatListTimeAndRemembersIt(t *testing.T) {
 // "#general" stay apart. Under a header or a filter that already names the
 // workspace the list leaves it out; where nothing else says it — the plain
 // list across networks, the Pinned section — it stays. The rows read
-// "general": the list draws names without symbols (stripEmojis).
+// "#general", the channel's name as written.
 func TestListLeavesOutTheNetworkItAlreadyNames(t *testing.T) {
 	workspaceOf := func(guid string) string {
 		switch {
@@ -851,15 +851,15 @@ func TestListLeavesOutTheNetworkItAlreadyNames(t *testing.T) {
 		want    []string
 	}{
 		{name: "grouped", group: true,
-			want: []string{" iMessage", " Family", " Slack · Acme", " general", " Slack · Beta", " general"}},
+			want: []string{" iMessage", " Family", " Slack · Acme", " #general", " Slack · Beta", " #general"}},
 		{name: "recent, every network",
-			want: []string{" Acme general", " Family", " Beta general"}},
+			want: []string{" Acme #general", " Family", " Beta #general"}},
 		{name: "filtered to one workspace", network: "Slack · Acme",
-			want: []string{" general"}},
+			want: []string{" #general"}},
 		{name: "grouped, one pinned", group: true, pin: "sl:acme:C1",
-			want: []string{" Pinned", " Acme general", " iMessage", " Family", " Slack · Beta", " general"}},
+			want: []string{" Pinned", " Acme #general", " iMessage", " Family", " Slack · Beta", " #general"}},
 		{name: "grouped, renamed", group: true, alias: "Jobbet",
-			want: []string{" iMessage", " Family", " Slack · Acme", " Jobbet", " Slack · Beta", " general"}},
+			want: []string{" iMessage", " Family", " Slack · Acme", " Jobbet", " Slack · Beta", " #general"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

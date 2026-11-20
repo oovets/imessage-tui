@@ -191,7 +191,8 @@ inside a URL.
 Tab in an IRC pane completes the word before the cursor to a nick, the way
 WeeChat does (`tui/nick_complete.go`): Tab again for the next match,
 Shift+Tab for the previous, `nick: ` at the start of the message and `nick `
-elsewhere, case ignored. The order is WeeChat's "speakers": who spoke last in
+elsewhere, case ignored, and the characters ``[]`_-^`` too, as WeeChat's
+`nick_ignore_chars` does — `k` completes to `[k]`. The order is WeeChat's "speakers": who spoke last in
 the pane first, then the channel's other members alphabetically. Members come
 from this package through `provider.NickLister`: NAMES on joining, then JOIN,
 PART, KICK, QUIT and NICK, with mode prefixes (`@`, `+`, from ISUPPORT

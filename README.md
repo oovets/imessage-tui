@@ -363,7 +363,8 @@ max_previews_per_message: 2
     nick completion as in weechat: tab completes the word before the cursor,
     tab again goes to the next match and shift+tab back. a nick that starts
     the message gets ": ", one elsewhere a space. whoever spoke last comes
-    first, then the rest of the channel alphabetically; case is ignored
+    first, then the rest of the channel alphabetically; case is ignored,
+    and so are []`_-^ as in weechat, so k completes to [k]
 
   what does not
     joining or parting from the app: the configured channels and the

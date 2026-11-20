@@ -49,6 +49,40 @@ func TestCompleteNick(t *testing.T) {
 	}
 }
 
+// WeeChat compares without []`_-^ (nick_ignore_chars): the decoration around
+// a nick is not what anyone types first.
+func TestCompleteNickIgnoresDecoration(t *testing.T) {
+	nicks := []string{"[k]", "_foo_", "^away", "nick|away", "kalle"}
+	tests := []struct {
+		name string
+		text string
+		tabs int
+		want string
+	}{
+		{"brackets are not typed first", "k", 1, "[k]: "},
+		{"but may be", "[k", 1, "[k]: "},
+		{"Tab again reaches the next k", "k", 2, "kalle: "},
+		{"underscores", "fo", 1, "_foo_: "},
+		{"a caret", "aw", 1, "^away: "},
+		{"a pipe is part of the nick", "nick|a", 1, "nick|away: "},
+		{"decoration alone is compared as typed", "_", 1, "_foo_: "},
+		{"in the middle of a message", "tack k", 1, "tack [k] "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := composer(tt.text)
+			for range tt.tabs {
+				if !input.CompleteNick(nicks, false) {
+					t.Fatal("Tab was not taken as completion")
+				}
+			}
+			if got := input.GetText(); got != tt.want {
+				t.Fatalf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTypingEndsACompletion(t *testing.T) {
 	input := composer("a")
 	input.CompleteNick([]string{"alice", "adam"}, false) // "alice: "

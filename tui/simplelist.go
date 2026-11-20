@@ -11,19 +11,25 @@ import (
 )
 
 // stripEmojis removes emoji and symbol characters from a string using an
-// allowlist approach: only letters, digits, spaces, and common name punctuation
-// are kept. This handles all emoji blocks without enumerating them.
+// allowlist approach: letters and digits of any script, spaces, and every
+// printable ASCII character are kept. This handles all emoji blocks without
+// enumerating them.
+//
+// ASCII stays whole because it is always one column and because names are
+// made of it: an IRC nick such as [k], foo_bar or nick|away, and the # of a
+// channel, are the name itself, and dropping them showed [k] as k and made
+// two people out of foo_bar and foobar.
 func stripEmojis(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		switch {
+		case r > 0x20 && r < 0x7f: // printable ASCII: letters, digits, []_|^{}#…
+			b.WriteRune(r)
 		case unicode.IsLetter(r): // keeps all scripts: Latin, Cyrillic, Arabic, CJK, etc.
 			b.WriteRune(r)
 		case unicode.IsDigit(r):
 			b.WriteRune(r)
 		case unicode.IsSpace(r):
-			b.WriteRune(r)
-		case r == '-' || r == '\'' || r == '.' || r == ',' || r == '(' || r == ')':
 			b.WriteRune(r)
 			// skip everything else (emoji, symbols, variation selectors, ZWJ…)
 		}

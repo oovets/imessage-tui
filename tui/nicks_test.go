@@ -234,3 +234,36 @@ func TestAMentionNotifiesThroughAMute(t *testing.T) {
 		t.Fatalf("%d notifications, want the mention's", len(*alerts))
 	}
 }
+
+func TestStripEmojisKeepsWhatNamesAreMadeOf(t *testing.T) {
+	tests := map[string]string{
+		"[k]":          "[k]",
+		"foo_bar":      "foo_bar",
+		"nick|away":    "nick|away",
+		"^caret{x}\\`": "^caret{x}\\`",
+		"#go":          "#go",
+		"Familjen 🎉":   "Familjen",
+		"👍🏽 Anna":      "Anna",
+		"Åsa Ödmark":   "Åsa Ödmark",
+		"a\x07b":       "ab",
+	}
+	for in, want := range tests {
+		if got := stripEmojis(in); got != want {
+			t.Errorf("stripEmojis(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A nick is its whole self: [k] is not k, and foo_bar is not foobar.
+func TestDecoratedNicksShowWhole(t *testing.T) {
+	pane := ircPane(t, from("[k]", "hej"), from("foo_bar", "tjena [k]"))
+	view := ansi.Strip(pane.View())
+	for _, want := range []string{"[k]: hej", "foo_bar: tjena [k]"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("pane lacks %q:\n%s", want, view)
+		}
+	}
+	if !mentionsNick("[k]: ping", "[k]") {
+		t.Error("a mention of [k] was not recognised")
+	}
+}
