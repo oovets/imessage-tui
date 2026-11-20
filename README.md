@@ -2,11 +2,11 @@
 [![Bubble Tea](https://img.shields.io/badge/tui-bubble%20tea-ff69b4.svg)](https://github.com/charmbracelet/bubbletea)
 [![Docs](https://img.shields.io/badge/docs-mkdocs--material-blue.svg)](https://stevoo.net/imessage-tui/)
 
-keyboard-first terminal client for imessage, slack and telegram, in one chat
-list.
+keyboard-first terminal client for imessage, slack, telegram and irc, in one
+chat list.
 
-imessage goes through a bluebubbles-compatible server; slack and telegram talk
-to their own servers directly. all of them render the same way, and which
+imessage goes through a bluebubbles-compatible server; slack, telegram and irc
+talk to their own servers directly. all of them render the same way, and which
 backend owns a conversation is never something you have to think about.
 
 ```
@@ -16,6 +16,7 @@ backend owns a conversation is never something you have to think about.
   configuration        settings, env vars, theme
   slack                tokens, what works, what does not
   telegram             logging in, what works, what does not
+  irc                  adding a network, bouncers, what works, what does not
   using it             keys, composer commands, chat list
   behaviour            link previews, emoticons, chat management
   development          layout, checks, troubleshooting
@@ -31,11 +32,12 @@ backend owns a conversation is never something you have to think about.
     for imessage: a bluebubbles-compatible server, over http and websocket
     slack tokens, if you want slack -- optional, see below
     a telegram login, if you want telegram -- optional, see below
+    an irc network, if you want irc -- optional, see below
 
   every network is optional; the app needs one. a bluebubbles server that
   is configured but unreachable at startup is reported in the status line
-  and left out until the next start, so it never keeps slack or telegram
-  from loading. one that answers but does not hand over its chat list in
+  and left out until the next start, so it never keeps slack, telegram or
+  irc from loading. one that answers but does not hand over its chat list in
   time (15 seconds) is asked again after 5s, 15s, 30s, a minute, then every
   two minutes; the status line says so, and its panes keep their chats from
   the cache until the list arrives.
@@ -114,6 +116,13 @@ backend owns a conversation is never something you have to think about.
   BB_SLACK_TOKEN            unset     slack user token, one workspace
   BB_SLACK_APP_TOKEN        unset     slack app-level token, for realtime
   BB_SLACK_WORKSPACE        slack     label for the env workspace
+  BB_IRC_SERVER             unset     irc server, host or host:port, one network
+  BB_IRC_NICK               unset     irc nick (needed with BB_IRC_SERVER)
+  BB_IRC_TLS                true      false for a plain-text connection
+  BB_IRC_NETWORK            host      label for the env network
+  BB_IRC_LOGIN              unset     sasl account
+  BB_IRC_PASSWORD           unset     sasl password, or server password
+  BB_IRC_CHANNELS           unset     channels to join, comma-separated
 
   chat_limit applies to imessage and telegram (at most 100 there, one page
   of dialogs). it means "the most recent N", which needs a list ordered by
@@ -301,6 +310,59 @@ max_previews_per_message: 2
 
   reactions: telegram has no ‼️ or ❓, so emphasize and question send 🔥
   and 🤔. a chat can restrict reactions further; the error says so.
+```
+
+---
+
+```
+== irc ==
+
+  irc channels and private conversations appear in the same list, most
+  recently active first. like slack and telegram it needs nothing in
+  imessage.yaml: it is on for every network that is added.
+
+  add a network once, before starting the app
+    imessage-tui irc add                  asks for a name, server, tls, nick,
+                                          sasl account, password, channels
+    imessage-tui irc networks             what is configured
+    imessage-tui irc remove [<id>]        forget a network
+
+  everything, the password included, lives in the os keyring, never in a
+  file. BB_IRC_SERVER and BB_IRC_NICK set one network from the environment
+  instead (see configuration).
+
+  irc itself keeps no history, so the app is built for a bouncer: soju or
+  ergo, with draft/chathistory. behind one you get history, the gap after a
+  dropped connection filled in, private conversations in the list, read
+  state shared with your other clients, replies and reactions. on a plain
+  server you get what is said while the app runs, and nothing older.
+
+  with soju, log in with the server password as user/network:password, or
+  with a sasl account and password.
+
+  irccloud's bouncer (paid accounts) is one connection per network: in
+  irccloud, the gear menu of each network → "connect with another irc
+  client" gives its server and a password like bnc:abcxyz. make that
+  bnc@imessage-tui:abcxyz -- the part after @ names this client, and
+  irccloud replays what it missed when it connects -- and give it as the
+  server password, with no sasl account. run irc add once per network: each
+  one after the first offers the last one's server, tls and nick, so only
+  the name and password need typing.
+
+  what works
+    channels and private conversations, /me, replies (/r #N), reactions
+    (+draft/react), marking read (draft/read-marker), unread counts
+    bold, italic, strikethrough and monospace; colour is dropped
+    multi-line and long messages, split and paced so the server does not
+    disconnect for flooding, shown as the one message you typed
+    several networks at once, reconnecting by themselves
+
+  what does not
+    joining or parting from the app: the configured channels and the
+    bouncer's are what there is
+    a private conversation that starts while the app runs is in the list
+    from the next start (its messages are kept)
+    dcc, file transfer
 ```
 
 ---
@@ -572,6 +634,7 @@ max_previews_per_message: 2
     provider/imessage/   adapts api/ and ws/ to it
     provider/slack/      slack web api, socket mode, mrkdwn, guids
     provider/telegram/   telegram over mtproto (gotd/td), login, updates
+    provider/irc/        irc over ircv3 (ergochat/irc-go), chathistory, guids
     termqr/              qr codes drawn in the terminal, for logins
     emojiset/            the shared shortcode table, generated
     api/                 bluebubbles http client, contacts, attachments
@@ -582,7 +645,7 @@ max_previews_per_message: 2
 
     conversations are addressed by guid, and which backend owns one is
     derived from its prefix: unprefixed is imessage, sl: is slack, tg: is
-    telegram. nothing outside provider/ parses a guid.
+    telegram, irc: is irc. nothing outside provider/ parses a guid.
 
   checks
     go test ./...
@@ -597,8 +660,8 @@ max_previews_per_message: 2
     the root *.md files are the source of truth. scripts/docs.sh stages them
     into docs/ for mkdocs, and docs/*.md is gitignored, so never edit there.
     AGENTS.md has the rules that are easy to get wrong in this codebase.
-    SLACK.md has the slack design and its known limits; TELEGRAM.md and
-    SIGNAL.md do the same for telegram and for signal, which is planned.
+    SLACK.md has the slack design and its known limits; TELEGRAM.md, IRC.md
+    and SIGNAL.md do the same for telegram, irc and signal, which is planned.
 ```
 
 ```
@@ -637,6 +700,11 @@ max_previews_per_message: 2
   telegram missing
     grep telegram ~/.imessage-tui.log. "no longer authorized" means the
     session was ended from another device: log in again.
+
+  irc missing
+    grep irc ~/.imessage-tui.log. "unavailable" carries the reason: a wrong
+    password, a server that does not answer, tls on a plain-text port.
+    no history means the server lacks draft/chathistory: use a bouncer.
 
   anything else
     ~/.imessage-tui.log has it. the tui never writes to the terminal.

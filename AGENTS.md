@@ -33,8 +33,8 @@ there, edit the root ones.
 |---|---|
 | `main.go` | Config load, API ping, terminal-background resolution, backend wiring, Bubble Tea startup |
 | `emojiset/` | The one shortcode table, generated from the dataset Slack uses; both the composer and the Slack decoder read it |
-| `provider/` | The seam between the UI and the chat backends. `provider/imessage/` adapts `api/` + `ws/` to it; `provider/slack/` and `provider/telegram/` are the Slack and Telegram backends |
-| `commands.go` | The `telegram login/logout/accounts` subcommands, which run instead of the TUI |
+| `provider/` | The seam between the UI and the chat backends. `provider/imessage/` adapts `api/` + `ws/` to it; `provider/slack/`, `provider/telegram/` and `provider/irc/` are the Slack, Telegram and IRC backends |
+| `commands.go` | The `telegram login/logout/accounts` and `irc add/remove/networks` subcommands, which run instead of the TUI |
 | `termqr/` | QR codes as half-block text, for logins that a phone scans |
 | `api/` | BlueBubbles HTTP client, link-preview fetching |
 | `ws/` | Socket.io/websocket client for live events |
@@ -170,6 +170,19 @@ otherwise turn into a FLOOD_WAIT. Read optional TL fields directly
 (`msg.Media != nil`), not through the generated `Get…` accessors: those check
 flag bits that only decoding sets, so they lie about objects built in tests.
 `TELEGRAM.md` has the rest; `SIGNAL.md` is the plan for Signal.
+
+IRC lives in `provider/irc/` — one `Provider` per network, registered under
+`irc:<network>:`, on `ergochat/irc-go`. IRC keeps no history, so the backend
+is built for a bouncer with IRCv3 `draft/chathistory` and degrades on a plain
+server. Four things there are easy to break. `Messages` reads the provider's
+own log (`history.go`) and asks the server only once per conversation per
+connection — the refresh timer must never reach the server. The target in a
+GUID is casefolded by the server's `CASEMAPPING`, or `#Go` and `#go` become two
+chats. The library logs to stdout unless handed a logger, and runs callbacks on
+the read loop that answers PINGs: `New` passes `log.Writer()`, and no callback
+may block. A multi-line send comes back as several echoed lines; they are
+folded into one message (`outgoing` in `handlers.go`) so the optimistic copy
+matches. `IRC.md` has the rest.
 
 Logins run as subcommands (`commands.go`) before Bubble Tea starts, which is
 the one place the program may print to stdout.

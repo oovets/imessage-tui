@@ -23,6 +23,9 @@ const usage = `usage:
   imessage-tui telegram login [--phone] log in to a telegram account (QR code by default)
   imessage-tui telegram logout [<id>]   log out and forget an account
   imessage-tui telegram accounts        list logged-in accounts
+  imessage-tui irc add                  add an irc network (asks for server, nick, password)
+  imessage-tui irc remove [<id>]        forget an irc network
+  imessage-tui irc networks             list irc networks
 `
 
 // runCommand runs a subcommand and returns the exit code. These run before
@@ -35,6 +38,12 @@ func runCommand(args []string) int {
 		return 0
 	case len(args) >= 2 && args[0] == "telegram":
 		if err := runTelegram(args[1], args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "imessage-tui: "+err.Error())
+			return 1
+		}
+		return 0
+	case len(args) >= 2 && args[0] == "irc":
+		if err := runIRC(args[1], args[2:], newTerminal()); err != nil {
 			fmt.Fprintln(os.Stderr, "imessage-tui: "+err.Error())
 			return 1
 		}
@@ -179,10 +188,17 @@ func telegramLogout(ctx context.Context, args []string) error {
 type terminal struct {
 	in  *bufio.Reader
 	out io.Writer
+	// interactive says stdin is a terminal, so echo can be turned off for a
+	// secret. Piped input, and tests, read secrets as plain lines.
+	interactive bool
 }
 
 func newTerminal() *terminal {
-	return &terminal{in: bufio.NewReader(os.Stdin), out: os.Stdout}
+	return &terminal{
+		in:          bufio.NewReader(os.Stdin),
+		out:         os.Stdout,
+		interactive: term.IsTerminal(os.Stdin.Fd()),
+	}
 }
 
 func (t *terminal) ask(prompt string) (string, error) {
@@ -213,12 +229,177 @@ func (t *terminal) Phone() (string, error) { return t.ask("phone number, with co
 func (t *terminal) Code() (string, error) { return t.ask("code from telegram: ") }
 
 func (t *terminal) Password() (string, error) {
-	fd := os.Stdin.Fd()
-	if !term.IsTerminal(fd) {
-		return t.ask("two-step verification password: ")
+	return t.secret("two-step verification password: ")
+}
+
+// secret asks for something that must not be echoed. Without a terminal to
+// turn echo off on, as when piped, it reads a plain line.
+func (t *terminal) secret(prompt string) (string, error) {
+	if !t.interactive {
+		return t.ask(prompt)
 	}
-	fmt.Fprint(t.out, "two-step verification password: ")
-	password, err := term.ReadPassword(fd)
+	fmt.Fprint(t.out, prompt)
+	secret, err := term.ReadPassword(os.Stdin.Fd())
 	fmt.Fprintln(t.out)
-	return string(password), err
+	return string(secret), err
+}
+
+// askOr asks with a suggested answer in brackets, which an empty answer
+// takes. Without a suggestion it is an ordinary question.
+func (t *terminal) askOr(prompt, suggestion string) (string, error) {
+	if suggestion == "" {
+		return t.ask(prompt + ": ")
+	}
+	answer, err := t.ask(prompt + " [" + suggestion + "]: ")
+	if err != nil {
+		return "", err
+	}
+	if answer == "" {
+		return suggestion, nil
+	}
+	return answer, nil
+}
+
+func runIRC(command string, args []string, t *terminal) error {
+	switch command {
+	case "add":
+		if len(args) != 0 {
+			return errors.New("usage: imessage-tui irc add")
+		}
+		return ircAdd(t)
+	case "remove":
+		return ircRemove(args)
+	case "networks":
+		networks, err := config.LoadStoredIRCNetworks()
+		if err != nil {
+			return err
+		}
+		if len(networks) == 0 {
+			fmt.Println("no irc networks; run: imessage-tui irc add")
+		}
+		for _, network := range networks {
+			fmt.Printf("%s  %s  %s as %s\n", network.ID, network.Name, network.Server, network.Nick)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown irc command %q\n%s", command, usage)
+	}
+}
+
+// ircAdd asks for a network and stores it. Nothing is checked against the
+// server here: the next start connects, and a wrong password is reported
+// there like any other network that is down.
+//
+// The server, tls and nick of the network added last are offered as the
+// answers: a bouncer such as IRCCloud's is one server with a connection per
+// network, so adding five networks differs only in name and password.
+func ircAdd(t *terminal) error {
+	var last config.IRCNetwork
+	if stored, err := config.LoadStoredIRCNetworks(); err == nil && len(stored) > 0 {
+		last = stored[len(stored)-1]
+	}
+
+	name, err := t.ask("network name (e.g. libera): ")
+	if err != nil {
+		return err
+	}
+	if name == "" {
+		return errors.New("a network needs a name")
+	}
+	server, err := t.askOr("server (host or host:port)", last.Server)
+	if err != nil {
+		return err
+	}
+	if server == "" {
+		return errors.New("a network needs a server")
+	}
+	tlsPrompt := "use tls? [Y/n]: "
+	if last.Server != "" && !last.TLS {
+		tlsPrompt = "use tls? [y/N]: "
+	}
+	tlsAnswer, err := t.ask(tlsPrompt)
+	if err != nil {
+		return err
+	}
+	useTLS := last.Server == "" || last.TLS
+	switch strings.ToLower(tlsAnswer) {
+	case "y", "yes":
+		useTLS = true
+	case "n", "no":
+		useTLS = false
+	}
+	nick, err := t.askOr("nick", last.Nick)
+	if err != nil {
+		return err
+	}
+	if nick == "" || strings.ContainsAny(nick, " ,:!@") {
+		return errors.New("a nick is one word, without , : ! or @")
+	}
+	login, err := t.ask("sasl account (empty for none): ")
+	if err != nil {
+		return err
+	}
+	passwordPrompt := "server password (empty for none): "
+	if login != "" {
+		passwordPrompt = "sasl password: "
+	}
+	password, err := t.secret(passwordPrompt)
+	if err != nil {
+		return err
+	}
+	channelText, err := t.ask("channels to join (e.g. #go #emacs, empty for none): ")
+	if err != nil {
+		return err
+	}
+	var channels []string
+	for _, channel := range strings.FieldsFunc(channelText, func(r rune) bool { return r == ',' || r == ' ' }) {
+		channels = append(channels, channel)
+	}
+
+	network, err := config.AddIRCNetwork(config.IRCNetwork{
+		Name:     name,
+		Server:   config.IRCServerAddress(server, useTLS),
+		TLS:      useTLS,
+		Nick:     nick,
+		Login:    login,
+		Password: password,
+		Channels: channels,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(t.out, "added irc network %s (%s); it connects on the next start\n", network.Name, network.ID)
+	return nil
+}
+
+func ircRemove(args []string) error {
+	networks, err := config.LoadStoredIRCNetworks()
+	if err != nil {
+		return err
+	}
+	var network *config.IRCNetwork
+	switch {
+	case len(args) == 1:
+		for i := range networks {
+			if networks[i].ID == args[0] {
+				network = &networks[i]
+			}
+		}
+		if network == nil {
+			return fmt.Errorf("no irc network %s; see: imessage-tui irc networks", args[0])
+		}
+	case len(args) == 0 && len(networks) == 1:
+		network = &networks[0]
+	case len(args) == 0 && len(networks) == 0:
+		return errors.New("no irc network is configured")
+	case len(args) > 1:
+		return errors.New("usage: imessage-tui irc remove [<id>]")
+	default:
+		return errors.New("several networks are configured; name one: imessage-tui irc remove <id>")
+	}
+	if err := config.RemoveIRCNetwork(network.ID); err != nil {
+		return err
+	}
+	fmt.Printf("removed irc network %s (%s)\n", network.Name, network.ID)
+	return nil
 }

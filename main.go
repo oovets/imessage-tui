@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -13,6 +14,7 @@ import (
 	"github.com/oovets/imessage-tui/config"
 	"github.com/oovets/imessage-tui/provider"
 	"github.com/oovets/imessage-tui/provider/imessage"
+	ircprovider "github.com/oovets/imessage-tui/provider/irc"
 	slackprovider "github.com/oovets/imessage-tui/provider/slack"
 	telegramprovider "github.com/oovets/imessage-tui/provider/telegram"
 	"github.com/oovets/imessage-tui/tui"
@@ -76,13 +78,16 @@ func main() {
 	streams = append(streams, connectSlack(backends)...)
 	telegramStreams, telegramErrs := connectTelegram(backends)
 	streams = append(streams, telegramStreams...)
+	ircStreams, ircErrs := connectIRC(backends)
+	streams = append(streams, ircStreams...)
 
 	startupErrs := append([]error{imessageErr}, telegramErrs...)
+	startupErrs = append(startupErrs, ircErrs...)
 	if len(backends.All()) == 0 {
 		if err := joinErrors(startupErrs); err != nil {
 			fatal("%v", err)
 		}
-		fatal("no network is configured: set BB_SERVER_URL and BB_PASSWORD for imessage, add a slack token, or run: imessage-tui telegram login (see README)")
+		fatal("no network is configured: set BB_SERVER_URL and BB_PASSWORD for imessage, add a slack token, or run: imessage-tui telegram login or imessage-tui irc add (see README)")
 	}
 
 	app := tui.NewAppModelWithConfig(backends, provider.Merge(streams...), cfg)
@@ -256,6 +261,70 @@ func connectTelegram(backends *provider.Registry) ([]provider.Stream, []error) {
 		backends.Register(backend.GUIDPrefix(), backend)
 		log.Printf("telegram: connected account %s (%s)", account.Name, account.ID)
 		if stream := telegramprovider.NewStream(backend); stream != nil {
+			streams = append(streams, stream)
+		}
+	}
+	return streams, errs
+}
+
+// connectIRC registers every configured IRC network and returns their
+// realtime streams.
+//
+// The networks connect side by side, since each waits out its own server's
+// registration and one slow server must not hold up the others. A network
+// that cannot connect is reported, not fatal, and its error never carries the
+// password: the library's errors name the failure, not the credentials.
+func connectIRC(backends *provider.Registry) ([]provider.Stream, []error) {
+	networks, err := config.LoadIRCNetworks()
+	if err != nil {
+		log.Printf("irc: reading networks failed: %v", err)
+		return nil, []error{fmt.Errorf("irc: reading networks from the keyring failed: %w", err)}
+	}
+
+	// As with Slack workspaces: one network needs no label, two need one
+	// each to tell their #general apart.
+	labelNetworks := len(networks) > 1
+
+	type result struct {
+		backend *ircprovider.Provider
+		err     error
+	}
+	results := make([]result, len(networks))
+	var wg sync.WaitGroup
+	for i, network := range networks {
+		wg.Add(1)
+		go func(i int, network config.IRCNetwork) {
+			defer wg.Done()
+			backend, err := ircprovider.New(ircprovider.Network{
+				ID:       network.ID,
+				Name:     network.Name,
+				Server:   network.Server,
+				TLS:      network.TLS,
+				Nick:     network.Nick,
+				Login:    network.Login,
+				Password: network.Password,
+				Channels: network.Channels,
+			})
+			results[i] = result{backend: backend, err: err}
+		}(i, network)
+	}
+	wg.Wait()
+
+	var (
+		streams []provider.Stream
+		errs    []error
+	)
+	for i, network := range networks {
+		backend, err := results[i].backend, results[i].err
+		if err != nil {
+			log.Printf("irc: network %s unavailable: %v", network.Name, err)
+			errs = append(errs, fmt.Errorf("irc %s: %w", network.Name, err))
+			continue
+		}
+		backend.ShowNetworkInNames(labelNetworks)
+		backends.Register(backend.GUIDPrefix(), backend)
+		log.Printf("irc: connected to %s (%s) as %s", network.Name, network.Server, network.Nick)
+		if stream := ircprovider.NewStream(backend); stream != nil {
 			streams = append(streams, stream)
 		}
 	}
