@@ -38,6 +38,8 @@ type WindowManager struct {
 
 	// filters is what /filter and /ignore hide; every pane shares it.
 	filters *messageFilters
+	// selfNick is the user's nick in a chat on a nick network, or "".
+	selfNick func(chatGUID string) string
 
 	showTimestamps   bool
 	showLineNumbers  bool
@@ -88,7 +90,17 @@ func (wm *WindowManager) newWindow(id WindowID) *ChatWindow {
 	window.Messages.SetShowLineNumbers(wm.showLineNumbers)
 	window.Messages.SetShowSenderNames(wm.showSenderNames)
 	window.Messages.SetFilters(wm.filters)
+	window.Messages.SetSelfNick(wm.selfNick)
 	return window
+}
+
+// SetSelfNick gives every pane, in every tab, the way to ask a chat for the
+// user's nick, and the ones made later too.
+func (wm *WindowManager) SetSelfNick(selfNick func(chatGUID string) string) {
+	wm.selfNick = selfNick
+	for _, w := range wm.WindowsInAllTabs() {
+		w.Messages.SetSelfNick(selfNick)
+	}
 }
 
 // SetMessageFilters gives every pane, in every tab, the filters it hides

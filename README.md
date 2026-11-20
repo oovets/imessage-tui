@@ -356,6 +356,10 @@ max_previews_per_message: 2
     multi-line and long messages, split and paced so the server does not
     disconnect for flooding, shown as the one message you typed
     several networks at once, reconnecting by themselves
+    nicks coloured as in weechat: from the first line, in queries too, in a
+    twelve-colour palette, and in the text where someone names them
+    your own nick highlighted where someone writes it; such a line notifies
+    even in a muted channel, as a reply to you does
 
   what does not
     joining or parting from the app: the configured channels and the

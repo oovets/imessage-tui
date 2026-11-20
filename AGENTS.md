@@ -90,6 +90,15 @@ a pane has seen two distinct senders, and the message that crosses that line
 forces a full re-render, because the incremental append path never redraws the
 names already on screen.
 
+A chat whose backend implements `provider.NickNetwork` (IRC) is drawn the IRC
+way instead (`tui/nicks.go`): names and colours from the first line, queries
+included, from the twelve-colour `WideNickPalette`; nicks named in the text
+take their owner's colour; and the user's own nick, from `SelfNick`, is
+highlighted where someone else writes it, which also gets the message through
+a mute and the alert cooldown. A new speaker forces a full re-render too,
+since earlier lines may name them. Nicks are matched as whole words of the
+visible text, ANSI stepped over and URLs left alone.
+
 **The palette never branches on background *detection*.** The default values in
 `tui/styles.go` are chosen to stay readable on white and black alike, and
 incoming message text deliberately carries no foreground so it inherits the

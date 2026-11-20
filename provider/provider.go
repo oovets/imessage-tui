@@ -91,6 +91,19 @@ type BufferNamer interface {
 	BufferName(chatGUID string) string
 }
 
+// NickNetwork is implemented by backends whose people are known by nick, as
+// on IRC. Such a chat is drawn the way IRC clients draw one: every line names
+// its nick, in that nick's colour, from the first line on and in one-to-one
+// conversations too; a nick mentioned in a message takes its owner's colour;
+// and the user's own nick is highlighted where someone else writes it.
+//
+// SelfNick is the user's nick in the conversation, or "" when chatGUID is
+// not one of this backend's. A nick can change while connected, which is why
+// the UI asks per chat rather than once.
+type NickNetwork interface {
+	SelfNick(chatGUID string) string
+}
+
 // EventKind is what happened to a message, normalized across backends.
 type EventKind int
 
@@ -190,6 +203,15 @@ func (r *Registry) Label(chatGUID string) string {
 func (r *Registry) BufferName(chatGUID string) string {
 	if namer, ok := r.For(chatGUID).(BufferNamer); ok {
 		return namer.BufferName(chatGUID)
+	}
+	return ""
+}
+
+// SelfNick is the user's nick in a conversation on a NickNetwork backend, or
+// "" for a chat whose backend does not know people by nick.
+func (r *Registry) SelfNick(chatGUID string) string {
+	if network, ok := r.For(chatGUID).(NickNetwork); ok {
+		return network.SelfNick(chatGUID)
 	}
 	return ""
 }

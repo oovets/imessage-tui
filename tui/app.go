@@ -271,6 +271,7 @@ func NewAppModelWithConfig(backends *provider.Registry, stream provider.Stream, 
 	wm.SetShowPaneDividers(ui.ShowPaneDividers)
 	filters := newMessageFilters(config.LoadFilters(), backends.BufferName)
 	wm.SetMessageFilters(filters)
+	wm.SetSelfNick(backends.SelfNick)
 	app := AppModel{
 		filters:               filters,
 		chatList:              NewChatListModel(),

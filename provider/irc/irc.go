@@ -176,6 +176,7 @@ var (
 	_ provider.Provider    = (*Provider)(nil)
 	_ provider.Labeler     = (*Provider)(nil)
 	_ provider.BufferNamer = (*Provider)(nil)
+	_ provider.NickNetwork = (*Provider)(nil)
 )
 
 // newProvider is the one place a Provider is assembled, for New and tests.
@@ -271,6 +272,18 @@ func (p *Provider) BufferName(chatGUID string) string {
 		return ""
 	}
 	return "irc." + p.net.ID + "." + fold
+}
+
+// SelfNick is the nick the server knows the user by now — what someone types
+// to mention them. Before registration it is the nick asked for.
+func (p *Provider) SelfNick(chatGUID string) string {
+	if _, err := p.targetOf(chatGUID); err != nil {
+		return ""
+	}
+	if nick := p.wire.CurrentNick(); nick != "" {
+		return nick
+	}
+	return p.net.Nick
 }
 
 // Close quits the server.

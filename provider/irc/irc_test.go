@@ -682,3 +682,25 @@ func TestBufferNamesAreWeeChats(t *testing.T) {
 		t.Errorf("a chat no backend names got %q", got)
 	}
 }
+
+func TestSelfNickIsTheNickTheServerKnows(t *testing.T) {
+	p, w := newTestProvider(t, fullCaps...)
+	if got := p.SelfNick("irc:libera:#go"); got != "me" {
+		t.Errorf("SelfNick = %q, want me", got)
+	}
+	w.nick = "me_" // the server gave another nick, e.g. after a collision
+	if got := p.SelfNick("irc:libera:#go"); got != "me_" {
+		t.Errorf("after a nick change SelfNick = %q, want me_", got)
+	}
+	if got := p.SelfNick("irc:oftc:#go"); got != "" {
+		t.Errorf("another network's chat got %q", got)
+	}
+	registry := provider.NewRegistry(nil)
+	registry.Register(p.GUIDPrefix(), p)
+	if got := registry.SelfNick("irc:libera:bob"); got != "me_" {
+		t.Errorf("registry.SelfNick = %q", got)
+	}
+	if got := registry.SelfNick("chat-a"); got != "" {
+		t.Errorf("a chat on no nick network got %q", got)
+	}
+}

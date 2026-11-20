@@ -174,6 +174,18 @@ clear by default.
 | Read state | `irc.go` `MarkRead`, `handlers.go` `onMarkRead` | Shared with `draft/read-marker` |
 | Several networks | `main.go` `connectIRC` | Names and the network label carry the network name |
 
+### Nicks and highlights
+
+The UI draws chats on a `provider.NickNetwork` the IRC way (`tui/nicks.go`),
+and this package is one: `SelfNick` hands it the nick the server knows the
+user by now, which can differ from the one configured after a collision.
+Every line names its nick in the nick's colour from the first line on, in a
+wider palette than other chats; a nick that has spoken in the pane takes the
+same colour where someone names it; and the user's nick is highlighted where
+someone else writes it — the line's sender too — and notifies through a mute,
+like a reply to them. Nicks are matched as whole words, ignoring case, never
+inside a URL.
+
 ### Filters and ignores
 
 `/filter` and `/ignore` work as in WeeChat, and they live in the UI

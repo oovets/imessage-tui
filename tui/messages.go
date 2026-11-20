@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"hash/fnv"
 	"sort"
 	"strings"
 
@@ -67,6 +66,14 @@ type MessagesModel struct {
 	// pane. hiddenCount is how many the last render left out.
 	filters     *messageFilters
 	hiddenCount int
+
+	// selfNick is the user's nick in a chat whose backend knows people by
+	// nick (provider.NickNetwork), "" for any other; shared by every pane.
+	// nickChat says the pane holds such a chat, which turns on IRC-style
+	// nicks: coloured from the first line, in the wide palette, and named
+	// inside the text too.
+	selfNick func(chatGUID string) string
+	nickChat bool
 }
 
 func NewMessagesModel() MessagesModel {
@@ -462,6 +469,27 @@ func (m *MessagesModel) wrapWidth() int {
 	return w
 }
 
+// SetSelfNick gives the pane the way to ask a chat for the user's nick.
+func (m *MessagesModel) SetSelfNick(selfNick func(chatGUID string) string) {
+	m.selfNick = selfNick
+}
+
+// selfNickFor is the user's nick in msg's chat, or "" outside a nick network.
+func (m *MessagesModel) selfNickFor(msg models.Message) string {
+	if m.selfNick == nil || msg.ChatGUID == "" {
+		return ""
+	}
+	return m.selfNick(msg.ChatGUID)
+}
+
+// palette is the nick palette for this pane's chat.
+func (m *MessagesModel) palette() []lipgloss.Color {
+	if m.nickChat {
+		return WideNickPalette
+	}
+	return NickPalette
+}
+
 // SetFilters gives the pane the filters it hides lines by.
 func (m *MessagesModel) SetFilters(filters *messageFilters) {
 	m.filters = filters
@@ -541,9 +569,16 @@ func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg model
 
 	timeStr := msgTime.Format("15:04")
 
+	self := m.selfNickFor(msg)
+	mentionsMe := self != "" && !msg.IsFromMe && mentionsNick(displayText(msg), self)
 	sender := senderName(msg)
-	if m.colorSenders && !msg.IsFromMe {
-		sender = nickStyle(sender).Render(sender)
+	switch {
+	case mentionsMe:
+		// A line that names the user stands out by its sender, as a WeeChat
+		// highlight does, whatever colour that nick has otherwise.
+		sender = highlightStyle().Render(sender)
+	case m.colorSenders && !msg.IsFromMe:
+		sender = nickStyleFrom(sender, m.palette()).Render(sender)
 	}
 
 	prefix := ""
@@ -563,6 +598,9 @@ func (m *MessagesModel) renderMessageBlock(sb *strings.Builder, i int, msg model
 	)
 	for _, segment := range messageSegments(msg) {
 		for _, line := range textLines(stripSupportedMediaLinks(segment.text, previewLinks), msg.Format) {
+			if m.nickChat {
+				line = decorateNicks(line, m.senders, self, !msg.IsFromMe, m.palette())
+			}
 			bodyLines = append(bodyLines, line)
 			bodyLineBars = append(bodyLineBars, segment.bar)
 		}
@@ -784,7 +822,7 @@ func (m *MessagesModel) styleQuoteRow(row, lead, name string, answered *models.M
 		return muted.Render(row)
 	}
 	rest := strings.TrimPrefix(row, lead+name)
-	out := nickStyle(name).Render(name) + muted.Render(rest)
+	out := nickStyleFrom(name, m.palette()).Render(name) + muted.Render(rest)
 	if lead != "" {
 		out = muted.Render(lead) + out
 	}
@@ -987,6 +1025,7 @@ func reopenAfterResets(s, open string) string {
 func (m *MessagesModel) rebuildSenders() {
 	m.senders = make(map[string]struct{})
 	m.colorSenders = false
+	m.nickChat = false
 	if !m.senderNamesPinned {
 		// Back to the default before counting, so a pane that used to hold a
 		// group chat does not keep its names after loading a two-person one.
@@ -999,26 +1038,35 @@ func (m *MessagesModel) rebuildSenders() {
 
 // noteSender records an incoming sender and reports whether the pane just
 // became a multi-party conversation, which is when colouring starts.
+//
+// On a nick network it reports a new nick too: the lines already on screen
+// may name that nick, and they were drawn before it was one to colour.
 func (m *MessagesModel) noteSender(msg models.Message) bool {
-	if msg.IsFromMe {
-		return false
-	}
-	if m.senders == nil {
-		m.senders = make(map[string]struct{})
-	}
-	name := strings.ToLower(strings.TrimSpace(senderName(msg)))
-	if name == "" {
-		return false
-	}
 	before := m.colorSenders
-	m.senders[name] = struct{}{}
-	m.colorSenders = len(m.senders) > 1
+	beforeNick := m.nickChat
+	if !m.nickChat && m.selfNickFor(msg) != "" {
+		m.nickChat = true
+	}
+	newNick := false
+	if !msg.IsFromMe {
+		if m.senders == nil {
+			m.senders = make(map[string]struct{})
+		}
+		if name := strings.ToLower(strings.TrimSpace(senderName(msg))); name != "" {
+			_, seen := m.senders[name]
+			newNick = !seen && m.nickChat
+			m.senders[name] = struct{}{}
+		}
+	}
+	// IRC colours every nick from the first line: a channel where one person
+	// has spoken is still a channel, and a query still names who wrote.
+	m.colorSenders = len(m.senders) > 1 || m.nickChat
 	if m.colorSenders && !m.senderNamesPinned {
 		// Several people talking: show who, unless the user answered otherwise
 		// for this pane. Callers re-render, so this only sets the flag.
 		m.showSenderNames = true
 	}
-	return m.colorSenders != before
+	return m.colorSenders != before || m.nickChat != beforeNick || newNick
 }
 
 // senderName is who a message is from, as shown on its first line.
@@ -1033,19 +1081,6 @@ func senderName(msg models.Message) string {
 	default:
 		return "Unknown"
 	}
-}
-
-// nickStyle picks a stable colour for a name.
-//
-// Stable across restarts and across panes showing the same conversation, which
-// rules out anything derived from map iteration or arrival order: the same
-// person must keep the same colour or the colour tells you nothing. Matching is
-// case-insensitive so a handle that arrives capitalised differently does not
-// become a second person.
-func nickStyle(name string) lipgloss.Style {
-	hash := fnv.New32a()
-	_, _ = hash.Write([]byte(strings.ToLower(strings.TrimSpace(name))))
-	return lipgloss.NewStyle().Foreground(NickPalette[int(hash.Sum32()%uint32(len(NickPalette)))])
 }
 
 func messageRenderLines(prefix, lineNum, sender string, bodyLines, bodyLineLinks []string, showSenderNames bool) ([]string, []string) {

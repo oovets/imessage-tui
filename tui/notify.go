@@ -86,6 +86,15 @@ type notice struct {
 	// toMe marks a reply to one of the user's own messages, which says so:
 	// it is the one message in a busy channel that is about them.
 	toMe bool
+	// mention marks a message that names the user's own nick, on a network
+	// that knows people by nick: IRC's highlight, and as much about them.
+	mention bool
+}
+
+// forMe is whether the message is about the user, which gets it through a
+// mute and past the alert cooldown.
+func (n notice) forMe() bool {
+	return n.toMe || n.mention
 }
 
 func (n notice) title() string {
@@ -115,6 +124,10 @@ func (n notice) who() string {
 		return n.sender + " replied to you"
 	case n.toMe:
 		return "Replied to you"
+	case n.mention && n.sender != "":
+		return n.sender + " mentioned you"
+	case n.mention:
+		return "Mentioned you"
 	}
 	return n.sender
 }
@@ -140,6 +153,9 @@ func (m *AppModel) noticeFor(msg models.Message) notice {
 	}
 	n.text = truncateToWidth(n.text, noticeTextWidth)
 	n.toMe = m.repliesToMe(msg)
+	if self := m.providers.SelfNick(msg.ChatGUID); self != "" {
+		n.mention = mentionsNick(displayText(msg), self)
+	}
 	return n
 }
 
@@ -188,7 +204,7 @@ func (m *AppModel) announce(msg models.Message) []tea.Cmd {
 		return nil
 	}
 	n := m.noticeFor(msg)
-	if m.chatList.IsMuted(msg.ChatGUID) && !n.toMe {
+	if m.chatList.IsMuted(msg.ChatGUID) && !n.forMe() {
 		return nil
 	}
 	if m.announcedBefore(msg.GUID) {
@@ -200,7 +216,7 @@ func (m *AppModel) announce(msg models.Message) []tea.Cmd {
 	if !onScreen {
 		cmds = append(cmds, showToastCmd(n.toast(), noticeToastDuration))
 	}
-	if m.shouldAlert(msg.ChatGUID, onScreen, n.toMe) {
+	if m.shouldAlert(msg.ChatGUID, onScreen, n.forMe()) {
 		cmds = append(cmds, alertCmd(m.alert, m.notifyMode, n))
 	}
 	return cmds

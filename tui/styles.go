@@ -83,9 +83,39 @@ var nickPaletteDark = []lipgloss.Color{
 	lipgloss.Color("184"), // #d7d700 olive
 }
 
-// NickPalette is the palette in force. Read at render time, so swapping it is
-// all ApplyTheme has to do.
-var NickPalette = nickPalette
+// nickPaletteWide is for chats where people are known by nick (IRC): every
+// line is coloured, a busy channel has dozens of nicks, and eight colours put
+// too many people in each. The first eight are nickPalette's; the four added
+// meet the same rule — at least 3.8:1 on white and 4.2:1 on black — and stay
+// clear of the accent blue, the selection pink and red. That band of
+// luminance holds only so many hues an eye can tell apart, which is why it
+// stops at twelve rather than reaching for sixteen look-alikes.
+var nickPaletteWide = append(append([]lipgloss.Color(nil), nickPalette...),
+	lipgloss.Color("64"),  // #5f8700 leaf green
+	lipgloss.Color("29"),  // #00875f sea green
+	lipgloss.Color("129"), // #af00ff purple
+	lipgloss.Color("133"), // #af5faf orchid
+)
+
+// nickPaletteWideDark is nickPaletteWide for a background pinned as dark.
+var nickPaletteWideDark = append(append([]lipgloss.Color(nil), nickPaletteDark...),
+	lipgloss.Color("180"), // #d7af87 tan
+	lipgloss.Color("49"),  // #00ffaf spring green
+	lipgloss.Color("107"), // #87af5f moss
+	lipgloss.Color("209"), // #ff875f salmon
+)
+
+// NickPalette and WideNickPalette are the palettes in force. Read at render
+// time, so swapping them is all ApplyTheme has to do.
+var (
+	NickPalette     = nickPalette
+	WideNickPalette = nickPaletteWide
+)
+
+// PaletteHighlight is the background a mention of the user's own nick is
+// drawn on, under black text: a colour of its own, so it reads the same on
+// any terminal background.
+const PaletteHighlight = lipgloss.Color("220") // #ffd700
 
 // Semantic colors by UI area. Variables rather than constants so ApplyTheme can
 // swap in the tuned palette; the values here are the background-agnostic
@@ -116,6 +146,7 @@ func ApplyTheme(dark bool) {
 		ColorWindowDivider = PaletteDimBright
 		ColorCode = PaletteCodeBright
 		NickPalette = nickPaletteDark
+		WideNickPalette = nickPaletteWideDark
 	} else {
 		ColorAccent = PaletteBlue
 		ColorMuted = PaletteGray
@@ -123,6 +154,7 @@ func ApplyTheme(dark bool) {
 		ColorWindowDivider = PaletteDim
 		ColorCode = PaletteCode
 		NickPalette = nickPalette
+		WideNickPalette = nickPaletteWide
 	}
 	rebuildStyles()
 }
