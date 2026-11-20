@@ -67,7 +67,7 @@ backend owns a conversation is never something you have to think about.
     urls open with a click on the url itself, or with /open
 
   layout
-    up to 8 panes, split horizontally or vertically, each with its own chat
+    up to 16 panes, split horizontally or vertically, each with its own chat
     up to 9 tabs, each its own set of panes -- slack in one, imessage in
     another
     per-pane focus, resizable dividers, resizable chat list

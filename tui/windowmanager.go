@@ -208,7 +208,7 @@ func (wm *WindowManager) CycleFocus() bool {
 // splits that work today — and how narrow is too narrow is the user's call,
 // not ours. The layout clamps every pane to at least one column, and the frame
 // stays inside the terminal at any pane count.
-const maxPanes = 8
+const maxPanes = 16
 
 // ErrTooManyPanes is why a split is refused.
 var ErrTooManyPanes = fmt.Errorf("max %d panes (ctrl+w to close one)", maxPanes)
@@ -698,38 +698,48 @@ func (wm *WindowManager) renderNode(node *LayoutNode) string {
 		return ""
 	}
 
-	leftView := wm.renderNode(node.Left)
-	rightView := wm.renderNode(node.Right)
-
-	if node.Direction == SplitHorizontal {
-		_, _, dividerW := splitAxis(node.width, node.SplitRatio, wm.showPaneDividers)
-		if dividerW == 0 {
-			return lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
-		}
-
-		// Render vertical divider
-		dividerHeight := max(1, node.height)
-		divider := strings.Repeat(DividerVertical+"\n", dividerHeight-1) + DividerVertical
-		dividerStyled := lipgloss.NewStyle().
-			Foreground(ColorWindowDivider).
-			Render(divider)
-
-		return lipgloss.JoinHorizontal(lipgloss.Top, leftView, dividerStyled, rightView)
+	// A pane split past what its rectangle holds gets no rows or no columns
+	// (splitAxis gives the second half 0 once there is one left to give).
+	// It must then draw nothing at all: lipgloss reads MaxHeight(0) and
+	// MaxWidth(0) as "no limit", so a zero-sized pane would render its whole
+	// placeholder and push the frame past the terminal. It stays open and
+	// reachable; a bigger terminal, or closing a neighbour, gives it room.
+	var parts []string
+	if hasArea(node.Left) {
+		parts = append(parts, wm.renderNode(node.Left))
 	}
 
-	_, _, dividerH := splitAxis(node.height, node.SplitRatio, wm.showPaneDividers)
-	if dividerH == 0 {
-		return lipgloss.JoinVertical(lipgloss.Left, leftView, rightView)
+	if node.Direction == SplitHorizontal {
+		if _, _, dividerW := splitAxis(node.width, node.SplitRatio, wm.showPaneDividers); dividerW > 0 {
+			dividerHeight := max(1, node.height)
+			divider := strings.Repeat(DividerVertical+"\n", dividerHeight-1) + DividerVertical
+			parts = append(parts, lipgloss.NewStyle().
+				Foreground(ColorWindowDivider).
+				Render(divider))
+		}
+		if hasArea(node.Right) {
+			parts = append(parts, wm.renderNode(node.Right))
+		}
+		return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 	}
 
 	// Vertical split - render horizontal divider
-	dividerWidth := max(1, node.width)
-	divider := strings.Repeat(DividerHorizontal, dividerWidth)
-	dividerStyled := lipgloss.NewStyle().
-		Foreground(ColorWindowDivider).
-		Render(divider)
+	if _, _, dividerH := splitAxis(node.height, node.SplitRatio, wm.showPaneDividers); dividerH > 0 {
+		dividerWidth := max(1, node.width)
+		parts = append(parts, lipgloss.NewStyle().
+			Foreground(ColorWindowDivider).
+			Render(strings.Repeat(DividerHorizontal, dividerWidth)))
+	}
+	if hasArea(node.Right) {
+		parts = append(parts, wm.renderNode(node.Right))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
 
-	return lipgloss.JoinVertical(lipgloss.Left, leftView, dividerStyled, rightView)
+// hasArea reports whether the layout gave a node at least one row and one
+// column.
+func hasArea(node *LayoutNode) bool {
+	return node != nil && node.width > 0 && node.height > 0
 }
 
 // Helper function

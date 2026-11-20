@@ -59,9 +59,9 @@ becomes a pane.** The `Width`/`Height` setters only pad; they do not clip.
 line widens the whole pane and drags the divider — and every pane right of it —
 sideways. The vertical version is worse: with eight panes on a short terminal,
 unclipped panes rendered an 87-row frame into a 24-row window, which scrolls the
-alt screen and eats the top rows. `TestEightPanesStayInsideTheTerminal` pins
-both, including the empty-pane placeholder, which is the block that overflows
-first.
+alt screen and eats the top rows. `TestSixteenPanesStayInsideTheTerminal` pins
+both at the pane limit, including the empty-pane placeholder, which is the
+block that overflows first.
 
 **Re-arm a style after an embedded ANSI reset.** A pre-styled fragment inside a
 line (the muted timestamp, a `[Spotify]` link badge) ends with `\x1b[0m`, which

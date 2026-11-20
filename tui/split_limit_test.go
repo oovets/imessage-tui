@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -36,7 +37,7 @@ func splitToMaxPanes(t *testing.T, wm *WindowManager) error {
 	return nil
 }
 
-func TestEightPanesCanBeOpen(t *testing.T) {
+func TestSixteenPanesCanBeOpen(t *testing.T) {
 	wm := NewWindowManager()
 	wm.SetSize(200, 60)
 
@@ -47,48 +48,63 @@ func TestEightPanesCanBeOpen(t *testing.T) {
 	if got := len(wm.AllWindows()); got != maxPanes {
 		t.Errorf("opened %d panes, want %d", got, maxPanes)
 	}
-	if maxPanes != 8 {
-		t.Errorf("maxPanes = %d, want 8", maxPanes)
+	if maxPanes != 16 {
+		t.Errorf("maxPanes = %d, want 16", maxPanes)
 	}
 }
 
 // Raising the limit must not let the frame outgrow the terminal — the failure
 // mode that bends dividers and pushes everything sideways.
-func TestEightPanesStayInsideTheTerminal(t *testing.T) {
+func TestSixteenPanesStayInsideTheTerminal(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
-	for _, size := range []struct{ width, height int }{
-		{80, 24},
-		{120, 40},
-		{200, 60},
-	} {
-		app := NewAppModelWithConfig(nil, nil, nil)
-		chat := models.Chat{GUID: "chat-a", DisplayName: "Familjen 🎉"}
-		app.chatList.SetChats([]models.Chat{chat})
-		model, _ := app.Update(tea.WindowSizeMsg{Width: size.width, Height: size.height})
-		app = model.(AppModel)
-
-		if err := splitToMaxPanes(t, app.windowManager); !errors.Is(err, ErrTooManyPanes) {
-			t.Fatalf("%dx%d: %v", size.width, size.height, err)
+	// Whether the chat list is showing decides how much room the panes
+	// share, and so which splits run out of rows or columns. It is set here
+	// rather than left to whatever an earlier test saved. Sixteen panes split
+	// past what 80x24 holds either way, and before zero-sized panes drew
+	// nothing they overflowed the frame by up to 55 rows.
+	for _, sidebar := range []bool{true, false} {
+		for _, size := range []struct{ width, height int }{
+			{80, 24},
+			{120, 40},
+			{200, 60},
+		} {
+			sixteenPanesFit(t, size.width, size.height, sidebar)
 		}
-
-		// A freshly split pane has no chat yet — the state you are in between
-		// pressing ctrl+f and picking a conversation — and its placeholder is
-		// the block most likely to outgrow its share.
-		app.updateLayout()
-		assertFrameFits(t, app, size.width, size.height, "empty panes")
-
-		for _, window := range app.windowManager.AllWindows() {
-			window.SetChat(&chat)
-			window.Messages.SetMessages([]models.Message{
-				{GUID: "m1", Text: "hej 👨‍👩‍👧‍👦 där", DateCreated: 1000,
-					Handle: &models.Handle{DisplayName: "Anna"}},
-			})
-		}
-		app.updateLayout()
-		assertFrameFits(t, app, size.width, size.height, "panes with messages")
 	}
+}
+
+func sixteenPanesFit(t *testing.T, width, height int, sidebar bool) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	app := NewAppModelWithConfig(nil, nil, nil)
+	app.showChatList = sidebar
+	chat := models.Chat{GUID: "chat-a", DisplayName: "Familjen 🎉"}
+	app.chatList.SetChats([]models.Chat{chat})
+	model, _ := app.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	app = model.(AppModel)
+
+	if err := splitToMaxPanes(t, app.windowManager); !errors.Is(err, ErrTooManyPanes) {
+		t.Fatalf("%dx%d: %v", width, height, err)
+	}
+	where := fmt.Sprintf("sidebar %v", sidebar)
+
+	// A freshly split pane has no chat yet — the state you are in between
+	// pressing ctrl+f and picking a conversation — and its placeholder is
+	// the block most likely to outgrow its share.
+	app.updateLayout()
+	assertFrameFits(t, app, width, height, "empty panes, "+where)
+
+	for _, window := range app.windowManager.AllWindows() {
+		window.SetChat(&chat)
+		window.Messages.SetMessages([]models.Message{
+			{GUID: "m1", Text: "hej 👨‍👩‍👧‍👦 där", DateCreated: 1000,
+				Handle: &models.Handle{DisplayName: "Anna"}},
+		})
+	}
+	app.updateLayout()
+	assertFrameFits(t, app, width, height, "panes with messages, "+where)
 }
 
 func assertFrameFits(t *testing.T, app AppModel, width, height int, what string) {
