@@ -360,6 +360,10 @@ max_previews_per_message: 2
     twelve-colour palette, and in the text where someone names them
     your own nick highlighted where someone writes it; such a line notifies
     even in a muted channel, as a reply to you does
+    nick completion as in weechat: tab completes the word before the cursor,
+    tab again goes to the next match and shift+tab back. a nick that starts
+    the message gets ": ", one elsewhere a space. whoever spoke last comes
+    first, then the rest of the channel alphabetically; case is ignored
 
   what does not
     joining or parting from the app: the configured channels and the
@@ -380,7 +384,9 @@ max_previews_per_message: 2
   mid-message.
 
   moving around
-    tab                    switch focus between chat list and panes
+    tab                    switch focus between chat list and panes; in an
+                           irc pane, with a word before the cursor, complete
+                           it to a nick instead (see irc)
     esc                    back to the chat list
     up / down, k / j       navigate chats, or scroll messages
     g / G                  top / bottom of the chat list; in a pane, G and

@@ -704,3 +704,42 @@ func TestSelfNickIsTheNickTheServerKnows(t *testing.T) {
 		t.Errorf("a chat on no nick network got %q", got)
 	}
 }
+
+func TestNicksFollowTheChannel(t *testing.T) {
+	p, w := newTestProvider(t, fullCaps...)
+	w.isupport["PREFIX"] = "(qov)~@+"
+	p.onRegistered()
+
+	for _, raw := range []string{
+		":me!m@host JOIN #go",
+		":server 353 me = #go :~me @Alice +bob carol!c@host",
+		":server 353 me = #go :@+dave",
+		":server 366 me #go :End of /NAMES list",
+		":erin!e@host JOIN #go",
+		":carol!c@host PART #go :bye",
+		":Alice!a@host NICK alice_away",
+		":dave!d@host QUIT :gone",
+		":op!o@host KICK #go bob :spam",
+	} {
+		p.handle(parse(t, raw))
+	}
+	got := strings.Join(p.Nicks("irc:libera:#go"), " ")
+	if want := "alice_away erin"; got != want {
+		t.Fatalf("Nicks = %q, want %q", got, want)
+	}
+
+	// A new NAMES replaces the list whole, rather than adding to it.
+	p.handle(parse(t, ":server 353 me = #go :me frank"))
+	p.handle(parse(t, ":server 366 me #go :End of /NAMES list"))
+	if got := strings.Join(p.Nicks("irc:libera:#go"), " "); got != "frank" {
+		t.Fatalf("after a second NAMES: %q", got)
+	}
+
+	p.handle(parse(t, "@msgid=q :Grace!g@host PRIVMSG me :hi"))
+	if got := p.Nicks("irc:libera:grace"); len(got) != 1 || got[0] != "Grace" {
+		t.Fatalf("a query's nicks = %q, want the other person", got)
+	}
+	if got := p.Nicks("irc:oftc:#go"); got != nil {
+		t.Fatalf("another network's chat got %q", got)
+	}
+}

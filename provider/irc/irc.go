@@ -116,10 +116,13 @@ type session struct {
 	chanTypes  string
 	statusMsg  string
 	historyMax int
+	// prefixes are the symbols NAMES puts before a nick for its channel
+	// modes, from ISUPPORT PREFIX.
+	prefixes string
 }
 
 func defaultSession() session {
-	return session{caps: map[string]bool{}, mapping: mapRFC1459, chanTypes: "#&"}
+	return session{caps: map[string]bool{}, mapping: mapRFC1459, chanTypes: "#&", prefixes: "@+"}
 }
 
 func (s session) history() bool {
@@ -177,6 +180,7 @@ var (
 	_ provider.Labeler     = (*Provider)(nil)
 	_ provider.BufferNamer = (*Provider)(nil)
 	_ provider.NickNetwork = (*Provider)(nil)
+	_ provider.NickLister  = (*Provider)(nil)
 )
 
 // newProvider is the one place a Provider is assembled, for New and tests.
@@ -284,6 +288,33 @@ func (p *Provider) SelfNick(chatGUID string) string {
 		return nick
 	}
 	return p.net.Nick
+}
+
+// Nicks are the people in a conversation besides the user, for nick
+// completion: a channel's members as NAMES, JOIN, PART and the rest left
+// them, or the other person in a private conversation. Sorted, ignoring case.
+func (p *Provider) Nicks(chatGUID string) []string {
+	fold, err := p.targetOf(chatGUID)
+	if err != nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	l := p.logs[fold]
+	if l == nil {
+		return nil
+	}
+	if !l.channel {
+		return []string{l.name}
+	}
+	nicks := make([]string, 0, len(l.members))
+	for _, nick := range l.members {
+		if !p.isMe(nick) {
+			nicks = append(nicks, nick)
+		}
+	}
+	sort.Slice(nicks, func(i, j int) bool { return strings.ToLower(nicks[i]) < strings.ToLower(nicks[j]) })
+	return nicks
 }
 
 // Close quits the server.

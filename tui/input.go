@@ -30,6 +30,10 @@ type InputModel struct {
 	acQuery    string
 	acMatches  []emojiEntry
 	acSelected int
+
+	// nickCompletion is a Tab completion in progress (see nick_complete.go);
+	// any other key ends it.
+	nickCompletion *nickCompletion
 }
 
 func NewInputModel() InputModel {
@@ -102,6 +106,7 @@ func (m *InputModel) Clear() {
 	m.lastHeight = 0
 	m.reflowHeight()
 	m.dismissAutocomplete()
+	m.nickCompletion = nil
 }
 
 // wordBackwardWouldHang reports whether handing this key to the textarea would
@@ -148,6 +153,12 @@ func (m InputModel) Update(msg tea.Msg) (InputModel, tea.Cmd) {
 		// Nothing to move to anyway: the correct behaviour and the safe one
 		// are the same key press.
 		return m, nil
+	}
+
+	if _, ok := msg.(tea.KeyMsg); ok {
+		// A key that reaches the text is not a Tab completion, so the next
+		// Tab completes afresh rather than cycling.
+		m.nickCompletion = nil
 	}
 
 	var cmd tea.Cmd

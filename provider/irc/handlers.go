@@ -18,7 +18,8 @@ import (
 func (p *Provider) attach(conn *ircevent.Connection) {
 	conn.AddConnectCallback(func(ircmsg.Message) { p.onRegistered() })
 	conn.AddDisconnectCallback(func(ircmsg.Message) { p.onDisconnected() })
-	for _, command := range []string{"PRIVMSG", "NOTICE", "TAGMSG", "JOIN", "PART", "KICK", "MARKREAD", "FAIL"} {
+	for _, command := range []string{"PRIVMSG", "NOTICE", "TAGMSG", "JOIN", "PART", "KICK", "QUIT", "NICK",
+		ircevent.RPL_NAMREPLY, ircevent.RPL_ENDOFNAMES, "MARKREAD", "FAIL"} {
 		conn.AddCallback(command, p.handle)
 	}
 	conn.AddBatchCallback(p.onBatch)
@@ -85,6 +86,12 @@ func readSession(w wire) session {
 		s.chanTypes = types
 	}
 	s.statusMsg = isupport["STATUSMSG"]
+	if prefix, ok := isupport["PREFIX"]; ok {
+		// "(ov)@+": the modes, then the symbols NAMES puts before a nick.
+		if _, symbols, found := strings.Cut(prefix, ")"); found {
+			s.prefixes = symbols
+		}
+	}
 	s.historyMax, _ = strconv.Atoi(isupport["CHATHISTORY"])
 	return s
 }
@@ -122,7 +129,7 @@ func (p *Provider) handle(line ircmsg.Message) {
 		p.onMessage(line, true)
 	case "TAGMSG":
 		p.onTagmsg(line)
-	case "JOIN", "PART", "KICK":
+	case "JOIN", "PART", "KICK", "QUIT", "NICK", ircevent.RPL_NAMREPLY, ircevent.RPL_ENDOFNAMES:
 		p.onMembership(line)
 	case "MARKREAD":
 		p.onMarkRead(line)
@@ -343,7 +350,10 @@ func (p *Provider) applyReaction(fold, msgid, emoji, reactionID string) {
 	l.messages[i].ReactionCounts = counts
 }
 
-// onMembership tracks which channels the connection is in.
+// onMembership tracks which channels the connection is in, and who is in
+// each — what nick completion offers. The user's own JOIN starts a channel;
+// everyone else's JOIN, PART, KICK, QUIT and NICK keep its member list
+// current between the NAMES the server sends on joining.
 func (p *Provider) onMembership(line ircmsg.Message) {
 	if len(line.Params) < 1 {
 		return
@@ -351,25 +361,66 @@ func (p *Provider) onMembership(line ircmsg.Message) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	s := p.session
+	nick := line.Nick()
 	switch line.Command {
 	case "JOIN":
-		if !p.isMe(line.Nick()) {
-			return
-		}
 		for _, name := range strings.Split(line.Params[0], ",") {
-			p.logFor(name, true)
-			p.joined[s.mapping.fold(name)] = true
+			l := p.logFor(name, true)
+			if p.isMe(nick) {
+				p.joined[s.mapping.fold(name)] = true
+				continue
+			}
+			l.addMember(s.mapping, nick)
 		}
 	case "PART":
-		if !p.isMe(line.Nick()) {
-			return
-		}
 		for _, name := range strings.Split(line.Params[0], ",") {
-			delete(p.joined, s.mapping.fold(name))
+			if p.isMe(nick) {
+				delete(p.joined, s.mapping.fold(name))
+			} else if l := p.logs[s.mapping.fold(name)]; l != nil {
+				l.removeMember(s.mapping, nick)
+			}
 		}
 	case "KICK":
-		if len(line.Params) >= 2 && p.isMe(line.Params[1]) {
+		if len(line.Params) < 2 {
+			return
+		}
+		if p.isMe(line.Params[1]) {
 			delete(p.joined, s.mapping.fold(line.Params[0]))
+		} else if l := p.logs[s.mapping.fold(line.Params[0])]; l != nil {
+			l.removeMember(s.mapping, line.Params[1])
+		}
+	case "QUIT":
+		for _, l := range p.logs {
+			l.removeMember(s.mapping, nick)
+		}
+	case "NICK":
+		for _, l := range p.logs {
+			l.renameMember(s.mapping, nick, line.Params[0])
+		}
+	case ircevent.RPL_NAMREPLY:
+		// <me> <symbol> <channel> :<names>
+		if len(line.Params) < 4 {
+			return
+		}
+		l := p.logFor(line.Params[2], true)
+		if l.namesPending == nil {
+			l.namesPending = make(map[string]string)
+		}
+		for _, entry := range strings.Fields(line.Params[3]) {
+			// multi-prefix gives "@+nick", userhost-in-names "nick!u@h".
+			entry = strings.TrimLeft(entry, s.prefixes)
+			entry, _, _ = strings.Cut(entry, "!")
+			if entry != "" {
+				l.namesPending[s.mapping.fold(entry)] = entry
+			}
+		}
+	case ircevent.RPL_ENDOFNAMES:
+		// <me> <channel> :End of /NAMES list
+		if len(line.Params) < 2 {
+			return
+		}
+		if l := p.logs[s.mapping.fold(line.Params[1])]; l != nil && l.namesPending != nil {
+			l.members, l.namesPending = l.namesPending, nil
 		}
 	}
 }

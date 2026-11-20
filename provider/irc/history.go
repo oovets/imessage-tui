@@ -39,6 +39,30 @@ type chatLog struct {
 	// activeAt is when the conversation last had a message, from CHATHISTORY
 	// TARGETS, for ordering the list before its history is loaded.
 	activeAt int64
+
+	// members are a channel's nicks, folded to as written; namesPending
+	// collects a NAMES reply until its end, which replaces them whole.
+	members      map[string]string
+	namesPending map[string]string
+}
+
+func (l *chatLog) addMember(mapping caseMapping, nick string) {
+	if l.members == nil {
+		l.members = make(map[string]string)
+	}
+	l.members[mapping.fold(nick)] = nick
+}
+
+func (l *chatLog) removeMember(mapping caseMapping, nick string) {
+	delete(l.members, mapping.fold(nick))
+}
+
+func (l *chatLog) renameMember(mapping caseMapping, from, to string) {
+	if _, ok := l.members[mapping.fold(from)]; !ok {
+		return
+	}
+	delete(l.members, mapping.fold(from))
+	l.members[mapping.fold(to)] = to
 }
 
 // find returns the index of the message with guid, or -1.

@@ -20,6 +20,7 @@ func helpOverlayView(width, height int) string {
 			title: "Navigation",
 			lines: []string{
 				"Tab          Toggle chat list / active pane",
+				"Tab / S-Tab  In an IRC pane: complete / cycle the nick being typed",
 				"Esc          Focus chat list",
 				"Shift+←/→    Move between panes (Left from pane → chat list)",
 				"Ctrl+Up/Down Move focus between stacked panes",

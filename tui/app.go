@@ -632,6 +632,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Tab completes a nick in an IRC pane, as in WeeChat, before it can
+		// mean "switch focus". Only where there is a word to complete.
+		if m.completeNickKey(msg) {
+			return m, nil
+		}
+
 		m.lastKey = msg.String()
 
 		// While a text field has focus, editing keys belong to the text being

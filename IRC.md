@@ -186,6 +186,18 @@ someone else writes it — the line's sender too — and notifies through a mute
 like a reply to them. Nicks are matched as whole words, ignoring case, never
 inside a URL.
 
+### Nick completion
+
+Tab in an IRC pane completes the word before the cursor to a nick, the way
+WeeChat does (`tui/nick_complete.go`): Tab again for the next match,
+Shift+Tab for the previous, `nick: ` at the start of the message and `nick `
+elsewhere, case ignored. The order is WeeChat's "speakers": who spoke last in
+the pane first, then the channel's other members alphabetically. Members come
+from this package through `provider.NickLister`: NAMES on joining, then JOIN,
+PART, KICK, QUIT and NICK, with mode prefixes (`@`, `+`, from ISUPPORT
+PREFIX) and `user@host` stripped. With no word before the cursor Tab keeps
+its usual meaning, switching focus.
+
 ### Filters and ignores
 
 `/filter` and `/ignore` work as in WeeChat, and they live in the UI

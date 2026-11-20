@@ -95,9 +95,12 @@ way instead (`tui/nicks.go`): names and colours from the first line, queries
 included, from the twelve-colour `WideNickPalette`; nicks named in the text
 take their owner's colour; and the user's own nick, from `SelfNick`, is
 highlighted where someone else writes it, which also gets the message through
-a mute and the alert cooldown. A new speaker forces a full re-render too,
-since earlier lines may name them. Nicks are matched as whole words of the
-visible text, ANSI stepped over and URLs left alone.
+a mute and the alert cooldown. A new speaker forces a full re-render, since
+earlier lines may name them. Nicks are matched as whole words of the visible
+text, ANSI stepped over and URLs left alone. Tab there completes nicks
+(`tui/nick_complete.go`, members from `provider.NickLister`) before it can
+switch focus, but only with a word before the cursor, so an empty composer
+still tabs to the chat list.
 
 **The palette never branches on background *detection*.** The default values in
 `tui/styles.go` are chosen to stay readable on white and black alike, and

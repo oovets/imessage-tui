@@ -104,6 +104,13 @@ type NickNetwork interface {
 	SelfNick(chatGUID string) string
 }
 
+// NickLister is implemented by backends that know who is in a conversation
+// by nick — a channel's members — for nick completion. Nicks leaves the user
+// out. A backend without it completes only the nicks that have spoken.
+type NickLister interface {
+	Nicks(chatGUID string) []string
+}
+
 // EventKind is what happened to a message, normalized across backends.
 type EventKind int
 
@@ -214,6 +221,14 @@ func (r *Registry) SelfNick(chatGUID string) string {
 		return network.SelfNick(chatGUID)
 	}
 	return ""
+}
+
+// Nicks are the people in a conversation, from a NickLister backend, or nil.
+func (r *Registry) Nicks(chatGUID string) []string {
+	if lister, ok := r.For(chatGUID).(NickLister); ok {
+		return lister.Nicks(chatGUID)
+	}
+	return nil
 }
 
 // Labels returns every backend's label in registry order, fallback first, so
