@@ -159,7 +159,11 @@ under `sl:<workspace>:`. Two things there are load-bearing and easy to undo by
 accident: names come from one `users.list` rather than a `users.info` per
 sender, and threads are cached by reply count so the refresh timer does not
 re-expand them. Both exist because `conversations.history` and
-`conversations.replies` are Tier 3, about fifty calls a minute. For the same
+`conversations.replies` are Tier 3, about fifty calls a minute — and so does a
+third: each method has a budget of forty a minute per workspace (`budget.go`),
+past which `Messages` answers from the chat's last load, taking turns so every
+pane is refreshed. Up to sixteen panes refresh on the poll timer; without it
+that is 96 history calls a minute. For the same
 reason the stream publishes a reply under its thread's own GUID only for
 threads opened with `/t` (`Provider.watched`), never for every thread. A
 message's body is assembled in `content.go` from its text, Block Kit blocks and legacy

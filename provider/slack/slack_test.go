@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/oovets/imessage-tui/models"
 	slackapi "github.com/slack-go/slack"
@@ -641,11 +642,18 @@ func TestThreadsAreNotRefetchedUntilTheyChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	// Refreshes come seconds apart, past the window in which a load is
+	// served again without asking: each one here reaches the history.
+	advance := fakeClock(p)
 
 	for range 3 {
 		if _, err := p.Messages("sl:acme:C1", 50); err != nil {
 			t.Fatalf("Messages: %v", err)
 		}
+		advance(freshFor + time.Second)
+	}
+	if got := fake.callCount("conversations.history"); got != 3 {
+		t.Fatalf("history fetched %d times across three spaced refreshes, want 3", got)
 	}
 	if got := fake.callCount("conversations.replies"); got != 1 {
 		t.Errorf("thread fetched %d times across three unchanged refreshes, want 1", got)

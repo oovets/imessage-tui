@@ -122,12 +122,26 @@ credentials; `main.go` registers one provider per workspace.
 
 ### Decisions worth knowing
 
-**Rate limits shape two designs.** `conversations.history` is Tier 3 — roughly
+**Rate limits shape three designs.** `conversations.history` is Tier 3 — roughly
 fifty calls a minute — and the UI reconciles every open pane on a timer. So
 threads are cached by reply count (`cachedThread`): the count arrives free with
 the history, and an unchanged thread costs no call at all. Names come from one
 `users.list` rather than a `users.info` per sender, which would otherwise be
 thirty calls for one busy channel.
+
+And the calls themselves are budgeted (`budget.go`). With sixteen panes a
+ten-second poll would make 96 history calls a minute; `conversations.history`
+and `conversations.replies` each get forty a minute per workspace, in a token
+bucket, and a load that finds the budget spent is answered with the chat's
+last result (`histories`) instead. The UI merges that with what the realtime
+feed delivered, so nothing new is lost — the pane is only a refresh behind. A
+plain bucket would starve whichever panes the refresh reaches last, so a chat
+loaded within its share of the budget (`shareInterval`: active chats ÷ forty
+a minute, at least twenty seconds) is served from the cache without spending,
+which hands the calls round. A chat with nothing cached is always fetched, and
+the user's own send or reaction drops the cache, so neither ever shows
+something stale. `TestSixteenPanesStayInsideTier3` pins both the limit and
+that every pane is refreshed each minute.
 
 **A thread is a conversation, addressed by its root.** Inline, replies sort by
 time among everything else, so a channel with several live threads cannot be

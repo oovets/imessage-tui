@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/oovets/imessage-tui/models"
 	"github.com/oovets/imessage-tui/provider"
@@ -109,6 +110,28 @@ type Provider struct {
 	// their thread GUID: every live reply in every channel would otherwise
 	// become a chat the UI caches, persists and resyncs.
 	watched map[string]struct{}
+
+	// histories is each conversation's last loaded history, by chat GUID —
+	// a channel's or a thread pane's — served when the budget for its method
+	// is spent.
+	histories map[string]cachedHistory
+
+	// historyCalls and replyCalls keep conversations.history and
+	// conversations.replies inside Tier 3; see budget.go.
+	historyCalls *callBudget
+	replyCalls   *callBudget
+	// now is the clock the cache ages by; tests replace it.
+	now func() time.Time
+}
+
+// cachedHistory is a conversation as last loaded, and how many messages were
+// asked for: a cache of 20 cannot answer for 50.
+type cachedHistory struct {
+	limit    int
+	messages []models.Message
+	at       time.Time // when it was loaded
+	asked    time.Time // when a load was last asked for, from Slack or not
+	thread   bool      // a thread pane's, which spends replies, not history
 }
 
 // cachedThread is a thread as last fetched, kept so the refresh loop does not
@@ -169,6 +192,68 @@ func newProvider(ws Workspace, api *slackapi.Client, selfID string) *Provider {
 		roots:   make(map[string]string),
 		names:   make(map[string]string),
 		watched: make(map[string]struct{}),
+
+		histories:    make(map[string]cachedHistory),
+		historyCalls: newCallBudget(tier3PerMinute, tier3Burst),
+		replyCalls:   newCallBudget(tier3PerMinute, tier3Burst),
+		now:          time.Now,
+	}
+}
+
+// fromCache decides whether a load is answered from the last result rather
+// than from Slack. It is, when there is a result that covers limit and the
+// method's budget is spent; with no such result the call is made — and
+// counted — regardless, so a chat opened for the first time is never empty.
+//
+// A chat loaded more recently than its share of the budget allows (see
+// shareInterval) is served from the cache without spending anything, which
+// is what lets every open pane take its turn.
+func (p *Provider) fromCache(chatGUID string, limit int, budget *callBudget) ([]models.Message, bool) {
+	now := p.now()
+	p.mu.Lock()
+	entry, ok := p.histories[chatGUID]
+	if ok {
+		entry.asked = now
+		p.histories[chatGUID] = entry
+	}
+	interval := shareInterval(p.activeLocked(now, entry.thread), tier3PerMinute)
+	p.mu.Unlock()
+
+	if !ok || (limit > 0 && entry.limit < limit) {
+		budget.spend()
+		return nil, false
+	}
+	if now.Sub(entry.at) < interval || !budget.take() {
+		return append([]models.Message(nil), entry.messages...), true
+	}
+	return nil, false
+}
+
+// activeLocked counts the chats asked for in the last minute that spend the
+// same budget: channels for history, thread panes for replies. Called with
+// p.mu held.
+func (p *Provider) activeLocked(now time.Time, thread bool) int {
+	n := 0
+	for _, entry := range p.histories {
+		if entry.thread == thread && now.Sub(entry.asked) < time.Minute {
+			n++
+		}
+	}
+	return n
+}
+
+// storeHistory remembers a load for fromCache. The slice is copied both ways,
+// so neither the caller nor a later load can change what is stored.
+func (p *Provider) storeHistory(chatGUID string, limit int, messages []models.Message) {
+	now := p.now()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.histories[chatGUID] = cachedHistory{
+		limit:    limit,
+		messages: append([]models.Message(nil), messages...),
+		at:       now,
+		asked:    now,
+		thread:   threadOf(chatGUID) != "",
 	}
 }
 
@@ -333,6 +418,9 @@ func (p *Provider) Messages(chatGUID string, limit int) ([]models.Message, error
 	if rootTS := threadOf(chatGUID); rootTS != "" {
 		return p.threadMessages(chatGUID, channelID, rootTS, limit)
 	}
+	if cached, ok := p.fromCache(chatGUID, limit, p.historyCalls); ok {
+		return cached, nil
+	}
 	// One users.list beats a users.info per sender; after the first call this
 	// is free. A pane can open before the chat list has ever loaded.
 	p.users.loadAll()
@@ -361,6 +449,7 @@ func (p *Provider) Messages(chatGUID string, limit int) ([]models.Message, error
 	sort.SliceStable(out, func(i, j int) bool { return out[i].DateCreated < out[j].DateCreated })
 
 	p.rememberLatest(channelID, out)
+	p.storeHistory(chatGUID, limit, out)
 	return out, nil
 }
 
@@ -398,6 +487,12 @@ func (p *Provider) threadReplies(channelID string, history []slackapi.Msg) []sla
 	for _, r := range roots {
 		if cached, ok := p.cachedThread(channelID, r.ts, r.count); ok {
 			replies = append(replies, cached...)
+			continue
+		}
+		if !p.replyCalls.take() {
+			// The budget is spent: show the replies as last fetched, and
+			// let a later load, with budget, catch the thread up.
+			replies = append(replies, p.staleThread(channelID, r.ts)...)
 			continue
 		}
 		wg.Add(1)
@@ -441,6 +536,9 @@ func (p *Provider) threadReplies(channelID string, history []slackapi.Msg) []sla
 // it does for the channel view: the count arrives with the channel's history,
 // which this pane never fetches.
 func (p *Provider) threadMessages(chatGUID, channelID, rootTS string, limit int) ([]models.Message, error) {
+	if cached, ok := p.fromCache(chatGUID, limit, p.replyCalls); ok {
+		return cached, nil
+	}
 	p.users.loadAll()
 
 	var (
@@ -449,6 +547,10 @@ func (p *Provider) threadMessages(chatGUID, channelID, rootTS string, limit int)
 		cursor string
 	)
 	for page := 0; page < maxThreadPages; page++ {
+		if page > 0 {
+			// fromCache counted the first page; the rest are calls too.
+			p.replyCalls.spend()
+		}
 		msgs, more, next, err := p.api.GetConversationReplies(&slackapi.GetConversationRepliesParameters{
 			ChannelID: channelID,
 			Timestamp: rootTS,
@@ -486,6 +588,7 @@ func (p *Provider) threadMessages(chatGUID, channelID, rootTS string, limit int)
 		out = append(out, p.toMessage(chatGUID, channelID, &raw[i], names))
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].DateCreated < out[j].DateCreated })
+	p.storeHistory(chatGUID, limit, out)
 	return out, nil
 }
 
@@ -536,6 +639,14 @@ func (p *Provider) cachedThread(channelID, rootTS string, replyCount int) ([]sla
 		return nil, false
 	}
 	return entry.replies, true
+}
+
+// staleThread returns the replies as last fetched, whatever the count says
+// now, or nothing for a thread never fetched.
+func (p *Provider) staleThread(channelID, rootTS string) []slackapi.Msg {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.threads[threadKey(channelID, rootTS)].replies
 }
 
 func (p *Provider) rememberThread(channelID, rootTS string, replyCount int, replies []slackapi.Msg) {
@@ -695,7 +806,19 @@ func (p *Provider) Send(chatGUID, text, replyToGUID, _ string) error {
 	if _, _, err := p.api.PostMessage(channelID, options...); err != nil {
 		return fmt.Errorf("slack send: %w", err)
 	}
+	p.forgetHistory(chatGUID)
 	return nil
+}
+
+// forgetHistory drops a conversation's cached history, so the next load asks
+// Slack whatever the budget says. After the user's own send or reaction a
+// stale answer would undo what they just did: the optimistic copy times out,
+// the pane refetches, and a cached history without the message would hide it
+// until a later refresh came round.
+func (p *Provider) forgetHistory(chatGUID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.histories, chatGUID)
 }
 
 // React adds one of the UI's six tapbacks as the matching Slack emoji.
@@ -716,6 +839,7 @@ func (p *Provider) React(chatGUID, messageGUID, reaction string) error {
 	if err := p.api.AddReaction(name, slackapi.ItemRef{Channel: channelID, Timestamp: ts}); err != nil {
 		return fmt.Errorf("slack react: %w", err)
 	}
+	p.forgetHistory(chatGUID)
 	return nil
 }
 
